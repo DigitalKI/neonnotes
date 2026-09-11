@@ -1,0 +1,217 @@
+[gd_scene format=3 uid="uid://r4hgiw3vsp4v"]
+
+[ext_resource type="Script" uid="uid://blcr73uhsp6w4" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="FontFile" uid="uid://dhrjvvn04r3c2" path="res://assets/fonts/Orbitron.ttf" id="2_orbitron"]
+[ext_resource type="Shader" uid="uid://d0udygsyay06s" path="res://shaders/crt.gdshader" id="3_crt"]
+[ext_resource type="Script" uid="uid://54xformjxgfq" path="res://scripts/render/graph_view.gd" id="4_graph"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMat_crt"]
+shader = ExtResource("3_crt")
+shader_parameter/curve = 0.0
+shader_parameter/scanline_strength = 0.12
+shader_parameter/mask_strength = 0.1
+shader_parameter/wobble_strength = 0.0
+shader_parameter/mask_type = 2
+
+[node name="App" type="Control" unique_id=1238224295]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_main")
+
+[node name="Bg" type="ColorRect" parent="." unique_id=1675437827]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Root" type="VBoxContainer" parent="." unique_id=331828940]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Header" type="PanelContainer" parent="Root" unique_id=1604539716]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="Title" type="Label" parent="Root/Header" unique_id=1157650099]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_fonts/font = ExtResource("2_orbitron")
+theme_override_font_sizes/font_size = 20
+text = "◈ NEON NOTES v2"
+horizontal_alignment = 1
+
+[node name="Toolbar" type="HFlowContainer" parent="Root" unique_id=752447213]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/h_separation = 8
+theme_override_constants/v_separation = 6
+
+[node name="MenuBtn" type="Button" parent="Root/Toolbar" unique_id=1760644460]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(44, 36)
+layout_mode = 2
+text = "☰"
+
+[node name="NoteTitle" type="Label" parent="Root/Toolbar" unique_id=1171288910]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_fonts/font = ExtResource("2_orbitron")
+theme_override_font_sizes/font_size = 18
+text = "No note selected"
+clip_text = true
+
+[node name="NewBtn" type="Button" parent="Root/Toolbar" unique_id=976610646]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(56, 36)
+layout_mode = 2
+text = "＋ New"
+
+[node name="ModeBtn" type="Button" parent="Root/Toolbar" unique_id=1395942889]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(72, 36)
+layout_mode = 2
+text = "✎ Edit"
+
+[node name="HelpBtn" type="Button" parent="Root/Toolbar" unique_id=996622888]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(56, 36)
+layout_mode = 2
+text = "? Help"
+
+[node name="ExportBtn" type="MenuButton" parent="Root/Toolbar" unique_id=957741864]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(72, 36)
+layout_mode = 2
+text = "⬇ Export"
+
+[node name="BacklinksBtn" type="Button" parent="Root/Toolbar" unique_id=916891750]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(56, 36)
+layout_mode = 2
+text = "🔗 Links"
+
+[node name="GraphBtn" type="Button" parent="Root/Toolbar" unique_id=119528378]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(56, 36)
+layout_mode = 2
+text = "🕸 Graph"
+
+[node name="MoreBtn" type="MenuButton" parent="Root/Toolbar" unique_id=471326557]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(44, 36)
+layout_mode = 2
+text = "⋮"
+
+[node name="MoreMenu" type="PopupMenu" parent="Root/Toolbar/MoreBtn" unique_id=934102136]
+unique_name_in_owner = true
+
+[node name="Workspace" type="HSplitContainer" parent="Root" unique_id=776811514]
+layout_mode = 2
+size_flags_vertical = 3
+split_offsets = PackedInt32Array(230)
+split_offset = 230
+
+[node name="SidePanel" type="PanelContainer" parent="Root/Workspace" unique_id=2062134626]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(220, 0)
+layout_mode = 2
+
+[node name="SideVBox" type="VBoxContainer" parent="Root/Workspace/SidePanel" unique_id=1683968186]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="SideTree" type="Tree" parent="Root/Workspace/SidePanel/SideVBox" unique_id=1553072570]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="BacklinksPanel" type="PanelContainer" parent="Root/Workspace/SidePanel/SideVBox" unique_id=160805282]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+
+[node name="BacklinksBox" type="VBoxContainer" parent="Root/Workspace/SidePanel/SideVBox/BacklinksPanel" unique_id=493428536]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="SideBottom" type="HBoxContainer" parent="Root/Workspace/SidePanel/SideVBox" unique_id=1801830491]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="PaletteBtn" type="OptionButton" parent="Root/Workspace/SidePanel/SideVBox/SideBottom" unique_id=2033471314]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="VaultBtn" type="Button" parent="Root/Workspace/SidePanel/SideVBox/SideBottom" unique_id=469971492]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "📂 Vault"
+
+[node name="SyncBtn" type="Button" parent="Root/Workspace/SidePanel/SideVBox/SideBottom" unique_id=1451978887]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "⇄ Sync"
+
+[node name="Content" type="PanelContainer" parent="Root/Workspace" unique_id=198102758]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ContentHost" type="ScrollContainer" parent="Root/Workspace/Content" unique_id=1622826570]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+vertical_scroll_mode = 1
+follow_focus = true
+
+[node name="ContentBody" type="VBoxContainer" parent="Root/Workspace/Content/ContentHost"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 10
+
+[node name="GraphView" type="Control" parent="Root/Workspace/Content" unique_id=938625459]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_vertical = 3
+script = ExtResource("4_graph")
+
+[node name="StatusBar" type="PanelContainer" parent="Root" unique_id=395094812]
+layout_mode = 2
+
+[node name="StatusLabel" type="Label" parent="Root/StatusBar" unique_id=70186989]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "Ready"
+
+[node name="CrtOverlay" type="ColorRect" parent="." unique_id=1821292982]
+visible = false
+material = SubResource("ShaderMat_crt")
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2

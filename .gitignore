@@ -1,0 +1,25 @@
+# Godot 4
+.godot/
+*.translation
+
+# Builds
+build/
+export/
+*.apk
+*.aab
+*.idsig
+*.exe
+*.x86_64
+*.pck
+*.zip
+
+# Exports / credentials
+export_presets.cfg.bak
+*.keystore
+*.jks
+*.pem
+
+# System / editor
+*.tmp
+.DS_Store
+Thumbs.db

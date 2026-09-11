@@ -1,0 +1,149 @@
+class_name PreviewBuilder
+extends RefCounted
+## Builds the styled neon preview of a parsed document into a VBoxContainer.
+## Wiki-links become clickable [url] metas; %%glitch%% and ++flicker++ effects.
+
+## Optional per-note palette override (front-matter "theme:").
+static var pal_override: Dictionary = {}
+## Callable(String note_name) invoked when the user clicks a wiki-link.
+static var open_cb := Callable()
+
+static func _col(key: String) -> Color:
+	if not pal_override.is_empty() and pal_override.has(key):
+		return pal_override[key]
+	return GameManager.color(key)
+
+static func build(doc: Dictionary, into: VBoxContainer) -> void:
+	for child in into.get_children():
+		child.queue_free()
+	var accent := _col("accent")
+	var accent2 := _col("accent2")
+	var text_c := _col("text")
+
+	var title: String = doc.get("meta", {}).get("title", "")
+	var tsize := 32 if ChartView.compact else 40
+	if title != "":
+		into.add_child(_rich("[font_size=%d][b][color=#%s]%s[/color][/b][/font_size]"
+			% [tsize, _hex(accent), _inline(escape(title))], text_c))
+		into.add_child(_rule(accent))
+
+	var compact: bool = ChartView.compact
+	var sizes := [38, 30, 24, 20] if not compact else [32, 27, 22, 19]
+	for block in doc.get("blocks", []):
+		match block["type"]:
+			"heading":
+				var lvl: int = clampi(block["level"] - 1, 0, 3)
+				var col: Color = [accent, accent2, _col("accent3"), _col("accent4")][lvl]
+				into.add_child(_rich("[font_size=%d][b][outline_color=#%s][outline_size=2][color=#%s]%s[/color][/outline_size][/outline_color][/b][/font_size]"
+					% [sizes[lvl], _hex(col, 0.35), _hex(col), _inline(escape(block["text"]))], text_c))
+			"para":
+				into.add_child(_rich(_inline(escape(block["text"])), text_c))
+			"quote":
+				into.add_child(_rich("[bgcolor=#%s][color=#%s] ❝ %s [/color][/bgcolor]"
+					% [_hex(Color(accent.r, accent.g, accent.b, 0.15)), _hex(accent2), _inline(escape(block["text"]))], text_c))
+			"hr":
+				into.add_child(_rule(accent2))
+			"list":
+				var lines := ""
+				var n: int = block["items"].size()
+				for i in n:
+					var bullet := "▸" if not block["ordered"] else "%d." % (i + 1)
+					lines += "[color=#%s] %s [/color] %s\n" % [_hex(accent), bullet, _inline(escape(block["items"][i]))]
+				into.add_child(_rich(lines, text_c))
+			"code":
+				into.add_child(_rich("[bgcolor=#%s][color=#%s][code]%s[/code][/color][/bgcolor]"
+					% [_hex(Color(0, 0, 0, 0.35)), _hex(accent2), escape(block["text"])], text_c))
+			"table":
+				into.add_child(_table(block["rows"], text_c))
+			"chart":
+				into.add_child(_chart(block))
+	into.add_child(Control.new())
+
+static func escape(s: String) -> String:
+	return s.replace("[", "[lb]")
+
+## Inline markdown -> BBCode (input is escaped text)
+static func _inline(s: String) -> String:
+	var accent := _hex(_col("accent"))
+	# v2 neon text effects (%%glitch%% — legacy %glitch% also accepted)
+	s = RegEx.create_from_string(r"%%(.+?)%%|%([^\s].*?)%").sub(
+		s, "[glitch][color=#%s][b]$1$2[/b][/color][/glitch]" % _hex(_col("accent4")), true)
+	s = RegEx.create_from_string(r"\+\+(.+?)\+\+").sub(
+		s, "[flicker][color=#%s]$1[/color][/flicker]" % _hex(_col("accent3")), true)
+	# wiki-links: [[Note]] / [[Note|alias]] — after escape() they look like [lb][lb]Note[lb][lb]
+	s = RegEx.create_from_string(r"\[lb\]\[lb\]([^\[|]+?)(?:\|([^\]]+?))?\[lb\]\[lb\]").sub(
+		s, "[url=$1][color=#%s][u]$2[/u][/color][/url]" % _hex(_col("accent2")), true)
+	# bold / italic / code / strike / highlight
+	s = RegEx.create_from_string(r"\*\*\*(.+?)\*\*\*").sub(s, "[b][i][color=#%s]$1[/color][/i][/b]" % accent, true)
+	s = RegEx.create_from_string(r"\*\*(.+?)\*\*").sub(s, "[b][color=#%s]$1[/color][/b]" % accent, true)
+	s = RegEx.create_from_string(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)").sub(s, "[i]$1[/i]", true)
+	s = RegEx.create_from_string(r"`(.+?)`").sub(s, "[code][color=#%s]$1[/color][/code]" % _hex(_col("accent2")), true)
+	s = RegEx.create_from_string(r"~~(.+?)~~").sub(s, "[s]$1[/s]", true)
+	s = RegEx.create_from_string(r"==(.+?)==").sub(s, "[bgcolor=#%s][color=#%s][b]$1[/b][/color][/bgcolor]"
+		% [_hex(Color(_col("accent3").r, _col("accent3").g, _col("accent3").b, 0.3)), _hex(_col("accent3"))], true)
+	return s
+
+static func _rich(bb: String, default_col: Color) -> RichTextLabel:
+	var rt := RichTextLabel.new()
+	rt.name = "PreviewRichText"
+	rt.bbcode_enabled = true
+	rt.fit_content = true
+	rt.scroll_active = false
+	rt.mouse_filter = Control.MOUSE_FILTER_PASS  # let touch drags reach the ScrollContainer
+	rt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	rt.add_theme_color_override("default_color", default_col)
+	rt.text = bb
+	rt.install_effect(GlitchFx.new())
+	rt.install_effect(FlickerFx.new())
+	if open_cb.is_valid():
+		rt.meta_clicked.connect(func(meta: Variant): open_cb.call(str(meta)))
+	return rt
+
+static func _rule(col: Color) -> Control:
+	var cr := ColorRect.new()
+	cr.name = "Rule"
+	cr.color = Color(col.r, col.g, col.b, 0.5)
+	cr.custom_minimum_size = Vector2(0, 2)
+	cr.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cr.mouse_filter = Control.MOUSE_FILTER_IGNORE  # don't block touch scrolling
+	return cr
+
+static func _table(rows: Array, text_c: Color) -> Control:
+	if rows.is_empty():
+		return Control.new()
+	var cols := 0
+	for r in rows:
+		cols = maxi(cols, r.size())
+	var bb := "[table=%d]" % cols
+	for ri in rows.size():
+		for cell in rows[ri]:
+			var border := _hex(_col("accent"), 0.6) if ri == 0 else _hex(Color(text_c.r, text_c.g, text_c.b, 0.25))
+			var bg := _hex(Color(_col("accent").r, _col("accent").g, _col("accent").b, 0.18)) if ri == 0 else _hex(Color(0, 0, 0, 0.25))
+			var content := _inline(escape(str(cell)))
+			if ri == 0:
+				content = "[b][color=#%s]%s[/color][/b]" % [_hex(_col("accent")), content]
+			bb += "[cell border=#%s bg=#%s padding=\"6,4,6,4\"]%s[/cell]" % [border, bg, content]
+	bb += "[/table]"
+	return _rich(bb, text_c)
+
+static func _chart(block: Dictionary) -> Control:
+	var cv := ChartView.new()
+	cv.name = "Chart"
+	cv.chart_type = block.get("chart_type", "bar")
+	cv.title = block.get("title", "")
+	cv.labels = block.get("labels", [])
+	cv.values = block.get("values", [])
+	cv.color = _col("accent")
+	cv.color2 = _col("accent2")
+	cv.text_color = _col("text")
+	cv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cv.custom_minimum_size = Vector2(0, 280 if not ChartView.compact else 200)
+	cv.mouse_filter = Control.MOUSE_FILTER_PASS  # let touch drags reach the ScrollContainer
+	cv.start()
+	return cv
+
+static func _hex(c: Color, alpha: float = -1.0) -> String:
+	var cc := c
+	if alpha >= 0.0:
+		cc.a = alpha
+	return cc.to_html(false)

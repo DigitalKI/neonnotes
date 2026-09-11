@@ -1,0 +1,39 @@
+# Default: normalize line endings to LF on commit
+* text=auto eol=lf
+
+# Godot-specific text files
+*.gd text eol=lf
+*.gdshader text eol=lf
+*.gdshaderinc text eol=lf
+*.tscn text eol=lf
+*.tres text eol=lf
+*.godot text eol=lf
+*.cfg text eol=lf
+*.import text eol=lf
+
+# C# source
+*.cs text eol=lf
+*.csproj text eol=lf
+*.sln text eol=lf
+
+# Binary assets — no diff, no merge, no EOL conversion
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.svg binary
+*.psd binary
+*.aseprite binary
+*.wav binary
+*.ogg binary
+*.mp3 binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+*.glb binary
+*.gltf binary
+*.blend binary
+*.fbx binary
+*.mp4 binary
+*.ogv binary
