@@ -72,9 +72,9 @@ func update_layout() -> void:
 				btn.custom_minimum_size = Vector2(52, 44)
 		# wide, tappable scrollbar for touch scrolling
 		var vsb := content_host.get_v_scroll_bar()
-		vsb.custom_minimum_size = Vector2(28, 0)
+		vsb.custom_minimum_size = Vector2(18, 0)
 		var grabber := StyleBoxFlat.new()
-		grabber.bg_color = Color(GameManager.color("accent").r, GameManager.color("accent").g, GameManager.color("accent").b, 0.55)
+		grabber.bg_color = Color(GameManager.color("accent").r, GameManager.color("accent").g, GameManager.color("accent").b, 0.40)
 		grabber.set_corner_radius_all(7)
 		grabber.set_content_margin_all(6)
 		vsb.add_theme_stylebox_override("grabber", grabber)
@@ -140,7 +140,6 @@ func _apply_safe_area() -> void:
 	_kb_h = kb
 	# editing area just resized around the keyboard — keep the caret visible
 	# (deferred so it runs after the new margin is actually laid out)
-	if content.get_parent().get_node_or_null("SourceEditor") != null:
-		var code_edit: CodeEdit = content.get_node("SourceEditor")
-		if code_edit.visible:
-			code_edit.adjust_viewport_to_caret.call_deferred(0)
+	var code_edit: CodeEdit = content.get_node_or_null("SourceEditor")
+	if code_edit != null and code_edit.visible:
+		code_edit.adjust_viewport_to_caret.call_deferred(0)

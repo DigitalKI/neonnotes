@@ -200,7 +200,7 @@ func _build_dynamic_ui() -> void:
 	code_edit.gui_input.connect(_on_code_edit_gui_input)
 	_long_press_timer.name = "LongPressTimer"
 	_long_press_timer.one_shot = true
-	_long_press_timer.wait_time = 0.35
+	_long_press_timer.wait_time = 0.8
 	_long_press_timer.timeout.connect(_on_code_edit_long_press)
 	add_child(_long_press_timer)
 	content_panel.add_child(code_edit)
@@ -355,6 +355,8 @@ func _on_code_edit_gui_input(event: InputEvent) -> void:
 		if not _drag_is_scroll and not _drag_is_select:
 			if event.position.distance_to(_drag_start_pos) > DRAG_SCROLL_THRESHOLD:
 				_drag_is_scroll = true
+				# it's a scroll, not a hold — the long-press clock stops entirely
+				_long_press_timer.stop()
 		if _drag_is_scroll:
 			code_edit.scroll_vertical -= event.relative.y / float(code_edit.get_line_height())
 			get_viewport().set_input_as_handled()

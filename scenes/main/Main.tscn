@@ -53,8 +53,9 @@ theme_override_font_sizes/font_size = 20
 text = "◈ NEON NOTES v2"
 horizontal_alignment = 1
 
-[node name="Toolbar" parent="Root" instance=ExtResource("5_toolbar")]
+[node name="Toolbar" parent="Root" unique_id=505865680 instance=ExtResource("5_toolbar")]
 unique_name_in_owner = true
+layout_mode = 2
 
 [node name="WorkspaceMargin" type="MarginContainer" parent="Root" unique_id=1015672353]
 layout_mode = 2
@@ -146,8 +147,9 @@ layout_mode = 2
 size_flags_vertical = 3
 script = ExtResource("4_graph")
 
-[node name="StatusBar" parent="Root" instance=ExtResource("6_status")]
+[node name="StatusBar" parent="Root" unique_id=781581872 instance=ExtResource("6_status")]
 unique_name_in_owner = true
+layout_mode = 2
 
 [node name="CrtOverlay" type="ColorRect" parent="." unique_id=1821292982]
 material = SubResource("ShaderMat_crt")
