@@ -20,21 +20,28 @@ signal delete_requested
 var save_cb: Callable
 var flash_cb: Callable
 var _tree_menu := PopupMenu.new()
+var _press_pos := Vector2.ZERO
 
 ## Wire behavior once the scene nodes are ready. The host connects
 ## palette_btn/vault_btn/sync_btn/tree_delete_btn signals itself.
 func build() -> void:
-	side_tree.item_selected.connect(_on_tree_selected)
-	# touch/drag: Tree can swallow the click when a drag gesture starts, so
-	# select the note on mouse/touch RELEASE if a drag just happened
+	side_tree.item_activated.connect(_on_tree_selected)
+	# Trigger note opening on mouse/touch RELEASE so dragging a row never
+	# accidentally opens a note or closes the mobile sidebar drawer.
 	side_tree.gui_input.connect(func(ev: InputEvent):
-		if ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_LEFT and not ev.pressed \
-				and _drag_just_happened:
-			_drag_just_happened = false
-			var it := side_tree.get_item_at_position(side_tree.get_local_mouse_position())
-			if it != null and it.get_metadata(0) != null:
-				it.select(0)
-				_on_tree_selected()
+		if ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_LEFT:
+			if ev.pressed:
+				_press_pos = ev.position
+				_drag_just_happened = false
+			else:
+				if _drag_just_happened:
+					_drag_just_happened = false
+				else:
+					if ev.position.distance_to(_press_pos) < 16.0:
+						var it := side_tree.get_item_at_position(side_tree.get_local_mouse_position())
+						if it != null and it.get_metadata(0) != null:
+							it.select(0)
+							_on_tree_selected()
 		elif ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_RIGHT and ev.pressed:
 			var rit := side_tree.get_item_at_position(side_tree.get_local_mouse_position())
 			if rit != null and rit.get_metadata(0) != null:
