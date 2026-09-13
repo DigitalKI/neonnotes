@@ -5,7 +5,7 @@
 > updated at the **end**, so context, decisions, and direction survive across
 > conversations. Keep it current — a stale memory file is worse than none.
 
-_Last updated: 2026-09-12 (mobile sidebar swap-drawer fix) · Godot 4.7 · renderer: gl_compatibility_
+_Last updated: 2026-09-12 (delete-parent dialog in vault tree) · Godot 4.7 · renderer: gl_compatibility_
 
 > ⚠️ **Path note:** the saved global memory says `/home/toshiwo/www/neonnotes`
 > but the project actually lives at **`/home/toshiwo/Projects/Godot/neonnotes`**.
@@ -47,6 +47,12 @@ _Chronological, newest last._
 - **Exports** (`scripts/`) — PNG, animated GIF (hand-rolled encoder via
   `Exporter`), standalone HTML (`HtmlExporter`), clipboard copy; Android system
   share (`Share`: gallery/save_to_gallery, share_text/share_image).
+- **Unified node deletion (v3)** — `delete_node(rel, keep_children, confirm)`
+  automatically detects parent vs leaf nodes based on tree/filesystem structure
+  (`_has_children`). Called from tree delete button, context menu, and note overflow menu.
+  Leaf (no children) → single permanent deletion confirmation dialog.
+  Parent (folder or companion note with children) → options dialog ("🗑 Delete All"
+  or "Delete Node Only" to move children up). Smoke test: `scripts/dev/smoke_delete_parent.gd`.
 - **v2 LAN sync** (`scripts/sync/`) — `SyncService` (UDP 47770 discovery, TCP
   47771 transfer, magic `neonnotes-v2`, PIN + QR + wordlist `WORDS` pairing,
   `device_name` optional via `NEONNOTES_DEVICE` env) + `SyncDialog`.

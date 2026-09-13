@@ -44,8 +44,17 @@ cd neonnotes
 godot --path . 
 
 # Run the test suite
-./tests/run_tests.sh   # or check tests/
+./tests/run_tests.sh
 ```
+
+The check runs focused parser/HTML tests and the full headless smoke test.
+Smoke data is isolated in a disposable
+`user://neonnotes-smoke` vault; set `NEONNOTES_SMOKE_VAULT` to override it.
+
+For AI-assisted development, see [`AGENTS.md`](AGENTS.md) and
+[`PROJECT_MEMORY.md`](PROJECT_MEMORY.md). With the Godot editor open and the
+`godot-mcp` plugin enabled, an agent can inspect the live scene tree, capture
+screenshots, collect runtime errors, and evaluate nodes while the app runs.
 
 Then hit **F5** in the Godot editor and bask in the glow.
 
