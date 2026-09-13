@@ -1,6 +1,7 @@
 class_name SyncDialog
 extends AcceptDialog
 
+var service: SyncService  # optional injected instance (main owns it for auto-sync)
 var _service: SyncService
 var _device_label: Label
 var _pin_label: Label
@@ -13,7 +14,9 @@ var _status_label: Label
 
 func _ready() -> void:
 	title = "LAN Sync"
-	size = Vector2i(720, 460)
+	# fit small screens: the fixed 720x460 overflows portrait phones
+	var vp: Vector2i = get_tree().root.size
+	size = Vector2i(mini(720, int(vp.x * 0.92)), mini(460, int(vp.y * 0.70)))
 	var pal: Dictionary = GameManager.palette()
 
 	var root := VBoxContainer.new()
@@ -90,15 +93,15 @@ func _ready() -> void:
 	_status_label.name = "StatusLabel"
 	root.add_child(_status_label)
 
-	_service = SyncService.new()
+	_service = service if service != null else SyncService.new()
 	_service.name = "SyncService"
 	add_child(_service)
 	_service.peers_changed.connect(_refresh_peers)
 	_service.sync_done.connect(_on_sync_done)
 	_service.sync_failed.connect(_on_sync_failed)
 
-	_device_label.text = "Device: " + _service.device_name
-	_log.append_text("[color=%s]LAN Sync ready. Start discovery to find peers, then share your PIN to pair.[/color]\n" % _css(pal.get("accent2", Color.GRAY)))
+	_device_label.text = "Device: " + _service.device_name + "\nID: " + GameManager.device_id
+	_log.append_text("[color=%s]LAN Sync ready. Start discovery to find peers, then share your PIN to pair. Devices you've paired with before reconnect without a PIN.[/color]\n" % _css(pal.get("accent2", Color.GRAY)))
 
 func _css(c: Color) -> String:
 	return "#%02x%02x%02x" % [int(c.r * 255), int(c.g * 255), int(c.b * 255)]
@@ -106,6 +109,7 @@ func _css(c: Color) -> String:
 func _on_discovery_toggled(pressed: bool) -> void:
 	if pressed:
 		if _service.start_discovery():
+			_service.enable_auto_sync()
 			_discovery_btn.text = "Stop Discovery"
 			var pin := _service.gen_pin()
 			_service.set_pin(pin)
@@ -148,7 +152,7 @@ func _on_send() -> void:
 	var p: Dictionary = _service.peers.get(ip, {})
 	var port := int(p.get("tcp", SyncService.TCP_PORT))
 	var peer_name := str(p.get("name", ip))
-	var files := _service.collect_notes()
+	var files: Dictionary = _service.collect_notes()["files"]
 	if files.is_empty():
 		_status_label.text = "No notes to send."
 		return

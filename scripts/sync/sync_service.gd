@@ -26,6 +26,13 @@ var peers: Dictionary = {}
 var device_name: String = ""
 var expected_pin := ""
 
+## Stable 4-word identity code (17.8M space) — the human-readable device ID.
+static func gen_device_code() -> String:
+	var out := []
+	for i in 4:
+		out.append(WORDS[randi() % WORDS.size()])
+	return "-".join(out)
+
 var _udp: PacketPeerUDP
 var _server: TCPServer
 var _bcast_timer: Timer
@@ -38,14 +45,15 @@ func _ready() -> void:
 	if env != "":
 		device_name = env
 	else:
-		device_name = "%s-%d" % [OS.get_name(), randi() % 100]
+		# stable name derived from the persistent device word-code
+		device_name = "%s-%04d" % [OS.get_name(), abs(int(GameManager.device_id.hash()) % 10000)]
 
 # ---------------- Discovery ----------------
 
 func start_discovery() -> bool:
 	stop_discovery()
 	_udp = PacketPeerUDP.new()
-	if not _udp.bind(DISCOVERY_PORT):
+	if _udp.bind(DISCOVERY_PORT) != OK:
 		_udp = null
 		return false
 	_udp.set_broadcast_enabled(true)
@@ -67,6 +75,8 @@ func start_discovery() -> bool:
 
 func stop_discovery() -> void:
 	_broadcasting = false
+	if _server and _server.is_listening():
+		_server.stop()  # release the TCP port when sync is off
 	if _bcast_timer:
 		_bcast_timer.stop()
 		_bcast_timer.queue_free()
@@ -85,7 +95,7 @@ func stop_discovery() -> void:
 func _send_broadcast() -> void:
 	if _udp == null:
 		return
-	var msg := JSON.stringify({"proto": MAGIC, "name": device_name, "tcp": TCP_PORT})
+	var msg := JSON.stringify({"proto": MAGIC, "name": device_name, "id": GameManager.device_id, "tcp": TCP_PORT})
 	_udp.set_broadcast_enabled(true)
 	_udp.set_dest_address("255.255.255.255", DISCOVERY_PORT)
 	_udp.put_packet(msg.to_utf8_buffer())
@@ -117,11 +127,12 @@ func _poll_discovery() -> void:
 			continue
 		var now := Time.get_ticks_msec()
 		if not peers.has(ip):
-			peers[ip] = {"name": str(data.get("name", "peer")), "tcp": int(data.get("tcp", TCP_PORT)), "seen": now}
+			peers[ip] = {"name": str(data.get("name", "peer")), "id": str(data.get("id", "")), "tcp": int(data.get("tcp", TCP_PORT)), "seen": now}
 			peers_changed.emit()
 		else:
 			peers[ip]["seen"] = now
 			peers[ip]["name"] = str(data.get("name", peers[ip]["name"]))
+			peers[ip]["id"] = str(data.get("id", peers[ip].get("id", "")))
 
 # ---------------- Pin / codes ----------------
 
@@ -142,14 +153,19 @@ func gen_words() -> String:
 func _ensure_server() -> bool:
 	if _server and _server.is_listening():
 		return true
+	if not _broadcasting:
+		return false  # sync not active — don't bind ports in the background
 	_server = TCPServer.new()
 	# "*" is Godot's portable all-interface bind address. Some mobile
 	# platforms reject the literal 0.0.0.0 here even though desktop accepts it.
 	var err := _server.listen(TCP_PORT, "*")
 	if err != OK:
 		_server = null
-		sync_failed.emit("Could not open TCP port %d (error %s). Check firewall or another NeonNotes instance." % [TCP_PORT, error_string(err)])
+		if not _tcp_error_reported:
+			_tcp_error_reported = true
+			sync_failed.emit("Could not open TCP port %d (error %s). Check firewall or another NeonNotes instance." % [TCP_PORT, error_string(err)])
 		return false
+	_tcp_error_reported = false
 	return true
 
 func _poll_server() -> void:
@@ -208,26 +224,41 @@ func _poll_server() -> void:
 func _handle_message(_conn: StreamPeerTCP, msg: Dictionary, st: Dictionary) -> Dictionary:
 	var cmd := String(msg.get("cmd", ""))
 	if cmd == "pair":
-		if expected_pin == "" or String(msg.get("pin", "")) != expected_pin:
+		var sender_id := String(msg.get("id", ""))
+		var trusted_ok: bool = sender_id != "" and GameManager.trusted.has(sender_id)
+		if not trusted_ok and (expected_pin == "" or String(msg.get("pin", "")) != expected_pin):
 			return {"ok": false, "error": "auth"}
 		st["paired"] = true
-		return {"ok": true, "name": device_name}
+		st["peer_id"] = sender_id
+		return {"ok": true, "name": device_name, "id": GameManager.device_id}
 	if cmd == "push":
 		if not st.get("paired", false):
 			return {"ok": false, "error": "auth"}
 		var files = msg.get("files", {})
 		if typeof(files) != TYPE_DICTIONARY:
 			return {"ok": false, "error": "bad_files"}
+		var times = msg.get("times", {})
+		if typeof(times) != TYPE_DICTIONARY:
+			times = {}
 		var count := 0
 		var vault := GameManager.vault_abs()
 		if vault == "":
 			return {"ok": false, "error": "no_vault"}
 		for fname in files.keys():
 			var name := String(fname)
-			if name == "" or name.contains("/") or name.contains("\\") or name.contains(".."):
+			# allow subfolders; reject traversal/absolute paths and exports
+			if name == "" or name.begins_with("/") or name.contains("\\") or name.contains("..") \
+					or name.get_base_dir() == GameManager.EXPORTS_SUBDIR:
 				continue
 			var text := String(files[fname])
-			var f := FileAccess.open(vault.path_join(name), FileAccess.WRITE)
+			var dest := vault.path_join(name)
+			# last-writer-wins: skip if our local copy is strictly newer
+			if FileAccess.file_exists(dest) and times.has(fname):
+				var local_t := FileAccess.get_modified_time(dest)
+				var remote_t := int(times[fname])
+				if local_t > remote_t:
+					continue
+			var f := FileAccess.open(dest, FileAccess.WRITE)
 			if f == null:
 				continue
 			f.store_string(text)
@@ -235,6 +266,9 @@ func _handle_message(_conn: StreamPeerTCP, msg: Dictionary, st: Dictionary) -> D
 			count += 1
 		if count > 0:
 			GameManager.scan_notes()
+		var peer_id := String(msg.get("id", ""))
+		if peer_id != "":
+			GameManager.add_trusted(peer_id)  # successfully paired+pushed → remember
 		sync_done.emit(str(msg.get("name", "peer")), count)
 		return {"ok": true, "count": count}
 	return {"ok": false, "error": "unknown_cmd"}
@@ -249,7 +283,7 @@ func _send_json(conn: StreamPeerTCP, data: Dictionary) -> void:
 
 # ---------------- Client ----------------
 
-static func push_to(ip: String, port: int, pin: String, files: Dictionary, timeout_ms := 4000) -> Dictionary:
+static func push_to(ip: String, port: int, pin: String, files: Dictionary, timeout_ms := 4000, times: Dictionary = {}) -> Dictionary:
 	var conn := StreamPeerTCP.new()
 	var err := conn.connect_to_host(ip, port)
 	if err != OK:
@@ -259,11 +293,15 @@ static func push_to(ip: String, port: int, pin: String, files: Dictionary, timeo
 		conn.poll()
 		if conn.get_status() == StreamPeerTCP.STATUS_ERROR or Time.get_ticks_msec() - start > timeout_ms:
 			return {"ok": false, "error": "timeout"}
-	var reply: Variant = _client_roundtrip(conn, {"cmd": "pair", "pin": pin})
+	var reply: Variant = _client_roundtrip(conn, {"cmd": "pair", "pin": pin, "id": GameManager.device_id})
 	if typeof(reply) != TYPE_DICTIONARY or not reply.get("ok", false):
 		conn.disconnect_from_host()
 		return {"ok": false, "error": str(reply.get("error", "auth")) if typeof(reply) == TYPE_DICTIONARY else "bad_reply"}
-	var reply2: Variant = _client_roundtrip(conn, {"cmd": "push", "files": files, "name": OS.get_environment("NEONNOTES_DEVICE")})
+	# remember the peer as trusted once pairing succeeded
+	var peer_id := String(reply.get("id", ""))
+	if peer_id != "":
+		GameManager.add_trusted(peer_id)
+	var reply2: Variant = _client_roundtrip(conn, {"cmd": "push", "files": files, "times": times, "name": device_display_name(), "id": GameManager.device_id})
 	conn.disconnect_from_host()
 	if typeof(reply2) != TYPE_DICTIONARY or not reply2.get("ok", false):
 		return {"ok": false, "error": str(reply2.get("error", "push_failed")) if typeof(reply2) == TYPE_DICTIONARY else "bad_reply"}
@@ -293,12 +331,61 @@ static func _client_roundtrip(conn: StreamPeerTCP, msg: Dictionary) -> Variant:
 # ---------------- Notes ----------------
 
 func collect_notes() -> Dictionary:
-	var out := {}
+	var files := {}
+	var times := {}
 	var vault := GameManager.vault_abs()
 	for fname in GameManager.notes:
 		var path := vault.path_join(String(fname))
 		var f := FileAccess.open(path, FileAccess.READ)
 		if f:
-			out[String(fname)] = f.get_as_text()
+			files[String(fname)] = f.get_as_text()
+			times[String(fname)] = FileAccess.get_modified_time(path)
 			f.close()
-	return out
+	return {"files": files, "times": times}
+
+## device name shared over the wire (env override or generated)
+static func device_display_name() -> String:
+	var env := OS.get_environment("NEONNOTES_DEVICE")
+	return env if env != "" else "%s-%d" % [OS.get_name(), abs(int(GameManager.device_id.hash()) % 100)]
+
+# ---------------- Auto-sync ----------------
+## Push local notes to every visible trusted peer. Called debounced after
+## edits and periodically while discovery runs. LWW on the receiver keeps
+## the newest copy.
+
+var _auto_timer: Timer
+var _syncing := false
+var _tcp_error_reported := false
+
+func enable_auto_sync() -> void:
+	if _auto_timer:
+		return
+	_auto_timer = Timer.new()
+	_auto_timer.wait_time = 15.0
+	_auto_timer.timeout.connect(auto_sync)
+	add_child(_auto_timer)
+	_auto_timer.start()
+
+func note_saved() -> void:
+	if _auto_timer == null:
+		return
+	_auto_timer.stop()
+	_auto_timer.start()  # debounce: sync 15 s after the last edit
+
+func auto_sync() -> void:
+	if _syncing or _udp == null or GameManager.trusted.is_empty():
+		return
+	_syncing = true
+	var data: Dictionary = collect_notes()
+	if data["files"].is_empty():
+		_syncing = false
+		return
+	for ip in peers.keys():
+		var p: Dictionary = peers[ip]
+		var pid := str(p.get("id", ""))
+		if pid == "" or not GameManager.trusted.has(pid):
+			continue  # never auto-send to an unverified device
+		var res: Dictionary = push_to(str(ip), int(p.get("tcp", TCP_PORT)), "", data["files"], 4000, data["times"])
+		if res.get("ok", false):
+			sync_done.emit(str(p.get("name", ip)), int(res.get("count", 0)))
+	_syncing = false
