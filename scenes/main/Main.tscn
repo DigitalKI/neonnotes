@@ -76,7 +76,7 @@ clip_text = true
 unique_name_in_owner = true
 custom_minimum_size = Vector2(56, 36)
 layout_mode = 2
-text = "＋ New"
+text = "+ New"
 
 [node name="ModeBtn" type="Button" parent="Root/Toolbar" unique_id=1395942889]
 unique_name_in_owner = true
@@ -118,78 +118,80 @@ text = "⋮"
 [node name="MoreMenu" type="PopupMenu" parent="Root/Toolbar/MoreBtn" unique_id=934102136]
 unique_name_in_owner = true
 
-[node name="Workspace" type="HSplitContainer" parent="Root" unique_id=776811514]
+[node name="WorkspaceMargin" type="MarginContainer" parent="Root"]
 layout_mode = 2
 size_flags_vertical = 3
+
+[node name="Workspace" type="HSplitContainer" parent="Root/WorkspaceMargin" unique_id=776811514]
+layout_mode = 2
 split_offsets = PackedInt32Array(230)
 split_offset = 230
 
-[node name="SidePanel" type="PanelContainer" parent="Root/Workspace" unique_id=2062134626]
+[node name="SidePanel" type="PanelContainer" parent="Root/WorkspaceMargin/Workspace" unique_id=2062134626]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(220, 0)
 layout_mode = 2
 
-[node name="SideVBox" type="VBoxContainer" parent="Root/Workspace/SidePanel" unique_id=1683968186]
+[node name="SideVBox" type="VBoxContainer" parent="Root/WorkspaceMargin/Workspace/SidePanel" unique_id=1683968186]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="SideTree" type="Tree" parent="Root/Workspace/SidePanel/SideVBox" unique_id=1553072570]
+[node name="SideTree" type="Tree" parent="Root/WorkspaceMargin/Workspace/SidePanel/SideVBox" unique_id=1553072570]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="BacklinksPanel" type="PanelContainer" parent="Root/Workspace/SidePanel/SideVBox" unique_id=160805282]
+[node name="BacklinksPanel" type="PanelContainer" parent="Root/WorkspaceMargin/Workspace/SidePanel/SideVBox" unique_id=160805282]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
 
-[node name="BacklinksBox" type="VBoxContainer" parent="Root/Workspace/SidePanel/SideVBox/BacklinksPanel" unique_id=493428536]
+[node name="BacklinksBox" type="VBoxContainer" parent="Root/WorkspaceMargin/Workspace/SidePanel/SideVBox/BacklinksPanel" unique_id=493428536]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="SideBottom" type="HBoxContainer" parent="Root/Workspace/SidePanel/SideVBox" unique_id=1801830491]
+[node name="SideBottom" type="HBoxContainer" parent="Root/WorkspaceMargin/Workspace/SidePanel/SideVBox" unique_id=1801830491]
 unique_name_in_owner = true
 layout_mode = 2
 
-[node name="PaletteBtn" type="OptionButton" parent="Root/Workspace/SidePanel/SideVBox/SideBottom" unique_id=2033471314]
+[node name="PaletteBtn" type="OptionButton" parent="Root/WorkspaceMargin/Workspace/SidePanel/SideVBox/SideBottom" unique_id=2033471314]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="VaultBtn" type="Button" parent="Root/Workspace/SidePanel/SideVBox/SideBottom" unique_id=469971492]
+[node name="VaultBtn" type="Button" parent="Root/WorkspaceMargin/Workspace/SidePanel/SideVBox/SideBottom" unique_id=469971492]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 text = "📂 Vault"
 
-[node name="SyncBtn" type="Button" parent="Root/Workspace/SidePanel/SideVBox/SideBottom" unique_id=1451978887]
+[node name="SyncBtn" type="Button" parent="Root/WorkspaceMargin/Workspace/SidePanel/SideVBox/SideBottom" unique_id=1451978887]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 text = "⇄ Sync"
 
-[node name="Content" type="PanelContainer" parent="Root/Workspace" unique_id=198102758]
+[node name="Content" type="PanelContainer" parent="Root/WorkspaceMargin/Workspace" unique_id=198102758]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="ContentHost" type="ScrollContainer" parent="Root/Workspace/Content" unique_id=1622826570]
+[node name="ContentHost" type="ScrollContainer" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=1622826570]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-horizontal_scroll_mode = 0
-vertical_scroll_mode = 1
 follow_focus = true
+horizontal_scroll_mode = 0
 
-[node name="ContentBody" type="VBoxContainer" parent="Root/Workspace/Content/ContentHost"]
+[node name="ContentBody" type="VBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentHost" unique_id=1712346518]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 10
 
-[node name="GraphView" type="Control" parent="Root/Workspace/Content" unique_id=938625459]
+[node name="GraphView" type="Control" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=938625459]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
@@ -206,7 +208,6 @@ theme_override_font_sizes/font_size = 12
 text = "Ready"
 
 [node name="CrtOverlay" type="ColorRect" parent="." unique_id=1821292982]
-visible = false
 material = SubResource("ShaderMat_crt")
 layout_mode = 1
 anchors_preset = 15
