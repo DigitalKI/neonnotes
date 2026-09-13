@@ -5,7 +5,7 @@
 > updated at the **end**, so context, decisions, and direction survive across
 > conversations. Keep it current — a stale memory file is worse than none.
 
-_Last updated: 2026-09-13 (componentization steps 1+2) · Godot 4.7 · renderer: gl_compatibility_
+_Last updated: 2026-09-13 (componentization: subscenes + VaultTreeComponent) · Godot 4.7 · renderer: gl_compatibility_
 
 > ⚠️ **Path note:** the saved global memory says `/home/toshiwo/www/neonnotes`
 > but the project actually lives at **`/home/toshiwo/Projects/Godot/neonnotes`**.
@@ -200,7 +200,33 @@ _Chronological, newest last._
     refresh, drag&drop, ordering, move/rename, link rewrite, prune — the
     biggest chunk); 4 = DeleteService + SaveService; 5 = NoteEditorController
     (modes, preview, image embeds, backlinks/graph). Commit after each step.
-  - **Gotcha**: after creating new `class_name` scripts, the global class
+  - **2026-09-13 — Componentization continued (scene + script)**:
+  - **Toolbar + StatusBar subscenes** (`scenes/components/toolbar.tscn`,
+    `status_bar.tscn`; root scripts `toolbar_component.gd` /
+    `status_bar_component.gd`). Subscene root scripts bind children via their
+    OWN `%` bindings and expose typed properties; Main.tscn instances them and
+    flags the instance node `unique_name_in_owner = true` so `%Toolbar` /
+    `%StatusBar` still resolve from main.gd. `flash()` moved into
+    StatusBarComponent; main's `_flash` just delegates.
+  - **Step 3: SidePanel.tscn + VaultTreeComponent** (`vault_tree_component.gd`
+    is the SidePanel root, extends PanelContainer): owns tag chips, tree build
+    (folder-as-note merge), drag & drop + drop hints, ordering, move/rename,
+    wiki-link rewrite, empty-folder pruning, node_rel/has_children/selection.
+    Signals: `note_requested(fname)`, `delete_requested`; injected
+    `save_cb` (_flush_save) + `flash_cb`. It registers drag forwarding ONCE
+    (kept from refresh-time registration) and handles NOTIFICATION_DRAG_END
+    itself; main keeps WM_CLOSE_REQUEST. main.gd 1419 → 968 lines; Main.tscn
+    is now mostly a composition root. Backlinks panel/box + palette/vault/sync
+    buttons are exposed as component properties, logic still in main (until
+    steps 4/5). All 41 checks pass at each commit (commits 41c2c2f, b003206).
+  - **Remaining**: step 4 = DeleteService + SaveService; step 5 =
+    NoteEditorController + Content.tscn (content subtree still in Main.tscn).
+  - **Gotchas learned**: GDScript files must end with a newline (parse error
+    "Expected end of file" otherwise); when bulk-renaming keep wrapper names
+    distinct from member names (`func vault_tree.x(` is a parse error if left
+    inside main.gd); `_tree_node_rel`/`_has_children` were in the deletion
+    cluster, not the tree block — verify block boundaries before moving.
+- **Gotcha**: after creating new `class_name` scripts, the global class
     cache is stale until an editor scan; run `godot --headless --editor
 	--quit` once before smoke tests or main.gd fails with "Identifier not
 	declared".
