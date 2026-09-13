@@ -222,7 +222,7 @@ _Chronological, newest last._
   - **Remaining**: step 4 = DeleteService + SaveService; step 5 =
     NoteEditorController + Content.tscn (content subtree still in Main.tscn).
   - **Gotchas learned**: GDScript files must end with a newline (parse error
-    "Expected end of file" otherwise); when bulk-renaming keep wrapper names
+	"Expected end of file" otherwise); when bulk-renaming keep wrapper names
     distinct from member names (`func vault_tree.x(` is a parse error if left
     inside main.gd); `_tree_node_rel`/`_has_children` were in the deletion
     cluster, not the tree block — verify block boundaries before moving.
