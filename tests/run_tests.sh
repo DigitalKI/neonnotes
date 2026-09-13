@@ -4,4 +4,5 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 godot --headless --path . --script tests/unit_tests.gd
+godot --headless --path . tests/TestVaultTreeDrag.tscn
 NEONNOTES_SMOKE=1 godot --headless --path .

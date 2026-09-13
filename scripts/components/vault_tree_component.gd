@@ -209,11 +209,45 @@ func _tree_get_drag(at_position: Vector2) -> Variant:
 var _drag_just_happened := false
 var _tree_drag_forwarding_set := false
 
+## Calculates the drop section for `it` at mouse position `at_position`.
+## Widens the "MOVE INTO" (section 0) target zone for folders and notes so
+## creating parent/children structures is easy to hit on touch and desktop.
+func _custom_drop_section(it: TreeItem, at_position: Vector2) -> int:
+	if it == null or it == side_tree.get_root():
+		return 0  # dropping anywhere on root moves into vault root
+	var rect := side_tree.get_item_area_rect(it)
+	if rect.size.y <= 0.0:
+		return side_tree.get_drop_section_at_position(at_position)
+	var rel_y := at_position.y - rect.position.y
+	var ratio := clampf(rel_y / rect.size.y, 0.0, 1.0)
+
+	var meta := str(it.get_metadata(0))
+	var is_folder_row := not meta.ends_with(".md")
+	if not is_folder_row and DirAccess.dir_exists_absolute(GameManager.vault_abs().path_join(meta.trim_suffix(".md"))):
+		is_folder_row = true
+
+	if is_folder_row:
+		# Folders are primary containers: 70% middle zone for MOVE INTO
+		if ratio < 0.15:
+			return -1
+		elif ratio > 0.85:
+			return 1
+		else:
+			return 0
+	else:
+		# Standalone notes: 60% middle zone for MOVE INTO (create folder container)
+		if ratio < 0.20:
+			return -1
+		elif ratio > 0.80:
+			return 1
+		else:
+			return 0
+
 func _tree_can_drop(at_position: Vector2, data: Variant) -> bool:
 	var ok: bool = typeof(data) == TYPE_DICTIONARY and data.get("type", "") == "neonnotes_move"
 	if ok:
 		var target := side_tree.get_item_at_position(at_position)
-		var section := side_tree.get_drop_section_at_position(at_position)
+		var section := _custom_drop_section(target, at_position)
 		_mark_drop_hint(target, section)
 	else:
 		_clear_drop_hint()
@@ -227,8 +261,8 @@ var _drop_section := 0
 func _mark_drop_hint(it: TreeItem, section: int = 0) -> void:
 	if _drop_hint == it and _drop_section == section:
 		return
-	if _drop_hint != null:
-		_drop_hint.set_custom_bg_color(0, Color(0, 0, 0, 0))
+	if _drop_hint != null and is_instance_valid(_drop_hint):
+		_drop_hint.clear_custom_bg_color(0)
 	_drop_hint = it
 	_drop_section = section
 	if it == null:
@@ -263,7 +297,7 @@ func _tree_drop(at_position: Vector2, data: Variant) -> void:
 		_clear_drop_hint()
 		return
 	var it := side_tree.get_item_at_position(at_position)
-	var section := side_tree.get_drop_section_at_position(at_position)
+	var section := _custom_drop_section(it, at_position)
 	# target folder: the parent folder of the row under the cursor
 	var target_dir := ""
 	if it != null and it.get_metadata(0) != null:
@@ -351,10 +385,17 @@ func move_path(src_rel: String, dst_dir: String) -> String:
 	# never drop a folder into itself or one of its children
 	if not src_rel.ends_with(".md") and (dst_dir == src_rel or dst_dir.begins_with(src_rel + "/")):
 		return ""
+	# companion note should not be moved into its own companion folder
+	if src_rel.ends_with(".md") and dst_dir == src_rel.trim_suffix(".md"):
+		return src_rel
+
 	var dst := vault if dst_dir == "" else vault.path_join(dst_dir)
 	DirAccess.make_dir_recursive_absolute(dst)
 	var base := src_rel.get_file()
 	var target := dst.path_join(base)
+	if src == target:
+		return src_rel
+
 	if FileAccess.file_exists(target) or DirAccess.dir_exists_absolute(target):
 		var stem := base.trim_suffix(".md")
 		var ext := ".md" if base.ends_with(".md") else ""
