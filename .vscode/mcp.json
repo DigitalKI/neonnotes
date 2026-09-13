@@ -1,0 +1,12 @@
+{
+	"servers": {
+		"my-mcp-server-cc054ac6": {
+			"type": "stdio",
+			"command": "godot-mcp",
+			"env": {
+				"GODOT_MCP_BRIDGE_PORT": "6510"
+			}
+		}
+	},
+	"inputs": []
+}
