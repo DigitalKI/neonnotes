@@ -543,6 +543,7 @@ func _build_tag_bar() -> void:
 
 func _refresh_list() -> void:
 	side_tree.clear()
+	side_tree.hide_root = false
 	_build_tag_bar()
 	# drag notes/folders between folders + reorder rows (persisted in .neonnotes.json)
 	side_tree.set_drop_mode_flags(Tree.DROP_MODE_ON_ITEM | Tree.DROP_MODE_INBETWEEN)
@@ -552,6 +553,11 @@ func _refresh_list() -> void:
 		side_tree.set_drag_forwarding(_tree_get_drag, _tree_can_drop, _tree_drop)
 		_tree_drag_forwarding_set = true
 	var root := side_tree.create_item()
+	root.set_text(0, "Vault")
+	root.set_metadata(0, "")
+	root.disable_folding = true
+	root.collapsed = false
+	root.set_selectable(0, false)
 	# build folder hierarchy from relative paths
 	var folders := {}
 	# pass 1: folders first, so a note + folder sharing a name merge into one
@@ -582,10 +588,12 @@ func _refresh_list() -> void:
 	# pass 2: note leaves in custom order (skipping those merged into folder rows)
 	for dir in folders.keys():
 		for n in _ordered_notes(dir):
-			var parts := n.split("/")
 			var parent: TreeItem = folders[dir]
 			if n == dir + ".md":
 				continue  # already represented by the merged folder row
+			var folder_abs := GameManager.vault_abs().path_join(n.trim_suffix(".md"))
+			if DirAccess.dir_exists_absolute(folder_abs):
+				continue  # already represented by a subfolder row
 			_add_note_leaf(parent, n)
 	for n in _ordered_notes(""):
 		if not n.contains("/"):
@@ -628,9 +636,11 @@ func _ordered_notes(dir: String) -> Array[String]:
 
 func _tree_get_drag(at_position: Vector2) -> Variant:
 	var it := side_tree.get_item_at_position(at_position)
-	if it == null or it.get_metadata(0) == null:
+	if it == null or it == side_tree.get_root() or it.get_metadata(0) == null:
 		return null
 	var meta := str(it.get_metadata(0))
+	if meta == "":
+		return null
 	# merged folder+note row: drag the FOLDER (companion note travels with it)
 	if meta.ends_with(".md") and DirAccess.dir_exists_absolute(GameManager.vault_abs().path_join(meta.trim_suffix(".md"))):
 		meta = meta.trim_suffix(".md")
@@ -674,6 +684,8 @@ func _mark_drop_hint(it: TreeItem, section: int = 0) -> void:
 	var alpha := 0.48 if section == 0 else 0.20
 	it.set_custom_bg_color(0, Color(c.r, c.g, c.b, alpha))
 	var target := str(it.get_metadata(0)).trim_suffix(".md")
+	if target == "":
+		target = "Vault"
 	if section == 0:
 		status.text = "MOVE INTO › " + target
 	elif section < 0:
@@ -1523,7 +1535,10 @@ func _run_smoke() -> void:
 	GameManager.write_note("sub/demo.md", "---\ntitle: \"Sub\"\n---\n\nhi\n")
 	GameManager.scan_notes()
 	_refresh_list()
-	fails += _check(side_tree.get_root().get_child_count() > 0, "tree populated")
+	fails += _check(side_tree.get_root() != null, "tree populated")
+	fails += _check(side_tree.hide_root == false, "tree shows root")
+	fails += _check(side_tree.get_root().get_text(0) == "Vault", "root labeled Vault")
+	fails += _check(side_tree.get_root().disable_folding == true, "root folding disabled")
 	fails += _check(GameManager.notes.has("sub/demo.md"), "recursive scan finds sub/demo.md")
 	GameManager.scan_notes()
 	fails += _check(GameManager.notes.has("sub.md"), "folder without companion note gets one auto-created")
@@ -1541,6 +1556,12 @@ func _run_smoke() -> void:
 	_refresh_list()
 	fails += _check(moved == "dnd/Help/drag_a.md" and GameManager.notes.has("dnd/Help/drag_a.md"), "note moved into folder")
 	fails += _check(GameManager.read_note("dnd/Help/blue.md").contains("[[dnd/Help/drag_a]]"), "links rewritten after move")
+	# nested multi-drag: move child into blue note inside Help (creating dnd/Help/blue/child.md)
+	var moved_nested: String = _move_path("dnd/Help/child.md", "dnd/Help/blue")
+	_prune_empty_dirs()
+	GameManager.scan_notes()
+	_refresh_list()
+	fails += _check(moved_nested == "dnd/Help/blue/child.md" and GameManager.notes.has("dnd/Help/blue/child.md"), "nested multi-drag parent/child move")
 	var moved2: String = _move_path("dnd/Help", "dnd/Other")  # drop folder INTO Other/
 	GameManager.scan_notes()
 	_refresh_list()

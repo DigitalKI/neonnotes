@@ -1,5 +1,6 @@
 {
     "chat.tools.terminal.autoApprove": {
-        "./tests/run_tests.sh": true
+        "./tests/run_tests.sh": true,
+        "godot": true
     }
 }
