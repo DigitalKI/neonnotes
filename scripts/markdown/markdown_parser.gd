@@ -19,7 +19,7 @@ static func parse(text: String) -> Dictionary:
 	var para: Array[String] = []
 	var flush := func() -> void:
 		if para.size() > 0:
-			blocks.append({"type":"para", "text":" ".join(para)})
+			blocks.append({"type":"para", "text":"\n".join(para)})  # single Enter = newline in preview
 			para.clear()
 	while i < lines.size():
 		var s := lines[i]
@@ -53,6 +53,10 @@ static func parse(text: String) -> Dictionary:
 			while n < t.length() and t[n] == "#": n += 1
 			if n <= 4 and n < t.length() and t[n] == " ": flush.call(); blocks.append({"type":"heading", "level":n, "text":t.substr(n).strip_edges()}); i += 1; continue
 		if t == "---" or t == "***" or t == "___": flush.call(); blocks.append({"type":"hr"}); i += 1; continue
+		# image embed: ![alt](vault-relative path) on its own line; empty src = placeholder
+		var img_re := RegEx.new(); img_re.compile("^!\\[([^\\]]*)\\]\\(([^)]*)\\)\\s*$")
+		var im := img_re.search(t)
+		if im: flush.call(); blocks.append({"type":"image", "alt":im.get_string(1), "src":im.get_string(2).strip_edges()}); i += 1; continue
 		if t.begins_with(">"):
 			flush.call(); var qtext := t.substr(1).strip_edges(); blocks.append({"type":"quote", "text":qtext}); i += 1; continue
 		if t.begins_with("|") and t.ends_with("|") and i + 1 < lines.size() and lines[i + 1].strip_edges().replace("|", "").replace("-", "").replace(":", "").strip_edges() == "":

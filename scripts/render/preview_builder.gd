@@ -7,6 +7,8 @@ extends RefCounted
 static var pal_override: Dictionary = {}
 ## Callable(String note_name) invoked when the user clicks a wiki-link.
 static var open_cb := Callable()
+## Callable(String src) invoked when an image embed is clicked (pick/replace).
+static var image_cb := Callable()
 
 static func _col(key: String) -> Color:
 	if not pal_override.is_empty() and pal_override.has(key):
@@ -57,22 +59,67 @@ static func build(doc: Dictionary, into: VBoxContainer) -> void:
 				into.add_child(_table(block["rows"], text_c))
 			"chart":
 				into.add_child(_chart(block))
+			"image":
+				into.add_child(_image_block(block))
 	into.add_child(Control.new())
 
+## Escape BBCode brackets in note text (single pass — sequential replace()
+## would re-escape the tokens themselves).
 static func escape(s: String) -> String:
-	return s.replace("[", "[lb]")
+	var out := ""
+	for ch in s:
+		if ch == "[":
+			out += "[lb]"
+		elif ch == "]":
+			out += "[rb]"
+		else:
+			out += ch
+	return out
+
+# ---- backslash escapes (\* \[ \% \\ … render the literal character) ----
+const ESC_OPEN := "\uE000"  # private-use sentinels unlikely in real text
+const ESC_CLOSE := "\uE001"
+
+## Replace \x with sentinel tokens so markdown regexes skip them.
+## Returns [protected_string, Dictionary idx -> literal char]
+static func _protect_escapes(s: String) -> Array:
+	var map := {}
+	var out := ""
+	var idx := 0
+	var i := 0
+	while i < s.length():
+		if s[i] == "\\" and i + 1 < s.length():
+			idx += 1
+			map[idx] = s[i + 1]
+			out += ESC_OPEN + str(idx) + ESC_CLOSE
+			i += 2
+		else:
+			out += s[i]
+			i += 1
+	return [out, map]
+
+static func _restore_escapes(s: String, map: Dictionary) -> String:
+	for k in map.keys():
+		s = s.replace(ESC_OPEN + str(k) + ESC_CLOSE, str(map[k]))
+	return s
 
 ## Inline markdown -> BBCode (input is escaped text)
 static func _inline(s: String) -> String:
 	var accent := _hex(_col("accent"))
+	# protect \-escapes from every transform below, restore at the end
+	var prot: Array = _protect_escapes(s)
+	s = prot[0]
 	# v2 neon text effects (%%glitch%% — legacy %glitch% also accepted)
 	s = RegEx.create_from_string(r"%%(.+?)%%|%([^\s].*?)%").sub(
 		s, "[glitch][color=#%s][b]$1$2[/b][/color][/glitch]" % _hex(_col("accent4")), true)
 	s = RegEx.create_from_string(r"\+\+(.+?)\+\+").sub(
 		s, "[flicker][color=#%s]$1[/color][/flicker]" % _hex(_col("accent3")), true)
-	# wiki-links: [[Note]] / [[Note|alias]] — after escape() they look like [lb][lb]Note[lb][lb]
-	s = RegEx.create_from_string(r"\[lb\]\[lb\]([^\[|]+?)(?:\|([^\]]+?))?\[lb\]\[lb\]").sub(
+	# wiki-links: [[Note]] / [[Note|alias]] — after escape() both brackets are
+	# masked. Alias form first, then plain form; label falls back to the target.
+	s = RegEx.create_from_string(r"\[lb\]\[lb\]([^\[|]+?)\|([^\[|]+?)\[rb\]\[rb\]").sub(
 		s, "[url=$1][color=#%s][u]$2[/u][/color][/url]" % _hex(_col("accent2")), true)
+	s = RegEx.create_from_string(r"\[lb\]\[lb\]([^\[|]+?)\[rb\]\[rb\]").sub(
+		s, "[url=$1][color=#%s][u]$1[/u][/color][/url]" % _hex(_col("accent2")), true)
 	# bold / italic / code / strike / highlight
 	s = RegEx.create_from_string(r"\*\*\*(.+?)\*\*\*").sub(s, "[b][i][color=#%s]$1[/color][/i][/b]" % accent, true)
 	s = RegEx.create_from_string(r"\*\*(.+?)\*\*").sub(s, "[b][color=#%s]$1[/color][/b]" % accent, true)
@@ -80,9 +127,8 @@ static func _inline(s: String) -> String:
 	s = RegEx.create_from_string(r"`(.+?)`").sub(s, "[code][color=#%s]$1[/color][/code]" % _hex(_col("accent2")), true)
 	s = RegEx.create_from_string(r"~~(.+?)~~").sub(s, "[s]$1[/s]", true)
 	s = RegEx.create_from_string(r"==(.+?)==").sub(s, "[bgcolor=#%s][color=#%s][b]$1[/b][/color][/bgcolor]"
-		% [_hex(Color(_col("accent3").r, _col("accent3").g, _col("accent3").b, 0.3)), _hex(_col("accent3"))], true)
-	return s
-
+		% [_hex(_col("accent3")), "#14062b"], true)  # dark text on the neon bar — always readable
+	return _restore_escapes(s, prot[1])
 static func _rich(bb: String, default_col: Color) -> RichTextLabel:
 	var rt := RichTextLabel.new()
 	rt.name = "PreviewRichText"
@@ -98,6 +144,36 @@ static func _rich(bb: String, default_col: Color) -> RichTextLabel:
 	if open_cb.is_valid():
 		rt.meta_clicked.connect(func(meta: Variant): open_cb.call(str(meta)))
 	return rt
+
+static func _image_block(block: Dictionary) -> Control:
+	var src := str(block.get("src", ""))
+	var alt := str(block.get("alt", ""))
+	var click := func():
+		if image_cb.is_valid():
+			image_cb.call(src)
+	if src != "":
+		var img := Image.load_from_file(GameManager.vault_abs().path_join(src))
+		if img:
+			var tr := TextureRect.new()
+			tr.name = "ImageEmbed"
+			tr.texture = ImageTexture.create_from_image(img)
+			tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			tr.custom_minimum_size = Vector2(0, 300)
+			tr.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			tr.mouse_filter = Control.MOUSE_FILTER_STOP
+			tr.tooltip_text = (alt + "  — " if alt != "" else "") + src + " (click to replace)"
+			tr.gui_input.connect(func(ev: InputEvent):
+				if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
+					click.call())
+			return tr
+	# empty embed (or missing file) → placeholder that opens the picker
+	var btn := Button.new()
+	btn.name = "ImageEmbed"
+	btn.text = "🖼 %s — click to choose image" % (alt if alt != "" else "Image")
+	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn.pressed.connect(click)
+	return btn
 
 static func _rule(col: Color) -> Control:
 	var cr := ColorRect.new()
