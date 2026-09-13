@@ -61,15 +61,12 @@ The interface supports portrait and landscape. On narrow screens actions move in
 @onready var bg: ColorRect = %Bg
 @onready var title_label: Label = %Title
 @onready var toolbar: ToolbarComponent = %Toolbar
+@onready var vault_tree: VaultTreeComponent = %SidePanel
 @onready var status_bar: StatusBarComponent = %StatusBar
 @onready var note_title: Label = toolbar.note_title
-@onready var palette_btn: OptionButton = %PaletteBtn
-@onready var side_tree: Tree = %SideTree
 @onready var content_host: ScrollContainer = %ContentHost
 @onready var content_body: VBoxContainer = %ContentBody
 @onready var content_panel: PanelContainer = %Content
-@onready var backlinks_panel: PanelContainer = %BacklinksPanel
-@onready var backlinks_box: VBoxContainer = %BacklinksBox
 @onready var graph_view: GraphView = %GraphView
 
 var code_edit := CodeEdit.new()
@@ -99,7 +96,7 @@ func _ready() -> void:
 	_build_dynamic_ui()
 	theme_component.name = "ThemeComponent"
 	theme_component.setup(%Bg, %Title, toolbar.note_title, %SidePanel as PanelContainer,
-			%Content as PanelContainer, %Toolbar, code_edit)
+			%Content as PanelContainer, toolbar, code_edit)
 	add_child(theme_component)
 	theme_component.apply()
 	layout_component.name = "LayoutComponent"
@@ -119,29 +116,17 @@ func _ready() -> void:
 	GameManager.palette_changed.connect(func():
 		theme_component.apply()
 		_render_preview())
-	side_tree.item_selected.connect(_on_tree_selected)
-	# touch/drag: Tree can swallow the click when a drag gesture starts, so
-	# select the note on mouse/touch RELEASE if a drag just happened
-	side_tree.gui_input.connect(func(ev: InputEvent):
-		if ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_LEFT and not ev.pressed \
-				and _drag_just_happened:
-			_drag_just_happened = false
-			var it := side_tree.get_item_at_position(side_tree.get_local_mouse_position())
-			if it != null and it.get_metadata(0) != null:
-				it.select(0)
-				_on_tree_selected()
-		elif ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_RIGHT and ev.pressed:
-			var rit := side_tree.get_item_at_position(side_tree.get_local_mouse_position())
-			if rit != null and rit.get_metadata(0) != null:
-				rit.select(0)
-				_tree_menu.popup(Rect2i(get_global_mouse_position(), Vector2i.ZERO)))
-	side_tree.set_drag_forwarding(_tree_get_drag, _tree_can_drop, _tree_drop)
-	# tree row deletion: button above the tree + right-click context menu
-	%TreeDeleteBtn.pressed.connect(_delete_selected_node)
-	_tree_menu.add_item("🗑 Delete…", 1)
-	_tree_menu.id_pressed.connect(func(id: int):
-		if id == 1:
-			_delete_selected_node())
+	vault_tree.save_cb = _flush_save
+	vault_tree.flash_cb = _flash
+	vault_tree.note_requested.connect(_on_note_selected)
+	vault_tree.delete_requested.connect(_delete_selected_node)
+	vault_tree.tree_delete_btn.pressed.connect(_delete_selected_node)
+	vault_tree.build()
+	vault_tree.build_palette()
+	vault_tree.palette_btn.item_selected.connect(func(index: int):
+		GameManager.set_palette(vault_tree.palette_btn.get_item_text(index)))
+	vault_tree.vault_btn.pressed.connect(_on_open_vault)
+	vault_tree.sync_btn.pressed.connect(_on_sync)
 	graph_view.open_cb = _open_wikilink
 	PreviewBuilder.open_cb = _open_wikilink
 	PreviewBuilder.image_cb = _on_image_click
@@ -159,6 +144,9 @@ func _ready() -> void:
 	add_child(sync_service)
 	if OS.get_environment("NEONNOTES_SMOKE") == "1":
 		_run_smoke.call_deferred()
+
+func _refresh_list() -> void:
+	vault_tree.refresh()
 
 func _prepare_smoke_vault() -> void:
 	# Smoke tests must never read or persist changes to the user's real vault.
@@ -222,19 +210,9 @@ func _build_dynamic_ui() -> void:
 	toolbar.help_btn.pressed.connect(_show_help)
 	toolbar.backlinks_btn.pressed.connect(_toggle_backlinks)
 	toolbar.graph_btn.pressed.connect(_toggle_graph)
-	%VaultBtn.pressed.connect(_on_open_vault)
-	%SyncBtn.pressed.connect(_on_sync)
 	slash_menu.name = "SlashMenu"
 	add_child(slash_menu)
 	slash_menu.build(code_edit, _flush_save)
-
-	# palette selector lives in the sidebar bottom row
-	palette_btn.clear()
-	for palette_name in GameManager.PALETTES.keys():
-		palette_btn.add_item(palette_name)
-	palette_btn.select(maxi(0, GameManager.PALETTES.keys().find(GameManager.palette_name)))
-	palette_btn.item_selected.connect(func(index: int):
-		GameManager.set_palette(palette_btn.get_item_text(index)))
 
 	# export menu (data-driven)
 	var menu: PopupMenu = toolbar.export_btn.get_popup()
@@ -380,427 +358,6 @@ func _show_selection_menu() -> void:
 	var caret: Vector2 = code_edit.get_global_position() + code_edit.get_caret_draw_pos()
 	menu.popup(Rect2i(Vector2i(caret + Vector2(0, 8)), Vector2i.ZERO))
 
-# ------------------------------------------------- safe area / vault tree
-
-## Active tag filter ("" = show all). Set by the tag chips above the tree.
-var active_tag := ""
-
-func _note_visible(n: String) -> bool:
-	return active_tag == "" or GameManager.tags.get(n, []).has(active_tag)
-
-func _visible_notes() -> Array[String]:
-	var out: Array[String] = []
-	for n in GameManager.notes:
-		if _note_visible(n):
-			out.append(n)
-	return out
-
-## Row of tag chips above the tree: click to filter, click again to clear.
-func _build_tag_bar() -> void:
-	var bar := side_tree.get_parent().get_node_or_null("TagBar") as HFlowContainer
-	if bar == null:
-		bar = HFlowContainer.new()
-		bar.name = "TagBar"
-		var vbox := side_tree.get_parent()
-		vbox.add_child(bar)
-		vbox.move_child(bar, side_tree.get_index())
-	var all := GameManager.all_tags()
-	bar.visible = all.size() > 0
-	for c in bar.get_children():
-		c.queue_free()
-	for tag in all:
-		var b := Button.new()
-		b.text = ("● " if tag == active_tag else "#") + tag
-		b.toggle_mode = false
-		b.pressed.connect(func():
-			active_tag = "" if active_tag == tag else tag
-			_refresh_list())
-		bar.add_child(b)
-	if all.size() > 0:
-		var clear := Button.new()
-		clear.text = "✕"
-		clear.visible = active_tag != ""
-		clear.pressed.connect(func():
-			active_tag = ""
-			_refresh_list())
-		bar.add_child(clear)
-
-func _refresh_list() -> void:
-	side_tree.clear()
-	side_tree.hide_root = false
-	_build_tag_bar()
-	# drag notes/folders between folders + reorder rows (persisted in .neonnotes.json)
-	side_tree.set_drop_mode_flags(Tree.DROP_MODE_ON_ITEM | Tree.DROP_MODE_INBETWEEN)
-	# set_drag_forwarding() is persistent; re-registering it after every refresh
-	# can invalidate the active drag on Android.
-	if not _tree_drag_forwarding_set:
-		side_tree.set_drag_forwarding(_tree_get_drag, _tree_can_drop, _tree_drop)
-		_tree_drag_forwarding_set = true
-	var root := side_tree.create_item()
-	root.set_text(0, "Vault")
-	root.set_metadata(0, "")
-	root.disable_folding = true
-	root.collapsed = false
-	root.set_selectable(0, false)
-	# build folder hierarchy from relative paths
-	var folders := {}
-	# pass 1: folders first, so a note + folder sharing a name merge into one
-	# node (e.g. "medic.md" + "medic/" -> one row that opens the note)
-	for n in _visible_notes():
-		var parts := n.split("/")
-		var parent: TreeItem = root
-		var path := ""
-		for i in parts.size() - 1:
-			path = (path + "/" if path != "" else "") + parts[i]
-			if not folders.has(path):
-				var it := side_tree.create_item(parent)
-				var companion: String = path + ".md"
-				if GameManager.notes.has(companion):
-					var ft: String = GameManager.titles.get(companion, "")
-					if ft == "":
-						ft = parts[i]
-					it.set_text(0, "◈ " + ft)
-					it.set_tooltip_text(0, parts[i])
-					it.set_metadata(0, companion)  # clicking opens the note
-				else:
-					it.set_text(0, "▸ " + parts[i])
-					it.set_tooltip_text(0, parts[i])
-					it.set_metadata(0, path)  # plain folder
-				it.set_selectable(0, true)
-				folders[path] = it
-			parent = folders[path]
-	# pass 2: note leaves in custom order (skipping those merged into folder rows)
-	for dir in folders.keys():
-		for n in _ordered_notes(dir):
-			var parent: TreeItem = folders[dir]
-			if n == dir + ".md":
-				continue  # already represented by the merged folder row
-			var folder_abs := GameManager.vault_abs().path_join(n.trim_suffix(".md"))
-			if DirAccess.dir_exists_absolute(folder_abs):
-				continue  # already represented by a subfolder row
-			_add_note_leaf(parent, n)
-	for n in _ordered_notes(""):
-		if not n.contains("/"):
-			# A companion note such as `help.md` is represented by the merged
-			# `help/` folder row above; never show it a second time at root.
-			var folder_abs := GameManager.vault_abs().path_join(n.trim_suffix(".md"))
-			if DirAccess.dir_exists_absolute(folder_abs):
-				continue
-			_add_note_leaf(root, n)
-func _add_note_leaf(parent: TreeItem, n: String) -> void:
-	var base := n.get_file().trim_suffix(".md")
-	var label: String = GameManager.titles.get(n, base)
-	if label == "":
-		label = base
-	var leaf := side_tree.create_item(parent)
-	leaf.set_text(0, "◈ " + label)
-	leaf.set_tooltip_text(0, base)
-	leaf.set_metadata(0, n)
-
-## Notes inside `dir`, custom order first, then alphabetical.
-func _ordered_notes(dir: String) -> Array[String]:
-	var lst: Array[String] = []
-	for n in GameManager.notes:
-		if n.get_base_dir() == dir and _note_visible(n):
-			lst.append(n)
-	var want: Array = GameManager.order.get(dir, [])
-	lst.sort_custom(func(a: String, b: String) -> bool:
-		var ia := want.find(a)
-		var ib := want.find(b)
-		if ia == -1 and ib == -1:
-			return a < b
-		if ia == -1:
-			return false
-		if ib == -1:
-			return true
-		return ia < ib)
-	return lst
-
-# ---------------------------------------------- tree drag & drop (v3)
-
-func _tree_get_drag(at_position: Vector2) -> Variant:
-	var it := side_tree.get_item_at_position(at_position)
-	if it == null or it == side_tree.get_root() or it.get_metadata(0) == null:
-		return null
-	var meta := str(it.get_metadata(0))
-	if meta == "":
-		return null
-	# merged folder+note row: drag the FOLDER (companion note travels with it)
-	if meta.ends_with(".md") and DirAccess.dir_exists_absolute(GameManager.vault_abs().path_join(meta.trim_suffix(".md"))):
-		meta = meta.trim_suffix(".md")
-	_drag_just_happened = true
-	return {"type": "neonnotes_move", "path": meta, "label": it.get_text(0)}
-
-## True between a tree drag and its release — lets the release handler select
-## the note (otherwise a drag gesture swallows the click).
-var _drag_just_happened := false
-## Right-click menu for vault tree rows (Delete).
-var _tree_menu := PopupMenu.new()
-var _tree_drag_forwarding_set := false
-
-func _tree_can_drop(at_position: Vector2, data: Variant) -> bool:
-	var ok: bool = typeof(data) == TYPE_DICTIONARY and data.get("type", "") == "neonnotes_move"
-	if ok:
-		var target := side_tree.get_item_at_position(at_position)
-		var section := side_tree.get_drop_section_at_position(at_position)
-		_mark_drop_hint(target, section)
-	else:
-		_clear_drop_hint()
-	return ok
-
-## Android has no native drop highlight — tint the hovered row and show the
-## exact target operation in the status bar.
-var _drop_hint: TreeItem
-var _drop_section := 0
-
-func _mark_drop_hint(it: TreeItem, section: int = 0) -> void:
-	if _drop_hint == it and _drop_section == section:
-		return
-	if _drop_hint != null:
-		_drop_hint.set_custom_bg_color(0, Color(0, 0, 0, 0))
-	_drop_hint = it
-	_drop_section = section
-	if it == null:
-		status_bar.flash("Ready")
-		return
-	var c := GameManager.color("accent")
-	# inside = solid bright row; above/below = thinner directional tint
-	var alpha := 0.48 if section == 0 else 0.20
-	it.set_custom_bg_color(0, Color(c.r, c.g, c.b, alpha))
-	var target := str(it.get_metadata(0)).trim_suffix(".md")
-	if target == "":
-		target = "Vault"
-	if section == 0:
-		status_bar.flash("MOVE INTO › " + target)
-	elif section < 0:
-		status_bar.flash("PLACE ABOVE › " + target)
-	else:
-		status_bar.flash("PLACE BELOW › " + target)
-
-func _clear_drop_hint() -> void:
-	_mark_drop_hint(null, 0)
-	_drag_just_happened = false
-	_drop_section = 0
-
-func _notification(what: int) -> void:
-	if what == NOTIFICATION_WM_CLOSE_REQUEST:
-		_flush_save()
-	elif what == NOTIFICATION_DRAG_END:
-		_clear_drop_hint()
-
-func _tree_drop(at_position: Vector2, data: Variant) -> void:
-	var src := str(data.get("path", ""))
-	if src == "":
-		_clear_drop_hint()
-		return
-	var it := side_tree.get_item_at_position(at_position)
-	var section := side_tree.get_drop_section_at_position(at_position)
-	# target folder: the parent folder of the row under the cursor
-	var target_dir := ""
-	if it != null and it.get_metadata(0) != null:
-		var meta := str(it.get_metadata(0))
-		var is_folder_row := not meta.ends_with(".md")
-		# merged folder+note row: metadata is the .md but the folder exists
-		if not is_folder_row and DirAccess.dir_exists_absolute(GameManager.vault_abs().path_join(meta.trim_suffix(".md"))):
-			is_folder_row = true
-			meta = meta.trim_suffix(".md")
-		if section == 0:
-			if is_folder_row:
-				target_dir = meta  # drop "on" a folder → into it
-			else:
-				# Dropping onto a standalone note turns it into a container.
-				# The note becomes `name/` + `name.md` automatically.
-				target_dir = meta.trim_suffix(".md")
-		else:
-			target_dir = meta.get_base_dir() if meta.contains("/") else ""
-	_flush_save()
-	var new_rel := _move_path(src, target_dir)
-	_clear_drop_hint()
-	if new_rel == "":
-		_flash("✗ Move failed")
-		return
-	# reorder within the same folder when dropped between rows
-	if section != 0 and it != null and it.get_metadata(0) != null:
-		var dst_meta := str(it.get_metadata(0))
-		var dst_dir := dst_meta.get_base_dir() if dst_meta.contains("/") else ""
-		if dst_dir == (new_rel.get_base_dir() if new_rel.contains("/") else ""):
-			_apply_order(new_rel, dst_dir, dst_meta, section < 0)
-	_prune_empty_dirs()
-	GameManager.scan_notes()
-	_refresh_list()
-	# reopen if the open note was the one moved/renamed
-	if GameManager.current_rel == "" and new_rel.ends_with(".md"):
-		_select_note(new_rel)
-	_flash("Moved → " + new_rel)
-
-## Remove now-empty folders (bottom-up) so restructuring leaves no leftovers.
-func _prune_empty_dirs() -> void:
-	var changed := true
-	while changed:
-		changed = false
-		for d in _all_dirs(""):
-			var abs := GameManager.vault_abs().path_join(d)
-			if DirAccess.get_directories_at(abs).is_empty() and DirAccess.get_files_at(abs).is_empty():
-				if DirAccess.remove_absolute(abs) == OK:
-					changed = true
-
-## Recursively delete a vault directory (smoke-test fixture reset).
-func _rm_dir(rel: String) -> void:
-	var abs := GameManager.vault_abs().path_join(rel)
-	if not DirAccess.dir_exists_absolute(abs):
-		return
-	for f in DirAccess.get_files_at(abs):
-		DirAccess.remove_absolute(abs.path_join(f))
-	for d in DirAccess.get_directories_at(abs):
-		_rm_dir(rel + "/" + d)
-		DirAccess.remove_absolute(abs.path_join(d))
-	DirAccess.remove_absolute(abs)
-
-func _all_dirs(rel: String) -> Array[String]:
-	var out: Array[String] = []
-	var d := DirAccess.open(GameManager.vault_abs() + ("/" + rel if rel != "" else ""))
-	if d == null:
-		return out
-	for f in d.get_directories():
-		if f.begins_with("."):
-			continue
-		var child := rel + ("/" if rel != "" else "") + f
-		out.append(child)
-		out.append_array(_all_dirs(child))
-	return out
-
-## Insert `rel` into the folder's order list next to `neighbor`.
-func _apply_order(rel: String, dir: String, neighbor: String, before: bool) -> void:
-	var lst: Array = GameManager.order.get(dir, [])
-	# seed with current visual order
-	if lst.is_empty():
-		lst = _ordered_notes(dir)
-	lst.erase(rel)
-	var idx := lst.find(neighbor)
-	if idx == -1:
-		lst.append(rel)
-	else:
-		lst.insert(idx if before else idx + 1, rel)
-	GameManager.order[dir] = lst
-	GameManager.save_order()
-
-## Move a note or folder (vault-relative) into `dst_dir` ("" = vault root).
-## Auto-renames on collision. Returns the new relative path ("" on failure).
-func _move_path(src_rel: String, dst_dir: String) -> String:
-	var vault := GameManager.vault_abs()
-	var src := vault.path_join(src_rel)
-	if not FileAccess.file_exists(src) and not DirAccess.dir_exists_absolute(src):
-		return ""
-	# never drop a folder into itself or one of its children
-	if not src_rel.ends_with(".md") and (dst_dir == src_rel or dst_dir.begins_with(src_rel + "/")):
-		return ""
-	var dst := vault if dst_dir == "" else vault.path_join(dst_dir)
-	DirAccess.make_dir_recursive_absolute(dst)
-	var base := src_rel.get_file()
-	var target := dst.path_join(base)
-	if FileAccess.file_exists(target) or DirAccess.dir_exists_absolute(target):
-		var stem := base.trim_suffix(".md")
-		var ext := ".md" if base.ends_with(".md") else ""
-		var i := 2
-		while FileAccess.file_exists(dst.path_join("%s-%d%s" % [stem, i, ext])) \
-				or DirAccess.dir_exists_absolute(dst.path_join("%s-%d" % [stem, i])):
-			i += 1
-		target = dst.path_join("%s-%d%s" % [stem, i, ext])
-	if DirAccess.rename_absolute(src, target) != OK:
-		return ""
-	var new_rel := target.trim_prefix(vault + "/")
-	if src_rel.ends_with(".md"):
-		_rewrite_links(src_rel, new_rel)
-	else:
-		# moving a FOLDER: take its companion note along and rewrite every
-		# [[old/sub/note]] link that pointed inside it
-		var companion := src_rel + ".md"
-		# companion follows the final folder name, including collision suffixes
-		var comp_target := target.get_base_dir().path_join(target.get_file() + ".md")
-		if FileAccess.file_exists(vault.path_join(companion)) and not FileAccess.file_exists(comp_target):
-			DirAccess.rename_absolute(vault.path_join(companion), comp_target)
-		_rewrite_folder_links(src_rel, new_rel)
-	# keep the open note consistent if it was the one moved
-	if GameManager.current_rel == src_rel:
-		GameManager.current_file = target
-		GameManager.current_rel = new_rel
-	return new_rel
-
-## Update [[wiki-links]] across the vault after a move/rename.
-func _rewrite_links(old_rel: String, new_rel: String) -> void:
-	var old_noext := old_rel.trim_suffix(".md")
-	var new_noext := new_rel.trim_suffix(".md")
-	var targets := [[old_noext, new_noext]]
-	var old_base := old_noext.get_file()
-	var new_base := new_noext.get_file()
-	if old_base != new_base:
-		targets.append([old_base, new_base])
-	for n in GameManager.notes:
-		var path := GameManager.vault_abs().path_join(n)
-		var f := FileAccess.open(path, FileAccess.READ)
-		if f == null:
-			continue
-		var t := f.get_as_text()
-		f.close()
-		var orig := t
-		for pair in targets:
-			var re := RegEx.create_from_string("(?i)\\[\\[" + _re_escape(str(pair[0])) + "(\\]\\]|\\|)")
-			t = re.sub(t, "[[" + str(pair[1]) + "$1", true)
-		if t != orig:
-			GameManager.write_note(n, t)
-
-## Update [[wiki-links]] across the vault after a move/rename.
-func _rewrite_folder_links(old_dir: String, new_dir: String) -> void:
-	GameManager.scan_notes()  # refresh paths — children just moved on disk
-	for n in GameManager.notes:
-		var path := GameManager.vault_abs().path_join(n)
-		var f := FileAccess.open(path, FileAccess.READ)
-		if f == null:
-			continue
-		var t := f.get_as_text()
-		f.close()
-		var orig := t
-		var re := RegEx.create_from_string("(?i)\\[\\[" + _re_escape(old_dir) + "/")
-		t = re.sub(t, "[[" + new_dir + "/", true)
-		if t != orig:
-			GameManager.write_note(n, t)
-
-## Escape regex metacharacters (Godot has no String.regex_escape).
-func _re_escape(s: String) -> String:
-	var out := ""
-	for ch in s:
-		if "\\.^$|?*+()[]{}".contains(ch):
-			out += "\\" + ch
-		else:
-			out += ch
-	return out
-
-func _on_tree_selected() -> void:
-	var it := side_tree.get_selected()
-	if it == null:
-		return
-	var meta: Variant = it.get_metadata(0)
-	if meta == null:
-		return
-	var fname := str(meta)
-	# A merged folder+note row (e.g. "medic.md" + "medic/") opens the note.
-	# Clicking a plain folder row only expands/collapses it.
-	if str(meta).ends_with(".md") and GameManager.notes.has(fname):
-		_on_note_selected(fname)
-
-func _select_note(fname: String) -> void:
-	# find matching leaf in the tree
-	var stack: Array[TreeItem] = [side_tree.get_root()]
-	while not stack.is_empty():
-		var it: TreeItem = stack.pop_back()
-		if it.get_metadata(0) == fname:
-			side_tree.scroll_to_item(it, false)
-			it.select(0)
-			_on_tree_selected()
-			return
-		for c in it.get_children():
-			stack.append(c)
-
 # ------------------------------------------------- autosave
 
 func _on_text_changed() -> void:
@@ -846,7 +403,7 @@ func _on_note_selected(fname: String) -> void:
 	_set_mode()
 	if layout_component.is_mobile_layout and layout_component.drawer_open:
 		layout_component.toggle_sidebar()
-	if backlinks_panel.visible:
+	if vault_tree.backlinks_panel.visible:
 		_refresh_backlinks()
 	status_bar.flash("Opened " + fname)
 
@@ -861,7 +418,7 @@ func _create_note() -> void:
 	var fname := (name if name.ends_with(".md") else name + ".md")
 	# place the new note as a sibling of the currently selected note / inside
 	# the selected folder in the vault
-	var sel := side_tree.get_selected()
+	var sel := vault_tree.selected_item()
 	if sel != null and sel.get_metadata(0) != null:
 		var sel_path := str(sel.get_metadata(0))
 		if sel_path.ends_with(".md"):
@@ -873,7 +430,7 @@ func _create_note() -> void:
 		GameManager.write_note(fname, NOTE_TEMPLATE % [fname.get_file().trim_suffix(".md"), fname.get_file().trim_suffix(".md")])
 	GameManager.scan_notes()
 	_refresh_list()
-	_select_note(fname)
+	vault_tree.select_note(fname)
 
 ## Delete the current open note after confirmation.
 func _delete_current_note() -> void:
@@ -886,47 +443,25 @@ func _delete_current_note() -> void:
 
 ## Delete the note/folder row currently selected in the vault tree.
 func _delete_selected_node() -> void:
-	var it := side_tree.get_selected()
+	var it := vault_tree.selected_item()
 	if it == null or it.get_metadata(0) == null:
 		_flash("Select a note or folder in the tree first")
 		return
-	var rel := _tree_node_rel(it)
+	var rel := vault_tree.node_rel(it)
 	if rel == "":
 		return
 	delete_node(rel)
 
-## Resolve a tree row's path: a merged folder+note row (`x.md` metadata while
-## folder `x` exists) counts as the FOLDER `x`.
-func _tree_node_rel(it: TreeItem) -> String:
-	var meta_v = it.get_metadata(0)
-	if meta_v == null:
-		return ""
-	var meta := str(meta_v)
-	if meta.ends_with(".md") and DirAccess.dir_exists_absolute(GameManager.vault_abs().path_join(meta.trim_suffix(".md"))):
-		return meta.trim_suffix(".md")
-	return meta
-
 ## Determine if a path (folder or companion note) has child items in the vault.
 func _has_children(rel: String) -> bool:
-	var vault := GameManager.vault_abs()
-	var folder_rel := rel.trim_suffix(".md") if rel.ends_with(".md") else rel
-	var abs_folder := vault.path_join(folder_rel)
-	if not DirAccess.dir_exists_absolute(abs_folder):
-		return false
-	for d in DirAccess.get_directories_at(abs_folder):
-		if not d.begins_with("."):
-			return true
-	for f in DirAccess.get_files_at(abs_folder):
-		if not f.begins_with("."):
-			return true
-	return false
+	return vault_tree.has_children(rel)
 
 ## Unified node/note/folder deletion. Automatically decides confirmation type based on tree structure.
 func delete_node(rel: String = "", keep_children: bool = false, confirm: bool = true) -> void:
 	if rel == "":
-		var it := side_tree.get_selected()
+		var it := vault_tree.selected_item()
 		if it != null and it.get_metadata(0) != null:
-			rel = _tree_node_rel(it)
+			rel = vault_tree.node_rel(it)
 		elif GameManager.current_rel != "" and not help_mode:
 			rel = GameManager.current_rel
 	if rel == "" or help_mode:
@@ -937,7 +472,7 @@ func delete_node(rel: String = "", keep_children: bool = false, confirm: bool = 
 		_perform_delete(rel, keep_children)
 		return
 
-	if _has_children(rel):
+	if vault_tree.has_children(rel):
 		_confirm_delete_parent(rel)
 	else:
 		_confirm_delete_leaf(rel)
@@ -988,13 +523,13 @@ func _perform_delete(rel: String, keep_children: bool = false) -> void:
 				if d.begins_with("."):
 					continue
 				var old_rel := folder_rel + "/" + d
-				if _move_path(old_rel, parent_dir) != "":
+				if vault_tree.move_path(old_rel, parent_dir) != "":
 					moved.append(old_rel)
 			for f in DirAccess.get_files_at(abs_folder):
 				if not f.ends_with(".md"):
 					continue
 				var old_rel := folder_rel + "/" + f
-				if _move_path(old_rel, parent_dir) != "":
+				if vault_tree.move_path(old_rel, parent_dir) != "":
 					moved.append(old_rel)
 			DirAccess.remove_absolute(abs_folder)
 
@@ -1008,11 +543,11 @@ func _perform_delete(rel: String, keep_children: bool = false) -> void:
 				code_edit.text = ""
 
 		_scrub_order(moved)
-		_prune_empty_dirs()
+		vault_tree.prune_empty_dirs()
 		GameManager.scan_notes()
 		_refresh_list()
 		if GameManager.current_rel != "":
-			_select_note(GameManager.current_rel)
+			vault_tree.select_note(GameManager.current_rel)
 		_flash("Deleted %s — children moved to %s" % [folder_rel.get_file(), parent_dir if parent_dir != "" else "vault root"])
 		return
 
@@ -1049,20 +584,20 @@ func _perform_delete(rel: String, keep_children: bool = false) -> void:
 	for n in affected:
 		_erase_note_meta(n)
 	_scrub_order(affected)
-	_prune_empty_dirs()
+	vault_tree.prune_empty_dirs()
 	GameManager.scan_notes()
 	_refresh_list()
 
 	if deleted_current:
 		var dir := deleted_note.get_base_dir() if deleted_note.contains("/") else ""
-		var candidates := _ordered_notes(dir)
+		var candidates := vault_tree.ordered_notes(dir)
 		if candidates.is_empty():
 			for d in GameManager.order.keys():
-				candidates = _ordered_notes(str(d))
+				candidates = vault_tree.ordered_notes(str(d))
 				if not candidates.is_empty():
 					break
 		if candidates.is_empty():
-			candidates = _visible_notes()
+			candidates = vault_tree.visible_notes()
 		var next_note := ""
 		for n in candidates:
 			if not affected.has(n):
@@ -1070,7 +605,7 @@ func _perform_delete(rel: String, keep_children: bool = false) -> void:
 				if n > deleted_note:
 					break
 		if next_note != "" and GameManager.notes.has(next_note):
-			_select_note(next_note)
+			vault_tree.select_note(next_note)
 
 	_flash("🗑 Deleted " + rel)
 
@@ -1138,7 +673,7 @@ func _open_wikilink(target: String) -> void:
 	if fname == "":
 		status_bar.flash("✗ Note not found: " + target)
 		return
-	_select_note(fname)
+	vault_tree.select_note(fname)
 
 # ------------------------------------------------- image embeds (v3)
 
@@ -1183,7 +718,7 @@ func _on_image_selected(path: String) -> void:
 	if _image_target_src == "":
 		re = RegEx.create_from_string("!\\[[^\\]]*\\]\\(\\s*\\)")
 	else:
-		re = RegEx.create_from_string("!\\[[^\\]]*\\]\\(\\s*" + _re_escape(_image_target_src) + "\\s*\\)")
+		re = RegEx.create_from_string("!\\[[^\\]]*\\]\\(\\s*" + vault_tree._re_escape(_image_target_src) + "\\s*\\)")
 	var m := re.search(t)
 	if m:
 		code_edit.text = t.substr(0, m.get_start()) + "![](" + rel + ")" + t.substr(m.get_end())
@@ -1198,17 +733,17 @@ func _on_image_selected(path: String) -> void:
 	_flash("🖼 " + rel)
 
 func _toggle_backlinks() -> void:
-	backlinks_panel.visible = not backlinks_panel.visible
-	if backlinks_panel.visible:
+	vault_tree.backlinks_panel.visible = not vault_tree.backlinks_panel.visible
+	if vault_tree.backlinks_panel.visible:
 		_refresh_backlinks()
 
 func _refresh_backlinks() -> void:
-	for c in backlinks_box.get_children():
+	for c in vault_tree.backlinks_box.get_children():
 		c.queue_free()
 	var title := Label.new()
 	title.name = "BacklinksTitle"
 	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	backlinks_box.add_child(title)
+	vault_tree.backlinks_box.add_child(title)
 	if GameManager.current_file == "":
 		title.text = "Open a note to see backlinks"
 		return
@@ -1222,8 +757,8 @@ func _refresh_backlinks() -> void:
 		var b := Button.new()
 		b.name = "Back_" + f.validate_filename()
 		b.text = "◈ " + f.trim_suffix(".md")
-		b.pressed.connect(_select_note.bind(f))
-		backlinks_box.add_child(b)
+		b.pressed.connect(vault_tree.select_note.bind(f))
+		vault_tree.backlinks_box.add_child(b)
 
 func _toggle_graph() -> void:
 	if graph_view.visible:
@@ -1270,6 +805,20 @@ func _export_dest(ext: String) -> String:
 	DirAccess.make_dir_recursive_absolute(d)
 	return d + "/" + GameManager.current_rel.get_file().trim_suffix(".md") + "." + ext
 
+## Recursively delete a vault directory (smoke-test fixture reset).
+## Recursively delete a vault directory (smoke-test fixture reset).
+func _rm_dir(rel: String) -> void:
+	var abs := GameManager.vault_abs().path_join(rel)
+	if not DirAccess.dir_exists_absolute(abs):
+		return
+	for f in DirAccess.get_files_at(abs):
+		DirAccess.remove_absolute(abs.path_join(f))
+	for d in DirAccess.get_directories_at(abs):
+		_rm_dir(rel + "/" + d)
+		DirAccess.remove_absolute(abs.path_join(d))
+	DirAccess.remove_absolute(abs)
+
+
 # ------------------------------------------------------------ smoke test
 
 func _run_smoke() -> void:
@@ -1285,10 +834,10 @@ func _run_smoke() -> void:
 	GameManager.write_note("sub/demo.md", "---\ntitle: \"Sub\"\n---\n\nhi\n")
 	GameManager.scan_notes()
 	_refresh_list()
-	fails += _check(side_tree.get_root() != null, "tree populated")
-	fails += _check(side_tree.hide_root == false, "tree shows root")
-	fails += _check(side_tree.get_root().get_text(0) == "Vault", "root labeled Vault")
-	fails += _check(side_tree.get_root().disable_folding == true, "root folding disabled")
+	fails += _check(vault_tree.side_tree.get_root() != null, "tree populated")
+	fails += _check(vault_tree.side_tree.hide_root == false, "tree shows root")
+	fails += _check(vault_tree.side_tree.get_root().get_text(0) == "Vault", "root labeled Vault")
+	fails += _check(vault_tree.side_tree.get_root().disable_folding == true, "root folding disabled")
 	fails += _check(GameManager.notes.has("sub/demo.md"), "recursive scan finds sub/demo.md")
 	GameManager.scan_notes()
 	fails += _check(GameManager.notes.has("sub.md"), "folder without companion note gets one auto-created")
@@ -1300,19 +849,19 @@ func _run_smoke() -> void:
 	GameManager.write_note("dnd/Other/keep.md", "---\ntitle: \"keep\"\n---\n\nx\n")
 	GameManager.scan_notes()
 	_refresh_list()
-	var moved: String = _move_path("dnd/drag_a.md", "dnd/Help")
-	_prune_empty_dirs()
+	var moved: String = vault_tree.move_path("dnd/drag_a.md", "dnd/Help")
+	vault_tree.prune_empty_dirs()
 	GameManager.scan_notes()
 	_refresh_list()
 	fails += _check(moved == "dnd/Help/drag_a.md" and GameManager.notes.has("dnd/Help/drag_a.md"), "note moved into folder")
 	fails += _check(GameManager.read_note("dnd/Help/blue.md").contains("[[dnd/Help/drag_a]]"), "links rewritten after move")
 	# nested multi-drag: move child into blue note inside Help (creating dnd/Help/blue/child.md)
-	var moved_nested: String = _move_path("dnd/Help/child.md", "dnd/Help/blue")
-	_prune_empty_dirs()
+	var moved_nested: String = vault_tree.move_path("dnd/Help/child.md", "dnd/Help/blue")
+	vault_tree.prune_empty_dirs()
 	GameManager.scan_notes()
 	_refresh_list()
 	fails += _check(moved_nested == "dnd/Help/blue/child.md" and GameManager.notes.has("dnd/Help/blue/child.md"), "nested multi-drag parent/child move")
-	var moved2: String = _move_path("dnd/Help", "dnd/Other")  # drop folder INTO Other/
+	var moved2: String = vault_tree.move_path("dnd/Help", "dnd/Other")  # drop folder INTO Other/
 	GameManager.scan_notes()
 	_refresh_list()
 	fails += _check(GameManager.notes.has("dnd/Other/Help/blue.md") and GameManager.notes.has("dnd/Other/Help.md"), "folder moved with children + companion")

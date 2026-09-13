@@ -6,6 +6,7 @@
 [ext_resource type="Script" uid="uid://54xformjxgfq" path="res://scripts/render/graph_view.gd" id="4_graph"]
 [ext_resource type="PackedScene" path="res://scenes/components/toolbar.tscn" id="5_toolbar"]
 [ext_resource type="PackedScene" path="res://scenes/components/status_bar.tscn" id="6_status"]
+[ext_resource type="PackedScene" path="res://scenes/components/side_panel.tscn" id="7_side"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMat_crt"]
 shader = ExtResource("3_crt")
@@ -66,60 +67,10 @@ layout_mode = 2
 split_offsets = PackedInt32Array(230)
 split_offset = 230
 
-[node name="SidePanel" type="PanelContainer" parent="Root/WorkspaceMargin/Workspace" unique_id=2062134626]
+[node name="SidePanel" parent="Root/WorkspaceMargin/Workspace" instance=ExtResource("7_side")]
 unique_name_in_owner = true
+
 custom_minimum_size = Vector2(220, 0)
-layout_mode = 2
-
-[node name="SideVBox" type="VBoxContainer" parent="Root/WorkspaceMargin/Workspace/SidePanel" unique_id=1683968186]
-layout_mode = 2
-theme_override_constants/separation = 8
-
-[node name="TreeDeleteBar" type="HBoxContainer" parent="Root/WorkspaceMargin/Workspace/SidePanel/SideVBox" unique_id=1322859554]
-layout_mode = 2
-alignment = 2
-
-[node name="TreeDeleteBtn" type="Button" parent="Root/WorkspaceMargin/Workspace/SidePanel/SideVBox/TreeDeleteBar" unique_id=1330940517]
-unique_name_in_owner = true
-layout_mode = 2
-tooltip_text = "Delete the selected note or folder in the tree"
-text = "🗑 Delete Node"
-
-[node name="SideTree" type="Tree" parent="Root/WorkspaceMargin/Workspace/SidePanel/SideVBox" unique_id=1553072570]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_vertical = 3
-
-[node name="BacklinksPanel" type="PanelContainer" parent="Root/WorkspaceMargin/Workspace/SidePanel/SideVBox" unique_id=160805282]
-unique_name_in_owner = true
-visible = false
-layout_mode = 2
-
-[node name="BacklinksBox" type="VBoxContainer" parent="Root/WorkspaceMargin/Workspace/SidePanel/SideVBox/BacklinksPanel" unique_id=493428536]
-unique_name_in_owner = true
-layout_mode = 2
-theme_override_constants/separation = 4
-
-[node name="SideBottom" type="HBoxContainer" parent="Root/WorkspaceMargin/Workspace/SidePanel/SideVBox" unique_id=1801830491]
-unique_name_in_owner = true
-layout_mode = 2
-
-[node name="PaletteBtn" type="OptionButton" parent="Root/WorkspaceMargin/Workspace/SidePanel/SideVBox/SideBottom" unique_id=2033471314]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="VaultBtn" type="Button" parent="Root/WorkspaceMargin/Workspace/SidePanel/SideVBox/SideBottom" unique_id=469971492]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_horizontal = 3
-text = "📂 Vault"
-
-[node name="SyncBtn" type="Button" parent="Root/WorkspaceMargin/Workspace/SidePanel/SideVBox/SideBottom" unique_id=1451978887]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_horizontal = 3
-text = "⇄ Sync"
 
 [node name="Content" type="PanelContainer" parent="Root/WorkspaceMargin/Workspace" unique_id=198102758]
 unique_name_in_owner = true
