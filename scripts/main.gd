@@ -84,6 +84,14 @@ var autosave_timer := Timer.new()
 var sync_service: SyncService
 var help_folder := "Help"  # sidebar folder items get this metadata
 
+# ---- editor drag gesture: plain drag scrolls, long-press-then-drag selects
+var _long_press_timer := Timer.new()
+var _drag_active := false
+var _drag_start_pos := Vector2.ZERO
+var _drag_is_scroll := false
+var _drag_is_select := false
+const DRAG_SCROLL_THRESHOLD := 12.0
+
 func _ready() -> void:
 	_build_dynamic_ui()
 	_apply_theme()
@@ -151,12 +159,27 @@ func _build_dynamic_ui() -> void:
 	code_edit.visible = false
 	# word wrap always — no horizontal scrolling in edit mode
 	code_edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
-	code_edit.scroll_fit_content_height = true
+	# NOT scroll_fit_content_height: that grows CodeEdit's min size with the
+	# note's content, which blows out Root's VBoxContainer on long notes and
+	# pushes the header/toolbar off-screen. It must stay confined to its
+	# container and scroll internally instead.
 	# slightly wider vertical scrollbar for comfortable dragging
 	code_edit.get_v_scroll_bar().custom_minimum_size = Vector2(14, 0)
-	# native cut/copy/paste/select-all context menu on right-click / long-press
+	# native context menu, trimmed to just Cut/Copy/Paste (drop Select
+	# All/Undo/Redo/direction submenus); still used as-is for desktop
+	# right-click. Touch uses _on_code_edit_gui_input's own popup instead.
 	code_edit.context_menu_enabled = true
+	var edit_menu := code_edit.get_menu()
+	for i in range(edit_menu.item_count - 1, -1, -1):
+		if edit_menu.get_item_id(i) > TextEdit.MENU_PASTE:
+			edit_menu.remove_item(i)
 	code_edit.text_changed.connect(_on_text_changed)
+	code_edit.gui_input.connect(_on_code_edit_gui_input)
+	_long_press_timer.name = "LongPressTimer"
+	_long_press_timer.one_shot = true
+	_long_press_timer.wait_time = 0.35
+	_long_press_timer.timeout.connect(_on_code_edit_long_press)
+	add_child(_long_press_timer)
 	content_panel.add_child(code_edit)
 
 	# autosave: immediate — every keystroke/paste persists (no debounce);
@@ -301,16 +324,72 @@ func _apply_theme() -> void:
 	}
 	code_edit.syntax_highlighter = hl
 
+# ------------------------------------------------------------ editor drag gesture
+
+## A single touch/mouse drag on the editor is ambiguous between "scroll the
+## text" and "select text", so we disambiguate by hold time: a plain drag
+## scrolls (mirrors normal touch-scrolling apps); pressing and holding first,
+## then dragging, selects instead. Motion is swallowed (via
+## set_input_as_handled) while we're deciding and while scrolling, so
+## CodeEdit's own default click-and-drag-to-select never engages for a plain
+## drag. Once a long-press is confirmed we stop swallowing so CodeEdit's
+## normal selection-drag takes back over from the still-held pointer.
+func _on_code_edit_gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			_drag_active = true
+			_drag_start_pos = event.position
+			_drag_is_scroll = false
+			_drag_is_select = false
+			_long_press_timer.start()
+			# initial press is left unhandled so CodeEdit places the caret normally
+		else:
+			_long_press_timer.stop()
+			if _drag_is_scroll:
+				get_viewport().set_input_as_handled()
+			elif _drag_is_select and code_edit.has_selection():
+				_show_selection_menu()
+			_drag_active = false
+			_drag_is_scroll = false
+			_drag_is_select = false
+	elif event is InputEventMouseMotion and _drag_active:
+		if not _drag_is_scroll and not _drag_is_select:
+			if event.position.distance_to(_drag_start_pos) > DRAG_SCROLL_THRESHOLD:
+				_drag_is_scroll = true
+		if _drag_is_scroll:
+			code_edit.scroll_vertical -= event.relative.y / float(code_edit.get_line_height())
+			get_viewport().set_input_as_handled()
+		elif not _drag_is_select:
+			# still waiting to see if this becomes a long-press-select; don't
+			# let CodeEdit see the motion yet or it would start selecting
+			get_viewport().set_input_as_handled()
+		# else: long-press confirmed — let the motion through to CodeEdit
+
+func _on_code_edit_long_press() -> void:
+	if _drag_active and not _drag_is_scroll:
+		_drag_is_select = true
+
+## Cut/Copy/Paste popup shown right after a long-press-drag selection ends.
+func _show_selection_menu() -> void:
+	var menu := code_edit.get_menu()
+	var has_sel := code_edit.has_selection()
+	menu.set_item_disabled(menu.get_item_index(TextEdit.MENU_CUT), not has_sel)
+	menu.set_item_disabled(menu.get_item_index(TextEdit.MENU_COPY), not has_sel)
+	menu.set_item_disabled(menu.get_item_index(TextEdit.MENU_PASTE), DisplayServer.clipboard_get() == "")
+	var caret: Vector2 = code_edit.get_global_position() + code_edit.get_caret_draw_pos()
+	menu.popup(Rect2i(Vector2i(caret + Vector2(0, 8)), Vector2i.ZERO))
+
 # ------------------------------------------------------------ responsive
 
 func _update_layout() -> void:
 	var vp := get_viewport_rect().size
-	_apply_safe_area()
 	var mobile := vp.x < 720.0 or vp.y > vp.x
-	# Keep all root controls inside the viewport after rotation/resizing.
-	if mobile == is_mobile_layout:
-		return
+	var layout_changed := mobile != is_mobile_layout
 	is_mobile_layout = mobile
+	_apply_safe_area()
+	# Keep all root controls inside the viewport after rotation/resizing.
+	if not layout_changed:
+		return
 	ChartView.compact = mobile
 	# cramped toolbar? collapse secondary actions into the ⋮ overflow menu
 	# (⋮ itself is ALWAYS visible — it hosts Delete etc. on desktop too)
@@ -361,16 +440,25 @@ func _toggle_sidebar() -> void:
 
 # ------------------------------------------------- safe area (Android cutouts/nav)
 
+## Comfortable breathing room around the workspace on phones; the keyboard/
+## nav-bar inset is added on top of this, never replaces it.
+const MOBILE_MARGIN_SIDE := 10
+const MOBILE_MARGIN_BOTTOM := 10
+
 func _apply_safe_area() -> void:
 	var root_ctl: Control = get_node("Root")
 	var wm: MarginContainer = get_node_or_null("Root/WorkspaceMargin")
+	var side_margin := MOBILE_MARGIN_SIDE if is_mobile_layout else 0
+	var base_bottom := MOBILE_MARGIN_BOTTOM if is_mobile_layout else 0
 	if OS.get_name() != "Android":
 		root_ctl.offset_left = 0
 		root_ctl.offset_top = 0
 		root_ctl.offset_right = 0
 		root_ctl.offset_bottom = 0
 		if wm:
-			wm.add_theme_constant_override("margin_bottom", 0)
+			wm.add_theme_constant_override("margin_left", side_margin)
+			wm.add_theme_constant_override("margin_right", side_margin)
+			wm.add_theme_constant_override("margin_bottom", base_bottom)
 		return
 	var sa := DisplayServer.get_display_safe_area()
 	var win := DisplayServer.window_get_size()
@@ -380,14 +468,22 @@ func _apply_safe_area() -> void:
 	root_ctl.offset_left = sa.position.x * sx
 	root_ctl.offset_top = sa.position.y * sy
 	root_ctl.offset_right = -(win.x - sa.end.x) * sx
-	# shrink for the Android soft keyboard too, so the cursor is never hidden
-	# behind it while typing at the bottom of a long note
-	var kb := DisplayServer.virtual_keyboard_get_height() if OS.get_name() == "Android" else 0
-	var bottom := (win.y - sa.end.y) * sy
-	if kb > 0:
-		bottom = maxf(bottom, kb * sy)
-	root_ctl.offset_bottom = -bottom
+	# Root's own bottom never moves — header/toolbar/status bar stay put.
+	# The soft-keyboard/nav-bar inset only grows WorkspaceMargin's bottom
+	# margin, so just the editing area shrinks and nothing appears to slide.
+	root_ctl.offset_bottom = 0
+	var kb := DisplayServer.virtual_keyboard_get_height()
+	var nav_inset := (win.y - sa.end.y) * sy
+	var bottom_inset := maxf(nav_inset, kb * sy)
+	if wm:
+		wm.add_theme_constant_override("margin_left", side_margin)
+		wm.add_theme_constant_override("margin_right", side_margin)
+		wm.add_theme_constant_override("margin_bottom", base_bottom + bottom_inset)
 	_kb_h = kb
+	# editing area just resized around the keyboard — keep the caret visible
+	# (deferred so it runs after the new margin is actually laid out)
+	if code_edit.visible:
+		code_edit.adjust_viewport_to_caret.call_deferred(0)
 
 
 ## Poll the Android soft keyboard; re-apply insets when it shows/hides so the

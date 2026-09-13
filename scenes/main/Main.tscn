@@ -118,7 +118,6 @@ text = "⋮"
 [node name="MoreMenu" type="PopupMenu" parent="Root/Toolbar/MoreBtn" unique_id=934102136]
 unique_name_in_owner = true
 oversampling_override = 1.0
-visible = true
 
 [node name="WorkspaceMargin" type="MarginContainer" parent="Root" unique_id=1015672353]
 layout_mode = 2
