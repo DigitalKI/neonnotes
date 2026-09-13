@@ -5,7 +5,7 @@
 > updated at the **end**, so context, decisions, and direction survive across
 > conversations. Keep it current — a stale memory file is worse than none.
 
-_Last updated: 2026-09-12 (delete-parent dialog in vault tree) · Godot 4.7 · renderer: gl_compatibility_
+_Last updated: 2026-09-13 (componentization steps 1+2) · Godot 4.7 · renderer: gl_compatibility_
 
 > ⚠️ **Path note:** the saved global memory says `/home/toshiwo/www/neonnotes`
 > but the project actually lives at **`/home/toshiwo/Projects/Godot/neonnotes`**.
@@ -173,6 +173,37 @@ _Chronological, newest last._
   earlier overlay attempt was reverted). `_update_layout` keeps them in sync
   on rotation; desktop unaffected. Also made the smoke screenshot step
   headless-safe (skip when `DisplayServer.get_name() == "headless"`).
+- **2026-09-13 — Componentization steps 1+2 (in progress, incremental)**:
+  Extracted cohesive clusters from the `main.gd` monolith into
+  `scripts/components/` (tab-indented, no new autoloads; components are Node
+  children of Main created in `main.gd` with node refs injected via
+  `setup()`/fields; cross-component communication via injected Callables +
+  signals):
+  - `ThemeComponent` — `_apply_theme` moved here (`apply()`); main keeps the
+    `GameManager.palette_changed` connection (apply + re-render preview).
+  - `LayoutComponent` — `_update_layout`/`_toggle_sidebar`/`_apply_safe_area`/
+    `_process` keyboard polling + mobile/drawer state (`is_mobile_layout`,
+    `drawer_open` live on the component; main reads them, e.g.
+    `_on_note_selected` closes the drawer via `layout_component.…`).
+    NOTE: extends Node → use `get_viewport().get_visible_rect().size`, not
+    `get_viewport_rect()`; it connects `get_viewport().size_changed` itself.
+  - `SlashMenuComponent` — SLASH_ITEMS + slash menu build/check/action;
+    emits `applied` + takes `save_cb` (main passes `_flush_save`); main calls
+    `slash_menu.check()` from `_on_text_changed`.
+  - `ExportComponent` — export/share menu build + `handle_action(id)`;
+    owns no note state — host injects `doc_cb` (`_current_doc`), `dest_cb`
+    (`_export_dest`), `flash_cb` (`_flash`), `get_code` (editor text).
+    The ⋮ overflow menu fallback routes export ids to
+    `export_component.handle_action`.
+  - All 41 smoke/unit checks pass. main.gd: 1672 → 1419 lines.
+  - **Remaining steps** (agreed plan): 3 = VaultTreeComponent (tag bar,
+    refresh, drag&drop, ordering, move/rename, link rewrite, prune — the
+    biggest chunk); 4 = DeleteService + SaveService; 5 = NoteEditorController
+    (modes, preview, image embeds, backlinks/graph). Commit after each step.
+  - **Gotcha**: after creating new `class_name` scripts, the global class
+    cache is stale until an editor scan; run `godot --headless --editor
+	--quit` once before smoke tests or main.gd fails with "Identifier not
+	declared".
 
 ## 3. Direction & next steps
 

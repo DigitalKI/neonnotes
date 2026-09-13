@@ -1,0 +1,71 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/components/toolbar_component.gd" id="1_comp"]
+[ext_resource type="FontFile" path="res://assets/fonts/Orbitron.ttf" id="2_orb"]
+
+[node name="Toolbar" type="HFlowContainer"]
+theme_override_constants/h_separation = 8
+theme_override_constants/v_separation = 6
+script = ExtResource("1_comp")
+
+[node name="MenuBtn" type="Button" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(44, 36)
+layout_mode = 2
+text = "☰"
+
+[node name="NoteTitle" type="Label" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_fonts/font = ExtResource("2_orb")
+theme_override_font_sizes/font_size = 18
+text = "No note selected"
+clip_text = true
+
+[node name="NewBtn" type="Button" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(56, 36)
+layout_mode = 2
+text = "+ New"
+
+[node name="ModeBtn" type="Button" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(72, 36)
+layout_mode = 2
+text = "✎ Edit"
+
+[node name="HelpBtn" type="Button" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(56, 36)
+layout_mode = 2
+text = "? Help"
+
+[node name="ExportBtn" type="MenuButton" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(72, 36)
+layout_mode = 2
+text = "⬇ Export"
+
+[node name="BacklinksBtn" type="Button" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(56, 36)
+layout_mode = 2
+text = "🔗 Links"
+
+[node name="GraphBtn" type="Button" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(56, 36)
+layout_mode = 2
+text = "🕸 Graph"
+
+[node name="MoreBtn" type="MenuButton" parent="."]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(44, 36)
+layout_mode = 2
+text = "⋮"
+
+[node name="MoreMenu" type="PopupMenu" parent="MoreBtn"]
+unique_name_in_owner = true
+oversampling_override = 1.0

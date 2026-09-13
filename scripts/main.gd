@@ -60,8 +60,9 @@ The interface supports portrait and landscape. On narrow screens actions move in
 
 @onready var bg: ColorRect = %Bg
 @onready var title_label: Label = %Title
-@onready var note_title: Label = %NoteTitle
-@onready var status: Label = %StatusLabel
+@onready var toolbar: ToolbarComponent = %Toolbar
+@onready var status_bar: StatusBarComponent = %StatusBar
+@onready var note_title: Label = toolbar.note_title
 @onready var palette_btn: OptionButton = %PaletteBtn
 @onready var side_tree: Tree = %SideTree
 @onready var content_host: ScrollContainer = %ContentHost
@@ -73,8 +74,6 @@ The interface supports portrait and landscape. On narrow screens actions move in
 
 var code_edit := CodeEdit.new()
 var sidebar: PanelContainer
-var drawer_open := false
-var is_mobile_layout := false
 var new_dialog: AcceptDialog
 var new_line: LineEdit
 var vault_dialog: FileDialog
@@ -83,6 +82,10 @@ var source_mode := false
 var autosave_timer := Timer.new()
 var sync_service: SyncService
 var help_folder := "Help"  # sidebar folder items get this metadata
+var theme_component := ThemeComponent.new()
+var layout_component := LayoutComponent.new()
+var slash_menu := SlashMenuComponent.new()
+var export_component := ExportComponent.new()
 
 # ---- editor drag gesture: plain drag scrolls, long-press-then-drag selects
 var _long_press_timer := Timer.new()
@@ -94,8 +97,28 @@ const DRAG_SCROLL_THRESHOLD := 12.0
 
 func _ready() -> void:
 	_build_dynamic_ui()
-	_apply_theme()
-	GameManager.palette_changed.connect(_on_palette_changed)
+	theme_component.name = "ThemeComponent"
+	theme_component.setup(%Bg, %Title, toolbar.note_title, %SidePanel as PanelContainer,
+			%Content as PanelContainer, %Toolbar, code_edit)
+	add_child(theme_component)
+	theme_component.apply()
+	layout_component.name = "LayoutComponent"
+	layout_component.root_ctl = get_node("Root")
+	layout_component.workspace_margin = get_node_or_null("Root/WorkspaceMargin")
+	layout_component.sidebar = %SidePanel as PanelContainer
+	layout_component.content = %Content as Control
+	layout_component.note_title = toolbar.note_title
+	layout_component.toolbar = toolbar
+	layout_component.content_host = %ContentHost
+	layout_component.more_btn = toolbar.more_btn
+	layout_component.help_btn = toolbar.help_btn
+	layout_component.backlinks_btn = toolbar.backlinks_btn
+	layout_component.graph_btn = toolbar.graph_btn
+	layout_component.export_btn = toolbar.export_btn
+	add_child(layout_component)
+	GameManager.palette_changed.connect(func():
+		theme_component.apply()
+		_render_preview())
 	side_tree.item_selected.connect(_on_tree_selected)
 	# touch/drag: Tree can swallow the click when a drag gesture starts, so
 	# select the note on mouse/touch RELEASE if a drag just happened
@@ -122,7 +145,7 @@ func _ready() -> void:
 	graph_view.open_cb = _open_wikilink
 	PreviewBuilder.open_cb = _open_wikilink
 	PreviewBuilder.image_cb = _on_image_click
-	get_viewport().size_changed.connect(_update_layout)
+	layout_component.ready()
 	# High-DPI phones: scale the whole UI from the 96dpi desktop baseline
 	var ui_scale := clampf(DisplayServer.screen_get_dpi() / 160.0, 1.0, 3.0)
 	get_tree().root.content_scale_factor = ui_scale
@@ -130,7 +153,7 @@ func _ready() -> void:
 		_prepare_smoke_vault()
 	GameManager.scan_notes()
 	_refresh_list()
-	_update_layout()
+	layout_component.update_layout()
 	sync_service = SyncService.new()
 	sync_service.name = "SyncService"
 	add_child(sync_service)
@@ -193,15 +216,17 @@ func _build_dynamic_ui() -> void:
 	sidebar = %SidePanel as PanelContainer
 
 	# toolbar actions
-	%MenuBtn.pressed.connect(_toggle_sidebar)
-	%NewBtn.pressed.connect(_on_new_note)
-	%ModeBtn.pressed.connect(_toggle_mode)
-	%HelpBtn.pressed.connect(_show_help)
-	%BacklinksBtn.pressed.connect(_toggle_backlinks)
-	%GraphBtn.pressed.connect(_toggle_graph)
+	toolbar.menu_btn.pressed.connect(layout_component.toggle_sidebar)
+	toolbar.new_btn.pressed.connect(_on_new_note)
+	toolbar.mode_btn.pressed.connect(_toggle_mode)
+	toolbar.help_btn.pressed.connect(_show_help)
+	toolbar.backlinks_btn.pressed.connect(_toggle_backlinks)
+	toolbar.graph_btn.pressed.connect(_toggle_graph)
 	%VaultBtn.pressed.connect(_on_open_vault)
 	%SyncBtn.pressed.connect(_on_sync)
-	_build_slash_menu()
+	slash_menu.name = "SlashMenu"
+	add_child(slash_menu)
+	slash_menu.build(code_edit, _flush_save)
 
 	# palette selector lives in the sidebar bottom row
 	palette_btn.clear()
@@ -212,7 +237,7 @@ func _build_dynamic_ui() -> void:
 		GameManager.set_palette(palette_btn.get_item_text(index)))
 
 	# export menu (data-driven)
-	var menu: PopupMenu = %ExportBtn.get_popup()
+	var menu: PopupMenu = toolbar.export_btn.get_popup()
 	menu.add_item("🖼 Save PNG", 0)
 	menu.add_item("🎞 Save GIF", 1)
 	menu.add_separator()
@@ -229,12 +254,19 @@ func _build_dynamic_ui() -> void:
 		menu.remove_item(5)
 		menu.remove_item(6)
 		menu.remove_item(7)
-	menu.id_pressed.connect(_on_export_action)
+	export_component.name = "ExportComponent"
+	add_child(export_component)
+	export_component.doc_cb = _current_doc
+	export_component.dest_cb = _export_dest
+	export_component.flash_cb = _flash
+	export_component.get_code = func(): return code_edit.text
+	export_component.build_menu(menu)
+	menu.id_pressed.connect(export_component.handle_action)
 
 	# "⋮ more" overflow menu (shown when the toolbar is cramped)
 	# MenuButton uses its own auto-created popup — a plain child PopupMenu
 	# named in the scene is never shown, which made this menu appear empty.
-	var more: PopupMenu = %MoreBtn.get_popup()
+	var more: PopupMenu = toolbar.more_btn.get_popup()
 	more.add_item("💾 Save Now", 30)
 	more.add_separator()
 	more.add_item("🗑 Delete Note…", 31)
@@ -252,8 +284,8 @@ func _build_dynamic_ui() -> void:
 	more.add_item("⬇ Copy Markdown", 2)
 	more.add_item("⬇ Copy HTML", 3)
 	more.add_item("⬇ Save HTML…", 4)
-	%MoreBtn.get_popup().id_pressed.connect(_on_more_action)
-	%MoreBtn.visible = true  # always available (delete/export/etc. on desktop too)
+	toolbar.more_btn.get_popup().id_pressed.connect(_on_more_action)
+	toolbar.more_btn.visible = true  # always available (delete/export/etc. on desktop too)
 	# new-note dialog: mobile-friendly row with Enter-to-submit
 	new_dialog = AcceptDialog.new()
 	new_dialog.name = "NewNoteDialog"
@@ -290,39 +322,6 @@ func _build_dynamic_ui() -> void:
 	vault_dialog.title = "Open Folder as Vault"
 	vault_dialog.dir_selected.connect(_on_vault_selected)
 	add_child(vault_dialog)
-
-func _on_palette_changed() -> void:
-	_apply_theme()
-	_render_preview()
-
-# ------------------------------------------------------------ theme
-
-func _apply_theme() -> void:
-	var c := GameManager.palette()
-	var orb: FontFile = load("res://assets/fonts/Orbitron.ttf")
-	bg.color = c["bg"]
-	var panel := StyleBoxFlat.new()
-	panel.bg_color = c["panel"]
-	panel.border_color = Color(c["accent"].r, c["accent"].g, c["accent"].b, 0.5)
-	panel.set_border_width_all(2)
-	(%SidePanel as PanelContainer).add_theme_stylebox_override("panel", panel)
-	(%Content as PanelContainer).add_theme_stylebox_override("panel", panel)
-	title_label.add_theme_font_override("font", orb)
-	note_title.add_theme_font_override("font", orb)
-	for btn in %Toolbar.get_children():
-		if btn is Button:
-			btn.add_theme_font_override("font", orb)
-			btn.add_theme_font_size_override("font_size", 13)
-	code_edit.add_theme_color_override("font_color", c["text"])
-	code_edit.add_theme_color_override("background_color", Color(c["bg"].r, c["bg"].g, c["bg"].b, 0.7))
-	code_edit.add_theme_color_override("current_line_color", Color(c["panel"].r, c["panel"].g, c["panel"].b, 0.9))
-	var hl := NeonHighlighter.new()
-	hl.colors = {
-		"heading": c["accent"], "accent": c["accent"], "accent2": c["accent2"],
-		"accent3": c["accent3"], "code": c["accent2"],
-		"dim": Color(c["text"].r, c["text"].g, c["text"].b, 0.5),
-	}
-	code_edit.syntax_highlighter = hl
 
 # ------------------------------------------------------------ editor drag gesture
 
@@ -378,123 +377,6 @@ func _show_selection_menu() -> void:
 	menu.set_item_disabled(menu.get_item_index(TextEdit.MENU_PASTE), DisplayServer.clipboard_get() == "")
 	var caret: Vector2 = code_edit.get_global_position() + code_edit.get_caret_draw_pos()
 	menu.popup(Rect2i(Vector2i(caret + Vector2(0, 8)), Vector2i.ZERO))
-
-# ------------------------------------------------------------ responsive
-
-func _update_layout() -> void:
-	var vp := get_viewport_rect().size
-	var mobile := vp.x < 720.0 or vp.y > vp.x
-	var layout_changed := mobile != is_mobile_layout
-	is_mobile_layout = mobile
-	_apply_safe_area()
-	# Keep all root controls inside the viewport after rotation/resizing.
-	if not layout_changed:
-		return
-	ChartView.compact = mobile
-	# cramped toolbar? collapse secondary actions into the ⋮ overflow menu
-	# (⋮ itself is ALWAYS visible — it hosts Delete etc. on desktop too)
-	var cramped := mobile or vp.x < 980.0
-	%MoreBtn.visible = true
-	%HelpBtn.visible = not cramped
-	%BacklinksBtn.visible = not cramped
-	%GraphBtn.visible = not cramped
-	%ExportBtn.visible = not cramped
-	if mobile:
-		sidebar.visible = drawer_open
-		sidebar.custom_minimum_size = Vector2(mini(280, int(vp.x * 0.75)), 0)
-		# mobile: tree and editor never share space — hide content while the drawer is open
-		(%Content as Control).visible = not drawer_open
-		note_title.add_theme_font_size_override("font_size", 14)
-		for btn in %Toolbar.get_children():
-			if btn is Button:
-				btn.custom_minimum_size = Vector2(52, 44)
-		# wide, tappable scrollbar for touch scrolling
-		var vsb := content_host.get_v_scroll_bar()
-		vsb.custom_minimum_size = Vector2(28, 0)
-		var grabber := StyleBoxFlat.new()
-		grabber.bg_color = Color(GameManager.color("accent").r, GameManager.color("accent").g, GameManager.color("accent").b, 0.55)
-		grabber.set_corner_radius_all(7)
-		grabber.set_content_margin_all(6)
-		vsb.add_theme_stylebox_override("grabber", grabber)
-		var grabber_hl := grabber.duplicate()
-		grabber_hl.bg_color = Color(GameManager.color("accent").r, GameManager.color("accent").g, GameManager.color("accent").b, 0.85)
-		vsb.add_theme_stylebox_override("grabber_highlight", grabber_hl)
-		vsb.add_theme_stylebox_override("grabber_pressed", grabber_hl)
-	else:
-		drawer_open = false
-		sidebar.visible = true
-		sidebar.custom_minimum_size = Vector2(220, 0)
-		(%Content as Control).visible = true
-		note_title.add_theme_font_size_override("font_size", 18)
-		for btn in %Toolbar.get_children():
-			if btn is Button:
-				btn.custom_minimum_size = Vector2(56, 36)
-
-func _toggle_sidebar() -> void:
-	drawer_open = not drawer_open
-	if is_mobile_layout:
-		sidebar.visible = drawer_open
-		(%Content as Control).visible = not drawer_open
-	elif not sidebar.visible:
-		sidebar.visible = true
-
-# ------------------------------------------------- safe area (Android cutouts/nav)
-
-## Comfortable breathing room around the workspace on phones; the keyboard/
-## nav-bar inset is added on top of this, never replaces it.
-const MOBILE_MARGIN_SIDE := 10
-const MOBILE_MARGIN_BOTTOM := 10
-
-func _apply_safe_area() -> void:
-	var root_ctl: Control = get_node("Root")
-	var wm: MarginContainer = get_node_or_null("Root/WorkspaceMargin")
-	var side_margin := MOBILE_MARGIN_SIDE if is_mobile_layout else 0
-	var base_bottom := MOBILE_MARGIN_BOTTOM if is_mobile_layout else 0
-	if OS.get_name() != "Android":
-		root_ctl.offset_left = 0
-		root_ctl.offset_top = 0
-		root_ctl.offset_right = 0
-		root_ctl.offset_bottom = 0
-		if wm:
-			wm.add_theme_constant_override("margin_left", side_margin)
-			wm.add_theme_constant_override("margin_right", side_margin)
-			wm.add_theme_constant_override("margin_bottom", base_bottom)
-		return
-	var sa := DisplayServer.get_display_safe_area()
-	var win := DisplayServer.window_get_size()
-	var vp := get_viewport_rect().size
-	var sx := vp.x / float(win.x)
-	var sy := vp.y / float(win.y)
-	root_ctl.offset_left = sa.position.x * sx
-	root_ctl.offset_top = sa.position.y * sy
-	root_ctl.offset_right = -(win.x - sa.end.x) * sx
-	# Root's own bottom never moves — header/toolbar/status bar stay put.
-	# The soft-keyboard/nav-bar inset only grows WorkspaceMargin's bottom
-	# margin, so just the editing area shrinks and nothing appears to slide.
-	root_ctl.offset_bottom = 0
-	var kb := DisplayServer.virtual_keyboard_get_height()
-	var nav_inset := (win.y - sa.end.y) * sy
-	var bottom_inset := maxf(nav_inset, kb * sy)
-	if wm:
-		wm.add_theme_constant_override("margin_left", side_margin)
-		wm.add_theme_constant_override("margin_right", side_margin)
-		wm.add_theme_constant_override("margin_bottom", base_bottom + bottom_inset)
-	_kb_h = kb
-	# editing area just resized around the keyboard — keep the caret visible
-	# (deferred so it runs after the new margin is actually laid out)
-	if code_edit.visible:
-		code_edit.adjust_viewport_to_caret.call_deferred(0)
-
-
-## Poll the Android soft keyboard; re-apply insets when it shows/hides so the
-## editor resizes and the cursor stays visible at the bottom of the doc.
-var _kb_h := -1
-
-func _process(_delta: float) -> void:
-	if OS.get_name() == "Android":
-		var kb := DisplayServer.virtual_keyboard_get_height()
-		if kb != _kb_h:
-			_apply_safe_area()
 
 # ------------------------------------------------- safe area / vault tree
 
@@ -677,7 +559,7 @@ func _mark_drop_hint(it: TreeItem, section: int = 0) -> void:
 	_drop_hint = it
 	_drop_section = section
 	if it == null:
-		status.text = "Ready"
+		status_bar.flash("Ready")
 		return
 	var c := GameManager.color("accent")
 	# inside = solid bright row; above/below = thinner directional tint
@@ -687,11 +569,11 @@ func _mark_drop_hint(it: TreeItem, section: int = 0) -> void:
 	if target == "":
 		target = "Vault"
 	if section == 0:
-		status.text = "MOVE INTO › " + target
+		status_bar.flash("MOVE INTO › " + target)
 	elif section < 0:
-		status.text = "PLACE ABOVE › " + target
+		status_bar.flash("PLACE ABOVE › " + target)
 	else:
-		status.text = "PLACE BELOW › " + target
+		status_bar.flash("PLACE BELOW › " + target)
 
 func _clear_drop_hint() -> void:
 	_mark_drop_hint(null, 0)
@@ -922,93 +804,9 @@ func _select_note(fname: String) -> void:
 func _on_text_changed() -> void:
 	help_mode = false
 	_flush_save()  # save on every typed/pasted character — never lose changes
-	_check_slash()
+	slash_menu.check()
 
 # ------------------------------------------------- slash menu (v3)
-
-## Markdown snippets offered by the "/" command menu.
-const SLASH_ITEMS := [
-	["# Heading 1", "# "],
-	["## Heading 2", "## "],
-	["### Heading 3", "### "],
-	["**Bold**", "**text**"],
-	["*Italic*", "*text*"],
-	["==Highlight==", "==text=="],
-	["%%Glitch%%", "%%glitch text%%"],
-	["++Flicker++", "++flicker text++"],
-	["• Bullet list", "- "],
-	["1. Numbered list", "1. "],
-	["❝ Quote", "> "],
-	["</> Code block", "```\n\n```"],
-	["▦ Table", "| Col 1 | Col 2 |\n| --- | --- |\n| a | b |"],
-	["📊 Chart", "```chart\ntype: bar\ntitle: Demo\nlabels: A, B, C\nvalues: 10, 25, 18\n```"],
-	["🖼 Image", "![]( )"],
-]
-
-var slash_panel: PopupPanel
-var slash_list: ItemList
-
-## 2-column snippet grid (ItemList supports columns; PopupMenu doesn't).
-func _build_slash_menu() -> void:
-	slash_panel = PopupPanel.new()
-	slash_panel.name = "SlashPanel"
-	slash_list = ItemList.new()
-	slash_list.name = "SlashList"
-	slash_list.max_columns = 2
-	slash_list.fixed_column_width = 175
-	slash_list.auto_height = true
-	slash_list.custom_minimum_size = Vector2(360, 0)
-	for i in SLASH_ITEMS.size():
-		slash_list.add_item(SLASH_ITEMS[i][0])
-	slash_list.item_selected.connect(func(idx: int):
-		slash_panel.hide()
-		_on_slash_action(idx))
-	slash_panel.add_child(slash_list)
-	add_child(slash_panel)
-
-func _slash_menu_height() -> float:
-	return ceil(SLASH_ITEMS.size() / 2.0) * 44.0 + 16.0
-
-## Typing "/" alone on a line pops the formatting menu (Notion-style).
-## Opens below the caret, or flips above it when the keyboard/screen edge
-## would cover it.
-func _check_slash() -> void:
-	if code_edit == null or not code_edit.visible or slash_panel == null or slash_panel.visible:
-		return
-	var ln := code_edit.get_caret_line()
-	if code_edit.get_line(ln).strip_edges() != "/":
-		return
-	var caret: Vector2 = code_edit.get_global_position() + code_edit.get_caret_draw_pos()
-	var h := _slash_menu_height()
-	var screen := get_viewport_rect().size
-	var pos := caret + Vector2(0, 12)
-	if pos.y + h > screen.y:  # would go under the keyboard / screen edge
-		pos.y = maxf(8.0, caret.y - h - 12.0)
-	pos.x = clampf(pos.x, 8.0, maxf(8.0, screen.x - 372.0))
-	slash_panel.popup(Rect2i(Vector2i(pos), Vector2i(360, int(h))))
-
-func _on_slash_action(id: int) -> void:
-	var snippet: String = SLASH_ITEMS[id][1]
-	var ln := code_edit.get_caret_line()
-	var line_text := code_edit.get_line(ln).strip_edges()
-	var rest := "" if line_text == "/" else line_text.substr(line_text.find("/") + 1)
-	var full := snippet + rest
-	code_edit.set_line(ln, full)
-	if snippet.contains("text"):
-		# caret inside the formatting chars, placeholder pre-selected so typing
-		# replaces it (e.g. **|text|**)
-		var col := snippet.find("text")
-		code_edit.set_caret_line(ln)
-		code_edit.select(ln, col, ln, col + 4)
-	elif snippet.contains("\n"):
-		# multi-line blocks (code/table/chart): caret on the first inner line
-		code_edit.set_caret_line(ln + 1)
-		code_edit.set_caret_column(0)
-	else:
-		code_edit.set_caret_line(ln)
-		code_edit.set_caret_column(snippet.length() + rest.length())
-	code_edit.grab_focus()
-	_flush_save()
 
 ## Save immediately. Called on debounce, note switch, mode change, quit.
 func _flush_save() -> void:
@@ -1018,7 +816,7 @@ func _flush_save() -> void:
 	if fname == "":
 		return
 	if GameManager.write_note(fname, code_edit.text):
-		status.text = "✓ Saved " + fname
+		status_bar.flash("✓ Saved " + fname)
 		sync_service.note_saved()  # debounce auto-sync after edits
 		# rebuild the tree if the front-matter title changed
 		var old_title: String = GameManager.titles.get(fname, "")
@@ -1044,11 +842,11 @@ func _on_note_selected(fname: String) -> void:
 	help_folder = fname.get_base_dir() if fname.contains("/") else ""
 	source_mode = false
 	_set_mode()
-	if is_mobile_layout and drawer_open:
-		_toggle_sidebar()
+	if layout_component.is_mobile_layout and layout_component.drawer_open:
+		layout_component.toggle_sidebar()
 	if backlinks_panel.visible:
 		_refresh_backlinks()
-	status.text = "Opened " + fname
+	status_bar.flash("Opened " + fname)
 
 func _on_new_note() -> void:
 	new_line.text = ""
@@ -1297,7 +1095,7 @@ func _scrub_order(old_rels: Array) -> void:
 func _set_mode() -> void:
 	code_edit.visible = source_mode
 	content_host.visible = not source_mode
-	%ModeBtn.text = "✎ Edit" if not source_mode else "◈ Preview"
+	toolbar.mode_btn.text = "✎ Edit" if not source_mode else "◈ Preview"
 	if not source_mode:
 		_render_preview()
 
@@ -1336,7 +1134,7 @@ func _render_preview() -> void:
 func _open_wikilink(target: String) -> void:
 	var fname := WikiLinks.resolve(target)
 	if fname == "":
-		status.text = "✗ Note not found: " + target
+		status_bar.flash("✗ Note not found: " + target)
 		return
 	_select_note(fname)
 
@@ -1391,7 +1189,7 @@ func _on_image_selected(path: String) -> void:
 	# hidden and _flush_save would bail out
 	if GameManager.current_rel != "":
 		GameManager.write_note(GameManager.current_rel, code_edit.text)
-		status.text = "✓ Saved " + GameManager.current_rel
+		status_bar.flash("✓ Saved " + GameManager.current_rel)
 		sync_service.note_saved()
 	if not source_mode:
 		_render_preview()
@@ -1464,61 +1262,11 @@ func _current_doc() -> Variant:
 	_flush_save()
 	return MarkdownParser.parse(code_edit.text)
 
-func _export_width() -> float:
-	return get_viewport().get_visible_rect().size.x
-
 func _export_dest(ext: String) -> String:
 	# exports live in vault/exports/ — never mixed with notes
 	var d := GameManager.vault_abs() + "/" + GameManager.EXPORTS_SUBDIR
 	DirAccess.make_dir_recursive_absolute(d)
 	return d + "/" + GameManager.current_rel.get_file().trim_suffix(".md") + "." + ext
-
-func _on_export_action(id: int) -> void:
-	match id:
-		0, 1:  # Save PNG / GIF
-			var doc: Variant = _current_doc()
-			if doc == null:
-				return
-			var ext := "png" if id == 0 else "gif"
-			var dest := _export_dest(ext)
-			if ext == "png":
-				await Exporter.export_png(self, get_viewport().get_visible_rect().size.x, dest, doc)
-			else:
-				await Exporter.export_gif(self, get_viewport().get_visible_rect().size.x, dest, doc)
-			if OS.get_name() == "Android" and Share.save_to_gallery(dest):
-				_flash("Saved to media library: " + dest.get_file())
-			else:
-				_flash("Saved %s: %s" % [ext.to_upper(), dest.get_file()])
-		2:  # copy markdown
-			DisplayServer.clipboard_set(code_edit.text)
-			_flash("Markdown copied to clipboard")
-		3:  # copy HTML
-			DisplayServer.clipboard_set(HtmlExporter.to_html(MarkdownParser.parse(code_edit.text)))
-			_flash("HTML copied to clipboard")
-		4:  # save HTML
-			var dest := _export_dest("html")
-			if HtmlExporter.save(dest, MarkdownParser.parse(code_edit.text)):
-				_flash("Saved HTML: " + dest.get_file())
-			else:
-				_flash("✗ HTML export failed")
-		5, 6, 7:  # share PNG / GIF / markdown
-			_share(id - 5)
-
-## kind: 0=png, 1=gif, 2=markdown text
-func _share(kind: int) -> void:
-	var doc: Variant = _current_doc()
-	if doc == null:
-		return
-	if kind == 2:
-		Share.share_text(GameManager.current_rel.get_file().trim_suffix(".md"), code_edit.text)
-		return
-	var dest := _export_dest("png" if kind == 0 else "gif")
-	if kind == 0:
-		await Exporter.export_png(self, get_viewport().get_visible_rect().size.x, dest, doc)
-	else:
-		await Exporter.export_gif(self, get_viewport().get_visible_rect().size.x, dest, doc)
-	# PNG/GIF: images are the social-friendly format — share them directly
-	Share.share_image(dest)
 
 # ------------------------------------------------------------ smoke test
 
@@ -1649,10 +1397,7 @@ func _check(ok: bool, label: String) -> int:
 	return 0 if ok else 1
 
 func _flash(msg: String) -> void:
-	status.text = msg
-	var tw := create_tween()
-	tw.tween_interval(2.5)
-	tw.tween_callback(func(): status.text = "Ready")
+	status_bar.flash(msg)
 
 
 func _on_more_action(id: int) -> void:
@@ -1669,4 +1414,4 @@ func _on_more_action(id: int) -> void:
 		12:
 			_toggle_graph()
 		_:
-			_on_export_action(id)
+			export_component.handle_action(id)
