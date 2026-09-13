@@ -5,7 +5,7 @@
 > updated at the **end**, so context, decisions, and direction survive across
 > conversations. Keep it current — a stale memory file is worse than none.
 
-_Last updated: 2026-09-13 (componentization: subscenes + VaultTreeComponent) · Godot 4.7 · renderer: gl_compatibility_
+_Last updated: 2026-09-13 (side_panel.tscn parenting fix; visual check via screenshot) · Godot 4.7 · renderer: gl_compatibility_
 
 > ⚠️ **Path note:** the saved global memory says `/home/toshiwo/www/neonnotes`
 > but the project actually lives at **`/home/toshiwo/Projects/Godot/neonnotes`**.
@@ -221,7 +221,23 @@ _Chronological, newest last._
     steps 4/5). All 41 checks pass at each commit (commits 41c2c2f, b003206).
   - **Remaining**: step 4 = DeleteService + SaveService; step 5 =
     NoteEditorController + Content.tscn (content subtree still in Main.tscn).
-  - **Gotchas learned**: GDScript files must end with a newline (parse error
+  - **2026-09-13 — sidebar layout regression + fix**: side_panel.tscn was
+  authored with ALL nodes as `parent="."` (root children), so TreeDeleteBtn/
+  SideTree/Backlinks/Palette/Vault/Sync overlapped at the root level instead
+  of nesting in SideVBox — user saw a messy sidebar. Fixed to proper nesting
+  (commit 2afc1bc) and verified visually via screenshot.
+- **Visual-check workflow**: `NEONNOTES_SMOKE=1 godot --path .` (with display,
+  not headless) saves `/tmp/dnd_tree.png` mid-smoke and quits — quick way to
+  get a real rendered screenshot without the MCP bridge. Dev helper
+  `scripts/dev/screenshot.gd` exists but only works via `godot -s` which does
+  NOT load autoloads (GameManager unresolved) — treat as broken until fixed.
+- **MCP bridge issue (2026-09-13)**: play_scene launches a game subprocess
+  that dies within ~2s (ping/screenshot time out); multiple godot-mcp server
+  instances are running concurrently (stale from earlier goose sessions),
+  likely contending for the debugger channel. Editor-side tools (status,
+  console, errors) still work. If runtime screenshots are needed, use the
+  smoke-test screenshot path above.
+- **Gotchas learned**: GDScript files must end with a newline (parse error
 	"Expected end of file" otherwise); when bulk-renaming keep wrapper names
     distinct from member names (`func vault_tree.x(` is a parse error if left
     inside main.gd); `_tree_node_rel`/`_has_children` were in the deletion
