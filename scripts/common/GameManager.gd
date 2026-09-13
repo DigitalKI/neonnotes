@@ -5,6 +5,7 @@ signal palette_changed
 
 const VAULT_DIR := "user://vault"
 const SETTINGS := "user://settings.cfg"
+const EXPORTS_SUBDIR := "exports"  # vault/exports/ — rendered PNG/GIF/HTML, hidden from the tree
 
 const PALETTES := {
 	"Synthwave": {
@@ -35,9 +36,18 @@ var current_file := ""  # absolute path of the open note ("" = none)
 var current_rel := ""   # vault-relative path of the open note ("" = none)
 var notes: Array[String] = []
 
+# Sync identity: a stable 4-word code (e.g. "amber-meteor-vinyl-orbit") that
+# uniquely identifies this device on the LAN, plus the set of device codes we
+# have successfully paired with (trusted → no PIN needed again).
+var device_id := ""
+var trusted: Array[String] = []
+
 func _ready() -> void:
 	_load_settings()
 	DirAccess.make_dir_recursive_absolute(vault_abs())
+	if device_id == "":
+		device_id = SyncService.gen_device_code()
+		_save_settings()
 
 # ------------------------------------------------------------ palette
 
@@ -69,14 +79,89 @@ func set_vault_dir(path: String) -> bool:
 	return true
 
 var titles := {}  # relative path -> front-matter title ("" = use filename)
+var tags := {}    # relative path -> Array[String] from front-matter "tags:"
+# custom sort order per folder: {"folder/sub": ["note.md", …]} persisted in
+# vault/.neonnotes.json (synced like a note, tiny and human-readable)
+const ORDER_FILE := ".neonnotes.json"
+var order := {}
+
+func load_order() -> void:
+	order = {}
+	var f := FileAccess.open(vault_abs() + "/" + ORDER_FILE, FileAccess.READ)
+	if f == null:
+		return
+	var data = JSON.parse_string(f.get_as_text())
+	if typeof(data) == TYPE_DICTIONARY and typeof(data.get("order", {})) == TYPE_DICTIONARY:
+		order = data["order"]
+
+func save_order() -> void:
+	var f := FileAccess.open(vault_abs() + "/" + ORDER_FILE, FileAccess.WRITE)
+	if f == null:
+		return
+	f.store_string(JSON.stringify({"order": order}, "  "))
+	f.close()
 
 func scan_notes() -> void:
 	notes.clear()
 	titles.clear()
+	tags.clear()
 	_scan_dir("")
+	_ensure_folder_notes()
 	notes.sort()
 	for n in notes:
 		titles[n] = _read_title(n)
+		tags[n] = _read_tags(n)
+	load_order()
+
+## Every folder that shows in the tree is also a note: if `folder.md` doesn't
+## exist, create it (fixes vaults made before folder+note merging).
+const FOLDER_NOTE_TEMPLATE := "---\ntitle: \"%s\"\n---\n\n# %s\n"
+
+func _ensure_folder_notes() -> void:
+	var found := notes.duplicate()
+	for n in found:
+		if not n.ends_with(".md"):
+			continue
+		var dir: String = n.get_base_dir()
+		while dir != "":
+			var comp: String = dir + ".md"
+			if not notes.has(comp):
+				write_note(comp, FOLDER_NOTE_TEMPLATE % [dir.get_file(), dir.get_file()])
+				notes.append(comp)
+			dir = dir.get_base_dir() if dir.contains("/") else ""
+
+## Collect tags from front-matter across all notes (deduplicated, sorted).
+func all_tags() -> Array[String]:
+	var out: Array[String] = []
+	for t in tags.values():
+		for x in t:
+			if not out.has(x):
+				out.append(x)
+	out.sort()
+	return out
+
+## Front-matter "tags: a, b" or "tags: [a, b]" → Array[String]
+func _read_tags(fname: String) -> Array[String]:
+	var f := FileAccess.open(vault_abs() + "/" + fname, FileAccess.READ)
+	if f == null:
+		return []
+	var first := f.get_line()
+	if first.strip_edges() != "---":
+		return []
+	while not f.eof_reached():
+		var line := f.get_line()
+		if line.strip_edges() == "---":
+			break
+		var idx := line.find(":")
+		if idx > 0 and line.substr(0, idx).strip_edges() == "tags":
+			var v := line.substr(idx + 1).strip_edges().trim_prefix("[").trim_suffix("]")
+			var out: Array[String] = []
+			for x in v.split(","):
+				var tag := x.strip_edges().trim_prefix("\"").trim_suffix("\"").trim_prefix("#")
+				if tag != "" and not out.has(tag):
+					out.append(tag)
+			return out
+	return []
 
 ## Peek at the front-matter title without parsing the whole file.
 func _read_title(fname: String) -> String:
@@ -107,7 +192,7 @@ func _scan_dir(rel: String) -> void:
 	while f != "":
 		var child := rel + ("/" if rel != "" else "") + f
 		if d.current_is_dir():
-			if not f.begins_with("."):
+			if not f.begins_with(".") and not (rel == "" and f == EXPORTS_SUBDIR):
 				_scan_dir(child)
 		elif f.ends_with(".md"):
 			notes.append(child)
@@ -146,9 +231,20 @@ func _load_settings() -> void:
 	if not PALETTES.has(palette_name):
 		palette_name = "Synthwave"
 	vault_dir = cf.get_value("vault", "dir", VAULT_DIR)
+	device_id = cf.get_value("sync", "device_id", "")
+	trusted.clear()
+	for t in cf.get_value("sync", "trusted", []):
+		trusted.append(String(t))
 
 func _save_settings() -> void:
 	var cf := ConfigFile.new()
 	cf.set_value("ui", "palette", palette_name)
 	cf.set_value("vault", "dir", vault_dir)
+	cf.set_value("sync", "device_id", device_id)
+	cf.set_value("sync", "trusted", trusted)
 	cf.save(SETTINGS)
+
+func add_trusted(id: String) -> void:
+	if id != "" and not trusted.has(id):
+		trusted.append(id)
+		_save_settings()
