@@ -98,8 +98,19 @@ func _ready() -> void:
 			var it := side_tree.get_item_at_position(side_tree.get_local_mouse_position())
 			if it != null and it.get_metadata(0) != null:
 				it.select(0)
-				_on_tree_selected())
+				_on_tree_selected()
+		elif ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_RIGHT and ev.pressed:
+			var rit := side_tree.get_item_at_position(side_tree.get_local_mouse_position())
+			if rit != null and rit.get_metadata(0) != null:
+				rit.select(0)
+				_tree_menu.popup(Rect2i(get_global_mouse_position(), Vector2i.ZERO)))
 	side_tree.set_drag_forwarding(_tree_get_drag, _tree_can_drop, _tree_drop)
+	# tree row deletion: button above the tree + right-click context menu
+	%TreeDeleteBtn.pressed.connect(_delete_selected_node)
+	_tree_menu.add_item("🗑 Delete…", 1)
+	_tree_menu.id_pressed.connect(func(id: int):
+		if id == 1:
+			_delete_selected_node())
 	graph_view.open_cb = _open_wikilink
 	PreviewBuilder.open_cb = _open_wikilink
 	PreviewBuilder.image_cb = _on_image_click
@@ -107,6 +118,8 @@ func _ready() -> void:
 	# High-DPI phones: scale the whole UI from the 96dpi desktop baseline
 	var ui_scale := clampf(DisplayServer.screen_get_dpi() / 160.0, 1.0, 3.0)
 	get_tree().root.content_scale_factor = ui_scale
+	if OS.get_environment("NEONNOTES_SMOKE") == "1":
+		_prepare_smoke_vault()
 	GameManager.scan_notes()
 	_refresh_list()
 	_update_layout()
@@ -115,6 +128,18 @@ func _ready() -> void:
 	add_child(sync_service)
 	if OS.get_environment("NEONNOTES_SMOKE") == "1":
 		_run_smoke.call_deferred()
+
+func _prepare_smoke_vault() -> void:
+	# Smoke tests must never read or persist changes to the user's real vault.
+	var smoke_vault := OS.get_environment("NEONNOTES_SMOKE_VAULT")
+	if smoke_vault == "":
+		smoke_vault = "user://neonnotes-smoke"
+	GameManager.vault_dir = smoke_vault
+	GameManager.current_file = ""
+	GameManager.current_rel = ""
+	GameManager.order.clear()
+	_rm_dir("")
+	DirAccess.make_dir_recursive_absolute(GameManager.vault_abs())
 
 # ------------------------------------------------------------ dynamic UI
 
@@ -519,6 +544,8 @@ func _tree_get_drag(at_position: Vector2) -> Variant:
 ## True between a tree drag and its release — lets the release handler select
 ## the note (otherwise a drag gesture swallows the click).
 var _drag_just_happened := false
+## Right-click menu for vault tree rows (Delete).
+var _tree_menu := PopupMenu.new()
 var _tree_drag_forwarding_set := false
 
 func _tree_can_drop(at_position: Vector2, data: Variant) -> bool:
@@ -940,28 +967,186 @@ func _create_note() -> void:
 	_refresh_list()
 	_select_note(fname)
 
-## Delete the current note after explicit confirmation.
+## Delete the current open note after confirmation.
 func _delete_current_note() -> void:
-	var fname: String = GameManager.current_rel
-	if fname == "" or help_mode:
+	if GameManager.current_rel == "" or help_mode:
 		_flash("No note open")
 		return
+	delete_node(GameManager.current_rel)
+
+# ------------------------------------------------- tree node deletion (v3)
+
+## Delete the note/folder row currently selected in the vault tree.
+func _delete_selected_node() -> void:
+	var it := side_tree.get_selected()
+	if it == null or it.get_metadata(0) == null:
+		_flash("Select a note or folder in the tree first")
+		return
+	var rel := _tree_node_rel(it)
+	if rel == "":
+		return
+	delete_node(rel)
+
+## Resolve a tree row's path: a merged folder+note row (`x.md` metadata while
+## folder `x` exists) counts as the FOLDER `x`.
+func _tree_node_rel(it: TreeItem) -> String:
+	var meta_v = it.get_metadata(0)
+	if meta_v == null:
+		return ""
+	var meta := str(meta_v)
+	if meta.ends_with(".md") and DirAccess.dir_exists_absolute(GameManager.vault_abs().path_join(meta.trim_suffix(".md"))):
+		return meta.trim_suffix(".md")
+	return meta
+
+## Determine if a path (folder or companion note) has child items in the vault.
+func _has_children(rel: String) -> bool:
+	var vault := GameManager.vault_abs()
+	var folder_rel := rel.trim_suffix(".md") if rel.ends_with(".md") else rel
+	var abs_folder := vault.path_join(folder_rel)
+	if not DirAccess.dir_exists_absolute(abs_folder):
+		return false
+	for d in DirAccess.get_directories_at(abs_folder):
+		if not d.begins_with("."):
+			return true
+	for f in DirAccess.get_files_at(abs_folder):
+		if not f.begins_with("."):
+			return true
+	return false
+
+## Unified node/note/folder deletion. Automatically decides confirmation type based on tree structure.
+func delete_node(rel: String = "", keep_children: bool = false, confirm: bool = true) -> void:
+	if rel == "":
+		var it := side_tree.get_selected()
+		if it != null and it.get_metadata(0) != null:
+			rel = _tree_node_rel(it)
+		elif GameManager.current_rel != "" and not help_mode:
+			rel = GameManager.current_rel
+	if rel == "" or help_mode:
+		_flash("Select a note or folder to delete")
+		return
+
+	if not confirm:
+		_perform_delete(rel, keep_children)
+		return
+
+	if _has_children(rel):
+		_confirm_delete_parent(rel)
+	else:
+		_confirm_delete_leaf(rel)
+
+func _confirm_delete_parent(rel: String) -> void:
+	var dlg := AcceptDialog.new()
+	dlg.title = "Delete Folder"
+	dlg.dialog_text = "\"%s\" contains child items.\n\nHow do you want to delete it?" % rel
+	dlg.ok_button_text = "Cancel"
+	dlg.add_button("🗑 Delete All", false, "del_all")
+	dlg.add_button("Delete Node Only", false, "del_one")
+	add_child(dlg)
+	dlg.custom_action.connect(func(action: String):
+		if action == "del_all":
+			_perform_delete(rel, false)
+		elif action == "del_one":
+			_perform_delete(rel, true)
+		dlg.queue_free())
+	dlg.canceled.connect(func(): dlg.queue_free())
+	dlg.popup_centered()
+
+func _confirm_delete_leaf(rel: String) -> void:
 	_flush_save()
 	var dlg := ConfirmationDialog.new()
-	dlg.title = "Delete Note"
-	dlg.dialog_text = "Delete \"%s\" permanently?\n\nThis cannot be undone." % fname
+	dlg.title = "Delete"
+	dlg.dialog_text = "Delete \"%s\" permanently?\n\nThis cannot be undone." % rel
 	dlg.ok_button_text = "🗑 Delete"
 	dlg.get_cancel_button().text = "Cancel"
 	add_child(dlg)
 	dlg.confirmed.connect(func():
-		var abs := GameManager.vault_abs() + "/" + fname
-		var err := DirAccess.remove_absolute(abs)
-		if err != OK:
-			_flash("✗ Delete failed (%d)" % err)
-			return
-		# pick the closest remaining note: neighbour in the same folder, else
-		# the first note anywhere (tree order)
-		var dir := fname.get_base_dir() if fname.contains("/") else ""
+		_perform_delete(rel, false)
+		dlg.queue_free())
+	dlg.canceled.connect(func(): dlg.queue_free())
+	dlg.popup_centered()
+
+func _perform_delete(rel: String, keep_children: bool = false) -> void:
+	var vault := GameManager.vault_abs()
+	var folder_rel := rel.trim_suffix(".md") if rel.ends_with(".md") else rel
+	var parent_dir := folder_rel.get_base_dir() if folder_rel.contains("/") else ""
+
+	_flush_save()
+
+	if keep_children:
+		var moved: Array[String] = []
+		var abs_folder := vault.path_join(folder_rel)
+		if DirAccess.dir_exists_absolute(abs_folder):
+			for d in DirAccess.get_directories_at(abs_folder):
+				if d.begins_with("."):
+					continue
+				var old_rel := folder_rel + "/" + d
+				if _move_path(old_rel, parent_dir) != "":
+					moved.append(old_rel)
+			for f in DirAccess.get_files_at(abs_folder):
+				if not f.ends_with(".md"):
+					continue
+				var old_rel := folder_rel + "/" + f
+				if _move_path(old_rel, parent_dir) != "":
+					moved.append(old_rel)
+			DirAccess.remove_absolute(abs_folder)
+
+		var comp_note := folder_rel + ".md"
+		if FileAccess.file_exists(vault.path_join(comp_note)):
+			DirAccess.remove_absolute(vault.path_join(comp_note))
+			_erase_note_meta(comp_note)
+			if GameManager.current_rel == comp_note:
+				GameManager.current_file = ""
+				GameManager.current_rel = ""
+				code_edit.text = ""
+
+		_scrub_order(moved)
+		_prune_empty_dirs()
+		GameManager.scan_notes()
+		_refresh_list()
+		if GameManager.current_rel != "":
+			_select_note(GameManager.current_rel)
+		_flash("Deleted %s — children moved to %s" % [folder_rel.get_file(), parent_dir if parent_dir != "" else "vault root"])
+		return
+
+	# Delete all (node / folder / note / branch)
+	var affected: Array[String] = []
+	var note_rel := folder_rel + ".md"
+	if FileAccess.file_exists(vault.path_join(note_rel)):
+		affected.append(note_rel)
+	if rel.ends_with(".md") and FileAccess.file_exists(vault.path_join(rel)) and not affected.has(rel):
+		affected.append(rel)
+
+	for n in GameManager.notes:
+		var n_str := str(n)
+		if n_str.get_base_dir() == folder_rel or n_str.begins_with(folder_rel + "/"):
+			if not affected.has(n_str):
+				affected.append(n_str)
+
+	if DirAccess.dir_exists_absolute(vault.path_join(folder_rel)):
+		_rm_dir(folder_rel)
+
+	for f in affected:
+		var abs_f := vault.path_join(f)
+		if FileAccess.file_exists(abs_f):
+			DirAccess.remove_absolute(abs_f)
+
+	var deleted_current := false
+	var deleted_note := GameManager.current_rel
+	if GameManager.current_rel != "" and (affected.has(GameManager.current_rel) or GameManager.current_rel.get_base_dir() == folder_rel or GameManager.current_rel.begins_with(folder_rel + "/")):
+		deleted_current = true
+		GameManager.current_file = ""
+		GameManager.current_rel = ""
+		code_edit.text = ""
+
+	for n in affected:
+		_erase_note_meta(n)
+	_scrub_order(affected)
+	_prune_empty_dirs()
+	GameManager.scan_notes()
+	_refresh_list()
+
+	if deleted_current:
+		var dir := deleted_note.get_base_dir() if deleted_note.contains("/") else ""
 		var candidates := _ordered_notes(dir)
 		if candidates.is_empty():
 			for d in GameManager.order.keys():
@@ -972,24 +1157,32 @@ func _delete_current_note() -> void:
 			candidates = _visible_notes()
 		var next_note := ""
 		for n in candidates:
-			next_note = n  # keep last < deleted as fallback
-			if n > fname:
-				next_note = n  # first one after (list is ordered) — break below
-				break
-		GameManager.notes.erase(fname)
-		GameManager.titles.erase(fname)
-		GameManager.tags.erase(fname)
-		GameManager.current_file = ""
-		GameManager.current_rel = ""
-		code_edit.text = ""
-		GameManager.scan_notes()
-		_refresh_list()
+			if not affected.has(n):
+				next_note = n
+				if n > deleted_note:
+					break
 		if next_note != "" and GameManager.notes.has(next_note):
 			_select_note(next_note)
-		_flash("🗑 Deleted " + fname)
-		dlg.queue_free())
-	dlg.canceled.connect(func(): dlg.queue_free())
-	dlg.popup_centered()
+
+	_flash("🗑 Deleted " + rel)
+
+## Forget a note's cached metadata (notes/titles/tags).
+func _erase_note_meta(rel: String) -> void:
+	GameManager.notes.erase(rel)
+	GameManager.titles.erase(rel)
+	GameManager.tags.erase(rel)
+
+## Remove stale relative paths from the persisted custom order.
+func _scrub_order(old_rels: Array) -> void:
+	var changed := false
+	for dir in GameManager.order.keys():
+		var lst: Array = GameManager.order[dir]
+		for r in old_rels:
+			if lst.has(r):
+				lst.erase(r)
+				changed = true
+	if changed:
+		GameManager.save_order()
 
 # ------------------------------------------------- mode toggle / help
 
