@@ -157,7 +157,16 @@ func _ready() -> void:
 		_run_smoke.call_deferred()
 
 func _refresh_list() -> void:
+	var selected := GameManager.current_rel
+	var mobile_drawer_was_open := layout_component.is_mobile_layout and layout_component.drawer_open
 	vault_tree.refresh()
+	if selected != "":
+		vault_tree.select_note(selected, false)
+	# Tree rebuilds must not change the mobile workspace the user was viewing.
+	if layout_component.is_mobile_layout and layout_component.drawer_open != mobile_drawer_was_open:
+		layout_component.drawer_open = mobile_drawer_was_open
+		layout_component.sidebar.visible = mobile_drawer_was_open
+		layout_component.content.visible = not mobile_drawer_was_open
 
 func _refresh_open_note_after_sync() -> void:
 	if help_mode or GameManager.current_rel == "" or not code_edit.visible:
@@ -605,6 +614,9 @@ func _perform_delete(rel: String, keep_children: bool = false) -> void:
 	for n in affected:
 		_erase_note_meta(n)
 	_scrub_order(affected)
+	if sync_service:
+		for deleted_path in affected:
+			sync_service.note_deleted(deleted_path)
 	vault_tree.prune_empty_dirs()
 	GameManager.scan_notes()
 	_refresh_list()

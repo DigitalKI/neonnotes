@@ -267,6 +267,7 @@ func _handle_message(_conn: StreamPeerTCP, msg: Dictionary, st: Dictionary) -> D
 		if typeof(times) != TYPE_DICTIONARY:
 			times = {}
 		var count := 0
+		var tombstone_count := 0
 		var vault := GameManager.vault_abs()
 		if vault == "":
 			return {"ok": false, "error": "no_vault"}
@@ -278,6 +279,18 @@ func _handle_message(_conn: StreamPeerTCP, msg: Dictionary, st: Dictionary) -> D
 				continue
 			var dest := vault.path_join(name)
 			var text := String(files[fname])
+			if name == ".neonnotes-tombstones.json":
+				var remote_tombs = JSON.parse_string(text)
+				if typeof(remote_tombs) == TYPE_DICTIONARY:
+					for deleted_path in remote_tombs.keys():
+						var deleted_file := vault.path_join(str(deleted_path))
+						if FileAccess.file_exists(deleted_file):
+							DirAccess.remove_absolute(deleted_file)
+						_tombstones[str(deleted_path)] = remote_tombs[deleted_path]
+					_tombstones.merge(remote_tombs, true)
+				continue
+			if _tombstones.has(name):
+				continue
 			var binary := not name.ends_with(".md") and not name.ends_with(".json")
 			# last-writer-wins: skip if our local copy is strictly newer
 			if FileAccess.file_exists(dest) and times.has(fname):
@@ -380,6 +393,9 @@ func collect_notes() -> Dictionary:
 			files[name] = f.get_as_text() if name.ends_with(".md") or name.ends_with(".json") else Marshalls.raw_to_base64(f.get_buffer(f.get_length()))
 			times[name] = FileAccess.get_modified_time(path)
 			f.close()
+	if not _tombstones.is_empty():
+		files[".neonnotes-tombstones.json"] = JSON.stringify(_tombstones)
+		times[".neonnotes-tombstones.json"] = Time.get_unix_time_from_system()
 	return {"files": files, "times": times}
 
 func _collect_media(dir_path: String, vault: String, paths: Array[String]) -> void:
@@ -406,6 +422,7 @@ var _retry_timer: Timer
 var _syncing := false
 var _tcp_error_reported := false
 var _peer_sync_times: Dictionary = {}
+var _tombstones: Dictionary = {}
 var _sync_thread: Thread
 var _sync_result: Array = []
 var _sync_mutex := Mutex.new()
@@ -425,6 +442,10 @@ func enable_auto_sync() -> void:
 	add_child(_retry_timer)
 	_retry_timer.start()
 
+func note_deleted(path: String) -> void:
+	_tombstones[path] = Time.get_unix_time_from_system()
+	note_saved()
+
 func note_saved() -> void:
 	_pending_unsynced = true
 	sync_pending.emit()
@@ -441,7 +462,7 @@ func auto_sync() -> void:
 		return
 	_syncing = true
 	var data: Dictionary = collect_notes()
-	if data["files"].is_empty():
+	if data["files"].is_empty() and _tombstones.is_empty():
 		_syncing = false
 		return
 	var targets: Array = []

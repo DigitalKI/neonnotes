@@ -18,7 +18,6 @@ config/icon="uid://dj33s3plqfbbw"
 [autoload]
 
 GameManager="*res://scripts/common/GameManager.gd"
-McpRuntime="*res://addons/godot-mcp/mcp_runtime.gd"
 
 [display]
 

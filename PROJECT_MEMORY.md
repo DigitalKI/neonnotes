@@ -256,6 +256,15 @@ _Chronological, newest last._
 
 ## 3. Direction & next steps
 
+- **2026-09-14 — edit-mode refresh safety**: tree refresh now reselects the current item without emitting `note_requested`, preventing a sync-triggered refresh from reopening the note and resetting edit/preview mode. Remote content still reloads only through the dedicated active-note refresh path. Full tests pass.
+
+
+- **2026-09-14 — mobile refresh state**: vault tree refresh now preserves the selected note and the mobile drawer/editor visibility state, so syncing while the tree is open keeps the tree open, while syncing while editing keeps the editor visible. Full tests pass.
+
+
+- **2026-09-14 — sync identity/delete/UI**: tree refresh preserves the selected note; Sync dialog displays local device/vault IDs and paired device names; added an initial hidden tombstone exchange so deletions propagate instead of stale file copies recreating them. Full tests pass. Tombstone conflict/recreation semantics still need hardening.
+
+
 - **2026-09-13 — TCP worker**: outgoing TCP transfers now run on a single Godot worker thread; the main thread polls a mutex-protected result queue and emits sync signals/UI updates safely. Discovery and file collection remain on Main. Full tests pass.
 
 

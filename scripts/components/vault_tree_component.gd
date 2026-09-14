@@ -538,7 +538,7 @@ func _on_tree_selected() -> void:
 	if str(meta).ends_with(".md") and GameManager.notes.has(fname):
 		note_requested.emit(fname)
 
-func select_note(fname: String) -> void:
+func select_note(fname: String, open_note := true) -> void:
 	# find matching leaf in the tree
 	var stack: Array[TreeItem] = [side_tree.get_root()]
 	while not stack.is_empty():
@@ -546,7 +546,8 @@ func select_note(fname: String) -> void:
 		if it.get_metadata(0) == fname:
 			side_tree.scroll_to_item(it, false)
 			it.select(0)
-			note_requested.emit(fname)
+			if open_note:
+				note_requested.emit(fname)
 			return
 		for c in it.get_children():
 			stack.append(c)

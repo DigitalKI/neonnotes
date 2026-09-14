@@ -55,7 +55,13 @@ func _ready() -> void:
 	_service.sync_done.connect(_on_sync_done)
 	_service.sync_failed.connect(_on_sync_failed)
 
-	_device_label.text = "Device: " + _service.device_name + "\nID: " + GameManager.device_id
+	var paired_text := "Not paired"
+	if not GameManager.paired_peers.is_empty():
+		var names: Array[String] = []
+		for peer in GameManager.paired_peers.values():
+			names.append(str(peer.get("name", "paired device")))
+		paired_text = "Paired with: " + ", ".join(names)
+	_device_label.text = "Device: " + _service.device_name + "\nID: " + GameManager.device_id + "\nVault: " + GameManager.vault_id + "\n" + paired_text
 	_log.append_text("[color=%s]LAN Sync ready. Start discovery to find peers, then share your PIN to pair. Devices you've paired with before reconnect without a PIN.[/color]\n" % _css(pal.get("accent2", Color.GRAY)))
 
 func _css(c: Color) -> String:
