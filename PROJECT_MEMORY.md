@@ -32,6 +32,13 @@ _Last updated: 2026-09-14 (shared Markdown inline-span model + Obsidian callouts
 
 _Chronological, newest last._
 
+- **2026-09-14 — Help as external markdown (user feedback)**: HELP_DOC const removed
+  from main.gd; Help is now `res://docs/help.md`, loaded by `_load_help_doc()`
+  (FileAccess, cached). Outside the vault → no GDScript escaping pitfalls and
+  normal editing. Formatting items are stacked plain paragraphs (no bullet
+  list), rendered + escaped per construct. Export presets include `*.md`
+  (include_filter) so the file ships in exports/APKs.
+
 - **2026-09-14 — highlight/round-2 (user feedback)**:
   - **Numbered lists keep source numbers**: parser stores `numbers` per item;
     renderer uses them (previously renumbered from 1, so `3.`/`7.` rendered as
