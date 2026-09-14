@@ -11,5 +11,7 @@ script = ExtResource("1_comp")
 [node name="StatusLabel" type="Label" parent="." unique_id=283039145]
 unique_name_in_owner = true
 layout_mode = 2
+theme_override_colors/font_color = Color(0.4, 0.85, 0.95, 1)
 theme_override_font_sizes/font_size = 12
 text = "Ready"
+size_flags_horizontal = 3

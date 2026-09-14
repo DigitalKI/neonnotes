@@ -142,11 +142,32 @@ func _ready() -> void:
 	sync_service = SyncService.new()
 	sync_service.name = "SyncService"
 	add_child(sync_service)
+	# Paired vaults reconnect automatically; the dialog is only configuration UI.
+	if not GameManager.trusted.is_empty() or not GameManager.paired_peers.is_empty() or GameManager.paired_vault_id != "":
+		if sync_service.start_discovery():
+			sync_service.enable_auto_sync()
+		else:
+			sync_service.sync_failed.emit("Could not start background discovery")
+	sync_service.sync_done.connect(func(_peer: String, _count: int):
+		GameManager.scan_notes()
+		_refresh_list()
+		_refresh_open_note_after_sync.call_deferred())
+	status_bar.set_sync_service(sync_service)
 	if OS.get_environment("NEONNOTES_SMOKE") == "1":
 		_run_smoke.call_deferred()
 
 func _refresh_list() -> void:
 	vault_tree.refresh()
+
+func _refresh_open_note_after_sync() -> void:
+	if help_mode or GameManager.current_rel == "" or not code_edit.visible:
+		return
+	var latest := GameManager.read_note(GameManager.current_rel)
+	if latest != code_edit.text:
+		code_edit.text = latest
+		if not source_mode:
+			_render_preview()
+		status_bar.flash("↻ Updated " + GameManager.current_rel)
 
 func _prepare_smoke_vault() -> void:
 	# Smoke tests must never read or persist changes to the user's real vault.
@@ -821,7 +842,7 @@ func _on_vault_selected(path: String) -> void:
 
 func _on_sync() -> void:
 	_flush_save()
-	var dlg: SyncDialog = load("res://scripts/sync/sync_dialog.gd").new()
+	var dlg: SyncDialog = load("res://scenes/components/sync_dialog.tscn").instantiate()
 	dlg.name = "SyncDialog"
 	dlg.service = sync_service
 	add_child(dlg)
@@ -937,7 +958,7 @@ func _run_smoke() -> void:
 	fails += _check(graph_view.visible, "graph view visible")
 	var svc: Node = load("res://scripts/sync/sync_service.gd").new()
 	fails += _check(svc.gen_pin().length() == 6, "pin gen")
-	var dlg: Node = load("res://scripts/sync/sync_dialog.gd").new()
+	var dlg: Node = load("res://scenes/components/sync_dialog.tscn").instantiate()
 	add_child(dlg)
 	fails += _check(dlg.get_child_count() > 0, "sync dialog built")
 	# v3: tags, image blocks, escapes, device id

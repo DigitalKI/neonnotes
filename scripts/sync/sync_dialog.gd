@@ -13,88 +13,43 @@ var _send_btn: Button
 var _status_label: Label
 
 func _ready() -> void:
+	_device_label = get_node("Root/DeviceRow/DeviceLabel")
+	_pin_label = get_node("Root/DeviceRow/PinLabel")
+	_discovery_btn = get_node("Root/Columns/DiscoveryToggle")
+	_peer_list = get_node("Root/Columns/PeerList")
+	_pin_edit = get_node("Root/Columns/PinEdit")
+	_send_btn = get_node("Root/Columns/SendBtn")
+	_log = get_node("Root/Columns/SyncLog")
+	_status_label = get_node("Root/StatusLabel")
+	_discovery_btn.toggled.connect(_on_discovery_toggled)
+	_send_btn.pressed.connect(_on_send)
+	_pin_edit.text_changed.connect(func(value: String):
+		if value.strip_edges() != "" and _service != null:
+			_service.set_pin(value.strip_edges()))
 	title = "LAN Sync"
 	# fit small screens: the fixed 720x460 overflows portrait phones
-	var vp: Vector2i = get_tree().root.size
-	size = Vector2i(mini(720, int(vp.x * 0.92)), mini(460, int(vp.y * 0.70)))
+	var vp: Vector2i = get_viewport().get_visible_rect().size
+	var narrow := vp.x < 700
+	var dialog_w := mini(720, int(vp.x * (0.86 if narrow else 0.92)))
+	var dialog_h := mini(640 if narrow else 460, int(vp.y * (0.84 if narrow else 0.70)))
+	size = Vector2i(maxi(260, dialog_w), maxi(360, dialog_h))
 	var pal: Dictionary = GameManager.palette()
+	var panel := StyleBoxFlat.new()
+	panel.bg_color = pal.get("panel", Color("1d0d3a"))
+	panel.border_color = pal.get("accent4", Color("8a2be2"))
+	panel.set_border_width_all(1)
+	panel.corner_radius_top_left = 8
+	panel.corner_radius_top_right = 8
+	panel.corner_radius_bottom_left = 8
+	panel.corner_radius_bottom_right = 8
+	add_theme_stylebox_override("panel", panel)
+	add_theme_color_override("font_color", pal.get("text", Color.WHITE))
 
-	var root := VBoxContainer.new()
-	root.name = "Root"
-	root.set_anchors_preset(Control.PRESET_FULL_RECT)
-	root.add_theme_constant_override("separation", 10)
-	add_child(root)
-
-	var device_row := HBoxContainer.new()
-	device_row.name = "DeviceRow"
-	device_row.add_theme_constant_override("separation", 16)
-	root.add_child(device_row)
-
-	_device_label = Label.new()
-	_device_label.name = "DeviceLabel"
-	device_row.add_child(_device_label)
-
-	_pin_label = Label.new()
-	_pin_label.name = "PinLabel"
-	_pin_label.add_theme_font_override("font", load("res://assets/fonts/Orbitron.ttf"))
-	_pin_label.add_theme_font_size_override("font_size", 28)
-	_pin_label.add_theme_color_override("font_color", pal.get("accent", Color.CYAN))
-	device_row.add_child(_pin_label)
-
-	var columns := HBoxContainer.new()
-	columns.name = "Columns"
-	columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	columns.add_theme_constant_override("separation", 12)
-	root.add_child(columns)
-
-	var left := VBoxContainer.new()
-	left.name = "LeftCol"
-	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	left.add_theme_constant_override("separation", 8)
-	columns.add_child(left)
-
-	_discovery_btn = Button.new()
-	_discovery_btn.name = "DiscoveryToggle"
-	_discovery_btn.toggle_mode = true
-	_discovery_btn.text = "Start Discovery"
-	_discovery_btn.toggled.connect(_on_discovery_toggled)
-	left.add_child(_discovery_btn)
-
-	_peer_list = ItemList.new()
-	_peer_list.name = "PeerList"
-	_peer_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	left.add_child(_peer_list)
-
-	_pin_edit = LineEdit.new()
-	_pin_edit.name = "PinEdit"
-	_pin_edit.placeholder_text = "Remote PIN or word-code"
-	left.add_child(_pin_edit)
-
-	_send_btn = Button.new()
-	_send_btn.name = "SendBtn"
-	_send_btn.text = "Send Notes → Peer"
-	_send_btn.pressed.connect(_on_send)
-	left.add_child(_send_btn)
-
-	var right := VBoxContainer.new()
-	right.name = "RightCol"
-	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	columns.add_child(right)
-
-	_log = RichTextLabel.new()
-	_log.name = "SyncLog"
-	_log.bbcode_enabled = true
-	_log.scroll_following = true
-	_log.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_log.add_theme_color_override("default_color", pal.get("text", Color.WHITE))
-	right.add_child(_log)
-
-	_status_label = Label.new()
-	_status_label.name = "StatusLabel"
-	root.add_child(_status_label)
-
+	_pin_label.text = "PIN: " + (GameManager.sync_pin if GameManager.sync_pin != "" else "Not set")
+	_pin_edit.text = GameManager.sync_pin
 	_service = service if service != null else SyncService.new()
 	_service.name = "SyncService"
+	_service.set_pin(GameManager.sync_pin)
 	add_child(_service)
 	_service.peers_changed.connect(_refresh_peers)
 	_service.sync_done.connect(_on_sync_done)
@@ -111,10 +66,13 @@ func _on_discovery_toggled(pressed: bool) -> void:
 		if _service.start_discovery():
 			_service.enable_auto_sync()
 			_discovery_btn.text = "Stop Discovery"
-			var pin := _service.gen_pin()
-			_service.set_pin(pin)
-			_pin_label.text = pin
-			_log.append_text("[color=%s]Discovery started. PIN: %s[/color]\n" % [_css(Color.WHITE), pin])
+			var pin := GameManager.sync_pin
+			if pin == "":
+				pin = _service.gen_pin()
+				_service.set_pin(pin)
+			_pin_label.text = "PIN: " + pin
+			_log.append_text("[color=%s]Discovery started. PIN: %s. Looking for devices on this LAN…[/color]\n" % [_css(Color.WHITE), pin])
+			_status_label.text = "Searching for nearby devices…"
 		else:
 			_discovery_btn.button_pressed = false
 			_log.append_text("[color=red]Could not bind UDP port %d. Is another instance running?[/color]\n" % SyncService.DISCOVERY_PORT)
@@ -126,6 +84,7 @@ func _on_discovery_toggled(pressed: bool) -> void:
 
 func _refresh_peers() -> void:
 	var selected_ip := ""
+	_status_label.text = "Found %d device(s)." % _service.peers.size()
 	var idx := _peer_list.get_selected_items()
 	if idx.size() > 0:
 		selected_ip = _peer_list.get_item_metadata(idx[0])
@@ -133,7 +92,8 @@ func _refresh_peers() -> void:
 	var i := 0
 	for ip in _service.peers.keys():
 		var p: Dictionary = _service.peers[ip]
-		_peer_list.add_item("%s  (%s)" % [str(p["name"]), ip])
+		var peer_id := str(p.get("id", ""))
+		_peer_list.add_item("◆ %s\n%s" % [str(p["name"]), peer_id])
 		_peer_list.set_item_metadata(i, ip)
 		if ip == selected_ip:
 			_peer_list.select(i)

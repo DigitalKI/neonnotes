@@ -4,6 +4,7 @@ extends Node
 signal peers_changed
 signal sync_done(peer_name: String, count: int)
 signal sync_failed(reason: String)
+signal sync_pending
 
 const DISCOVERY_PORT := 47770
 const TCP_PORT := 47771
@@ -25,6 +26,7 @@ const WORDS := [
 var peers: Dictionary = {}
 var device_name: String = ""
 var expected_pin := ""
+var _pending_unsynced := false
 
 ## Stable 4-word identity code (17.8M space) — the human-readable device ID.
 static func gen_device_code() -> String:
@@ -52,6 +54,8 @@ func _ready() -> void:
 
 func start_discovery() -> bool:
 	stop_discovery()
+	# Keep discovery alive even when this dialog is closed; Main owns this node.
+	set_process(true)
 	_udp = PacketPeerUDP.new()
 	if _udp.bind(DISCOVERY_PORT) != OK:
 		_udp = null
@@ -95,7 +99,7 @@ func stop_discovery() -> void:
 func _send_broadcast() -> void:
 	if _udp == null:
 		return
-	var msg := JSON.stringify({"proto": MAGIC, "name": device_name, "id": GameManager.device_id, "tcp": TCP_PORT})
+	var msg := JSON.stringify({"proto": MAGIC, "name": device_name, "id": GameManager.device_id, "vault_id": GameManager.vault_id, "tcp": TCP_PORT})
 	_udp.set_broadcast_enabled(true)
 	_udp.set_dest_address("255.255.255.255", DISCOVERY_PORT)
 	_udp.put_packet(msg.to_utf8_buffer())
@@ -111,8 +115,26 @@ func _expire_peers() -> void:
 		peers_changed.emit()
 
 func _process(_delta: float) -> void:
+	_poll_thread_result()
 	_poll_discovery()
 	_poll_server()
+
+func _poll_thread_result() -> void:
+	if _sync_thread == null:
+		return
+	_sync_mutex.lock()
+	var result: Dictionary = _sync_result.pop_front() if not _sync_result.is_empty() else {}
+	_sync_mutex.unlock()
+	if result.is_empty():
+		return
+	_sync_thread.wait_to_finish()
+	_sync_thread = null
+	_syncing = false
+	if result.get("ok", false):
+		_pending_unsynced = false
+		sync_done.emit(str(result.get("name", "peer")), int(result.get("count", 0)))
+	else:
+		sync_failed.emit(str(result.get("error", "sync failed")))
 
 func _poll_discovery() -> void:
 	if _udp == null:
@@ -127,17 +149,21 @@ func _poll_discovery() -> void:
 			continue
 		var now := Time.get_ticks_msec()
 		if not peers.has(ip):
-			peers[ip] = {"name": str(data.get("name", "peer")), "id": str(data.get("id", "")), "tcp": int(data.get("tcp", TCP_PORT)), "seen": now}
+			peers[ip] = {"name": str(data.get("name", "peer")), "id": str(data.get("id", "")), "vault_id": str(data.get("vault_id", "")), "tcp": int(data.get("tcp", TCP_PORT)), "seen": now}
 			peers_changed.emit()
 		else:
 			peers[ip]["seen"] = now
 			peers[ip]["name"] = str(data.get("name", peers[ip]["name"]))
 			peers[ip]["id"] = str(data.get("id", peers[ip].get("id", "")))
+			peers[ip]["vault_id"] = str(data.get("vault_id", peers[ip].get("vault_id", "")))
 
 # ---------------- Pin / codes ----------------
 
 func set_pin(pin: String) -> void:
 	expected_pin = pin
+	if pin != "" and GameManager.sync_pin == "":
+		GameManager.sync_pin = pin
+		GameManager._save_settings()
 
 func gen_pin() -> String:
 	return "%06d" % (randi() % 1000000)
@@ -230,7 +256,7 @@ func _handle_message(_conn: StreamPeerTCP, msg: Dictionary, st: Dictionary) -> D
 			return {"ok": false, "error": "auth"}
 		st["paired"] = true
 		st["peer_id"] = sender_id
-		return {"ok": true, "name": device_name, "id": GameManager.device_id}
+		return {"ok": true, "name": device_name, "id": GameManager.device_id, "vault_id": GameManager.vault_id, "pin": expected_pin}
 	if cmd == "push":
 		if not st.get("paired", false):
 			return {"ok": false, "error": "auth"}
@@ -250,18 +276,23 @@ func _handle_message(_conn: StreamPeerTCP, msg: Dictionary, st: Dictionary) -> D
 			if name == "" or name.begins_with("/") or name.contains("\\") or name.contains("..") \
 					or name.get_base_dir() == GameManager.EXPORTS_SUBDIR:
 				continue
-			var text := String(files[fname])
 			var dest := vault.path_join(name)
+			var text := String(files[fname])
+			var binary := not name.ends_with(".md") and not name.ends_with(".json")
 			# last-writer-wins: skip if our local copy is strictly newer
 			if FileAccess.file_exists(dest) and times.has(fname):
 				var local_t := FileAccess.get_modified_time(dest)
 				var remote_t := int(times[fname])
 				if local_t > remote_t:
 					continue
+			DirAccess.make_dir_recursive_absolute(dest.get_base_dir())
 			var f := FileAccess.open(dest, FileAccess.WRITE)
 			if f == null:
 				continue
-			f.store_string(text)
+			if binary:
+				f.store_buffer(Marshalls.base64_to_raw(text))
+			else:
+				f.store_string(text)
 			f.close()
 			count += 1
 		if count > 0:
@@ -301,6 +332,9 @@ static func push_to(ip: String, port: int, pin: String, files: Dictionary, timeo
 	var peer_id := String(reply.get("id", ""))
 	if peer_id != "":
 		GameManager.add_trusted(peer_id)
+		GameManager.paired_vault_id = String(reply.get("vault_id", ""))
+		GameManager.paired_peers[peer_id] = {"name": str(reply.get("name", peer_id)), "vault_id": GameManager.paired_vault_id, "pin": str(reply.get("pin", ""))}
+		GameManager._save_settings()
 	var reply2: Variant = _client_roundtrip(conn, {"cmd": "push", "files": files, "times": times, "name": device_display_name(), "id": GameManager.device_id})
 	conn.disconnect_from_host()
 	if typeof(reply2) != TYPE_DICTIONARY or not reply2.get("ok", false):
@@ -334,14 +368,28 @@ func collect_notes() -> Dictionary:
 	var files := {}
 	var times := {}
 	var vault := GameManager.vault_abs()
+	# Transfer markdown and embedded media, but never generated exports.
+	var paths: Array[String] = []
 	for fname in GameManager.notes:
-		var path := vault.path_join(String(fname))
+		paths.append(String(fname))
+	_collect_media(vault.path_join("media"), vault, paths)
+	for name in paths:
+		var path := vault.path_join(name)
 		var f := FileAccess.open(path, FileAccess.READ)
 		if f:
-			files[String(fname)] = f.get_as_text()
-			times[String(fname)] = FileAccess.get_modified_time(path)
+			files[name] = f.get_as_text() if name.ends_with(".md") or name.ends_with(".json") else Marshalls.raw_to_base64(f.get_buffer(f.get_length()))
+			times[name] = FileAccess.get_modified_time(path)
 			f.close()
 	return {"files": files, "times": times}
+
+func _collect_media(dir_path: String, vault: String, paths: Array[String]) -> void:
+	if not DirAccess.dir_exists_absolute(dir_path):
+		return
+	for name in DirAccess.get_files_at(dir_path):
+		var rel := dir_path.path_join(name).trim_prefix(vault + "/")
+		paths.append(rel)
+	for name in DirAccess.get_directories_at(dir_path):
+		_collect_media(dir_path.path_join(name), vault, paths)
 
 ## device name shared over the wire (env override or generated)
 static func device_display_name() -> String:
@@ -354,38 +402,72 @@ static func device_display_name() -> String:
 ## the newest copy.
 
 var _auto_timer: Timer
+var _retry_timer: Timer
 var _syncing := false
 var _tcp_error_reported := false
+var _peer_sync_times: Dictionary = {}
+var _sync_thread: Thread
+var _sync_result: Array = []
+var _sync_mutex := Mutex.new()
 
 func enable_auto_sync() -> void:
 	if _auto_timer:
 		return
 	_auto_timer = Timer.new()
-	_auto_timer.wait_time = 15.0
+	_auto_timer.wait_time = 2.5
 	_auto_timer.timeout.connect(auto_sync)
 	add_child(_auto_timer)
 	_auto_timer.start()
+	_retry_timer = Timer.new()
+	_retry_timer.name = "SyncRetryTimer"
+	_retry_timer.wait_time = 20.0
+	_retry_timer.timeout.connect(auto_sync)
+	add_child(_retry_timer)
+	_retry_timer.start()
 
 func note_saved() -> void:
+	_pending_unsynced = true
+	sync_pending.emit()
 	if _auto_timer == null:
 		return
 	_auto_timer.stop()
-	_auto_timer.start()  # debounce: sync 15 s after the last edit
+	_auto_timer.start()  # short debounce: sync shortly after each edit
 
 func auto_sync() -> void:
 	if _syncing or _udp == null or GameManager.trusted.is_empty():
+		return
+	# One single-flight transfer; periodic timer also discovers peers when edits are idle.
+	if not _pending_unsynced and peers.is_empty():
 		return
 	_syncing = true
 	var data: Dictionary = collect_notes()
 	if data["files"].is_empty():
 		_syncing = false
 		return
+	var targets: Array = []
 	for ip in peers.keys():
 		var p: Dictionary = peers[ip]
 		var pid := str(p.get("id", ""))
-		if pid == "" or not GameManager.trusted.has(pid):
-			continue  # never auto-send to an unverified device
-		var res: Dictionary = push_to(str(ip), int(p.get("tcp", TCP_PORT)), "", data["files"], 4000, data["times"])
-		if res.get("ok", false):
-			sync_done.emit(str(p.get("name", ip)), int(res.get("count", 0)))
-	_syncing = false
+		if pid != "" and GameManager.trusted.has(pid):
+			targets.append({"ip": str(ip), "port": int(p.get("tcp", TCP_PORT)), "name": str(p.get("name", ip))})
+	if targets.is_empty():
+		_syncing = false
+		return
+	_sync_thread = Thread.new()
+	_sync_thread.start(_sync_worker.bind(targets, data["files"], data["times"]))
+	return
+
+func _sync_worker(targets: Array, files: Dictionary, times: Dictionary) -> void:
+	var successful := 0
+	var last_name := "peer"
+	var failure := ""
+	for target in targets:
+		last_name = str(target["name"])
+		var result: Dictionary = push_to(str(target["ip"]), int(target["port"]), "", files, 4000, times)
+		if result.get("ok", false):
+			successful += int(result.get("count", 0))
+		else:
+			failure = "%s: %s" % [last_name, str(result.get("error", "unavailable"))]
+	_sync_mutex.lock()
+	_sync_result.append({"ok": successful > 0, "count": successful, "name": last_name, "error": failure})
+	_sync_mutex.unlock()

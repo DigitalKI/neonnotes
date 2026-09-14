@@ -41,13 +41,19 @@ var notes: Array[String] = []
 # have successfully paired with (trusted → no PIN needed again).
 var device_id := ""
 var trusted: Array[String] = []
+var sync_pin := ""
+var vault_id := ""
+var paired_vault_id := ""
+var paired_peers: Dictionary = {} # device_id -> {name, vault_id, pin}
 
 func _ready() -> void:
 	_load_settings()
 	DirAccess.make_dir_recursive_absolute(vault_abs())
 	if device_id == "":
 		device_id = SyncService.gen_device_code()
-		_save_settings()
+	if vault_id == "":
+		vault_id = "%s-%s" % [Time.get_unix_time_from_system(), randi()]
+	_save_settings()
 
 # ------------------------------------------------------------ palette
 
@@ -232,6 +238,10 @@ func _load_settings() -> void:
 		palette_name = "Synthwave"
 	vault_dir = cf.get_value("vault", "dir", VAULT_DIR)
 	device_id = cf.get_value("sync", "device_id", "")
+	sync_pin = cf.get_value("sync", "pin", "")
+	vault_id = cf.get_value("sync", "vault_id", "")
+	paired_vault_id = cf.get_value("sync", "paired_vault_id", "")
+	paired_peers = cf.get_value("sync", "paired_peers", {})
 	trusted.clear()
 	for t in cf.get_value("sync", "trusted", []):
 		trusted.append(String(t))
@@ -241,6 +251,10 @@ func _save_settings() -> void:
 	cf.set_value("ui", "palette", palette_name)
 	cf.set_value("vault", "dir", vault_dir)
 	cf.set_value("sync", "device_id", device_id)
+	cf.set_value("sync", "pin", sync_pin)
+	cf.set_value("sync", "vault_id", vault_id)
+	cf.set_value("sync", "paired_vault_id", paired_vault_id)
+	cf.set_value("sync", "paired_peers", paired_peers)
 	cf.set_value("sync", "trusted", trusted)
 	cf.save(SETTINGS)
 

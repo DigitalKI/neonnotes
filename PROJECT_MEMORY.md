@@ -256,6 +256,32 @@ _Chronological, newest last._
 
 ## 3. Direction & next steps
 
+- **2026-09-13 — TCP worker**: outgoing TCP transfers now run on a single Godot worker thread; the main thread polls a mutex-protected result queue and emits sync signals/UI updates safely. Discovery and file collection remain on Main. Full tests pass.
+
+
+- **2026-09-13 — sync refresh**: successful incoming sync now rescans the vault, refreshes the tree, and deferred-reloads the currently open note when its disk content differs. Existing TCP transfer remains synchronous; worker-thread extraction is still the next performance improvement if freezes persist.
+
+
+- **2026-09-13 — sync startup/status**: Main now automatically starts discovery and auto-sync on launch when saved pairing data exists. Startup status is red until a paired peer is discovered and a sync succeeds; a peer’s yellow state is local pending work and does not imply the other device has received it.
+- **2026-09-13 — sync scheduling**: added 2.5s edit debounce, single-flight guard, and a 20s periodic retry/peer detection timer. Idle paired devices are retried periodically; edits queue yellow pending state and sync when peers are available. Full tests pass. Network transfer is still synchronous and should be moved to a worker thread if real-device profiling shows UI blocking.
+
+
+- **2026-09-13 — media and faster sync**: sync now recursively transfers vault Markdown plus `media/` binary files (base64 framed over JSON), creates nested destination folders, excludes exports, and uses a 1.5-second post-edit debounce. This supports image updates and retries when a trusted peer becomes visible later. Full tests pass.
+
+
+- **2026-09-13 — SyncDialog scene conversion**: pairing UI moved from runtime-created controls into `scenes/components/sync_dialog.tscn`; script now handles behavior and injected persistent SyncService. Main and smoke tests instantiate the scene. Responsive sizing and palette styling remain in the component script.
+
+
+- **2026-09-13 — sync dialog refinement**: mobile dialog now clamps to 86% viewport width with a taller single-column layout, compact spacing, palette-styled panel/controls, wrapping labels, and explicit discovery feedback. Discovery remains owned by Main’s persistent service after the dialog closes. Tests pass.
+
+
+- **2026-09-13 — clean-break sync foundation**: legacy pairings are intentionally not migrated. Added persistent vault identity and paired-vault/device records, stable first-generated PIN behavior, exchanged peer vault/PIN metadata, immediate background health signaling, and yellow pending-sync status. Existing pairing UX still needs the explicit overwrite/merge confirmation, unpair UI, and tombstone manifest implementation.
+
+
+- **2026-09-13 — sync UX improvements**: incoming sync now rescans and refreshes the vault tree after received files; the mobile pairing dialog uses a single narrow vertical column; the status bar sync dot is an explicit compact child and remains connected to the Main-owned service after the dialog closes. Sync service remains a Main child, so trusted background syncing continues without the dialog.
+- **2026-09-13 — sync UX improvements**: sync PIN is persisted in `settings.cfg` and restored into the pairing dialog; entering a remote PIN stores it immediately. The pairing dialog now emphasizes the PIN and shows peers with their colored/visible word IDs. Status bar has a tiny sync health dot (grey unconfigured, green successful sync, red failure) wired to the app-owned SyncService. Full local tests pass. Mobile dialog remains viewport-clamped; further device validation is still recommended.
+
+
 - **Current goal:** v3 UX batch complete through round 2. Tree is now fully
   restructurable (drag notes/folders, folder-as-note, auto link rewrite).
 - **Next up:** live phone↔PC sync validation (trust flow + auto-sync over the
