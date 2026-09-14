@@ -21,6 +21,8 @@ var save_cb: Callable
 var flash_cb: Callable
 var _tree_menu := PopupMenu.new()
 var _press_pos := Vector2.ZERO
+var _touch_src_path := ""
+var _is_touch_dragging := false
 
 ## Wire behavior once the scene nodes are ready. The host connects
 ## palette_btn/vault_btn/sync_btn/tree_delete_btn signals itself.
@@ -29,19 +31,51 @@ func build() -> void:
 	# Trigger note opening on mouse/touch RELEASE so dragging a row never
 	# accidentally opens a note or closes the mobile sidebar drawer.
 	side_tree.gui_input.connect(func(ev: InputEvent):
-		if ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_LEFT:
+		if (ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_LEFT) or ev is InputEventScreenTouch:
 			if ev.pressed:
 				_press_pos = ev.position
+				_is_touch_dragging = false
 				_drag_just_happened = false
+				_touch_src_path = ""
+				var start_item := side_tree.get_item_at_position(ev.position)
+				if start_item != null and start_item != side_tree.get_root() and start_item.get_metadata(0) != null:
+					var meta := str(start_item.get_metadata(0))
+					if meta != "":
+						if meta.ends_with(".md") and DirAccess.dir_exists_absolute(GameManager.vault_abs().path_join(meta.trim_suffix(".md"))):
+							meta = meta.trim_suffix(".md")
+						_touch_src_path = meta
 			else:
-				if _drag_just_happened:
+				if _is_touch_dragging or _drag_just_happened:
+					if _touch_src_path != "":
+						var target_item := side_tree.get_item_at_position(ev.position)
+						var section := _custom_drop_section(target_item, ev.position)
+						_perform_drop(_touch_src_path, target_item, section)
+					_is_touch_dragging = false
 					_drag_just_happened = false
+					_touch_src_path = ""
 				else:
 					if ev.position.distance_to(_press_pos) < 16.0:
-						var it := side_tree.get_item_at_position(side_tree.get_local_mouse_position())
+						var it := side_tree.get_item_at_position(ev.position)
+						if it == null:
+							it = side_tree.get_item_at_position(side_tree.get_local_mouse_position())
 						if it != null and it.get_metadata(0) != null:
 							it.select(0)
 							_on_tree_selected()
+					_touch_src_path = ""
+		elif ev is InputEventMouseMotion:
+			if ev.button_mask & MOUSE_BUTTON_MASK_LEFT and _touch_src_path != "":
+				if ev.position.distance_to(_press_pos) > 10.0:
+					_is_touch_dragging = true
+					var target_item := side_tree.get_item_at_position(ev.position)
+					var section := _custom_drop_section(target_item, ev.position)
+					_mark_drop_hint(target_item, section)
+		elif ev is InputEventScreenDrag:
+			if _touch_src_path != "":
+				if ev.position.distance_to(_press_pos) > 10.0:
+					_is_touch_dragging = true
+					var target_item := side_tree.get_item_at_position(ev.position)
+					var section := _custom_drop_section(target_item, ev.position)
+					_mark_drop_hint(target_item, section)
 		elif ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_RIGHT and ev.pressed:
 			var rit := side_tree.get_item_at_position(side_tree.get_local_mouse_position())
 			if rit != null and rit.get_metadata(0) != null:
@@ -209,6 +243,15 @@ func _tree_get_drag(at_position: Vector2) -> Variant:
 	if meta.ends_with(".md") and DirAccess.dir_exists_absolute(GameManager.vault_abs().path_join(meta.trim_suffix(".md"))):
 		meta = meta.trim_suffix(".md")
 	_drag_just_happened = true
+	_is_touch_dragging = true
+
+	var preview := MarginContainer.new()
+	var label := Label.new()
+	label.text = " 📄 " + it.get_text(0) + " "
+	label.add_theme_color_override("font_color", GameManager.color("accent"))
+	preview.add_child(label)
+	set_drag_preview(preview)
+
 	return {"type": "neonnotes_move", "path": meta, "label": it.get_text(0)}
 
 ## True between a tree drag and its release — lets the release handler select
@@ -291,20 +334,16 @@ func _mark_drop_hint(it: TreeItem, section: int = 0) -> void:
 
 func _clear_drop_hint() -> void:
 	_mark_drop_hint(null, 0)
-	_drag_just_happened = false
 	_drop_section = 0
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_DRAG_END:
 		_clear_drop_hint()
 
-func _tree_drop(at_position: Vector2, data: Variant) -> void:
-	var src := str(data.get("path", ""))
+func _perform_drop(src: String, it: TreeItem, section: int) -> void:
 	if src == "":
 		_clear_drop_hint()
 		return
-	var it := side_tree.get_item_at_position(at_position)
-	var section := _custom_drop_section(it, at_position)
 	# target folder: the parent folder of the row under the cursor
 	var target_dir := ""
 	if it != null and it.get_metadata(0) != null:
@@ -342,6 +381,12 @@ func _tree_drop(at_position: Vector2, data: Variant) -> void:
 	if GameManager.current_rel == "" and new_rel.ends_with(".md"):
 		select_note(new_rel)
 	flash_cb.call("Moved → " + new_rel)
+
+func _tree_drop(at_position: Vector2, data: Variant) -> void:
+	var src := str(data.get("path", ""))
+	var it := side_tree.get_item_at_position(at_position)
+	var section := _custom_drop_section(it, at_position)
+	_perform_drop(src, it, section)
 
 ## Remove now-empty folders (bottom-up) so restructuring leaves no leftovers.
 func prune_empty_dirs() -> void:
