@@ -10,14 +10,15 @@ config_version=5
 
 [application]
 
-config/name="NeonNotes v2"
+config/name="NeonNotes"
 run/main_scene="res://scenes/main/Main.tscn"
 config/features=PackedStringArray("4.7")
-config/icon="res://icon.svg"
+config/icon="uid://dj33s3plqfbbw"
 
 [autoload]
 
 GameManager="*res://scripts/common/GameManager.gd"
+McpRuntime="*res://addons/godot-mcp/mcp_runtime.gd"
 
 [display]
 

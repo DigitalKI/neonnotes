@@ -691,11 +691,47 @@ func _on_image_click(src: String) -> void:
 		image_dialog.name = "ImageDialog"
 		image_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
 		image_dialog.access = FileDialog.ACCESS_FILESYSTEM
-		image_dialog.title = "Choose Image"
-		image_dialog.filters = ["*.png ; PNG images", "*.jpg,*.jpeg ; JPEG images", "*.webp ; WebP images", "*.gif ; GIF images"]
+		# Android's sandbox cannot enumerate shared storage through Godot's
+		# desktop picker. The native picker uses the Storage Access Framework and
+		# returns a readable, temporary file path without broad storage access.
+		if OS.get_name() == "Android":
+			image_dialog.use_native_dialog = true
+		image_dialog.title = "CHOOSE IMAGE"
+		image_dialog.filters = ["*.png,*.jpg,*.jpeg,*.webp,*.gif ; IMAGE FILES"]
 		image_dialog.file_selected.connect(_on_image_selected)
+		_style_image_dialog()
 		add_child(image_dialog)
-	image_dialog.popup_centered(Vector2i(700, 500))
+	var viewport_size := get_viewport().get_visible_rect().size
+	var dialog_size := Vector2i(
+		int(min(700.0, max(300.0, viewport_size.x * 0.92))),
+		int(min(500.0, max(280.0, viewport_size.y * 0.78))))
+	image_dialog.popup_centered(dialog_size)
+
+func _style_image_dialog() -> void:
+	if image_dialog == null:
+		return
+	var accent := GameManager.color("accent")
+	var accent2 := GameManager.color("accent2")
+	var panel := GameManager.color("panel")
+	var text := GameManager.color("text")
+	var bg := StyleBoxFlat.new()
+	bg.bg_color = panel
+	bg.border_color = accent
+	bg.set_border_width_all(2)
+	bg.corner_radius_top_left = 8
+	bg.corner_radius_top_right = 8
+	bg.corner_radius_bottom_left = 8
+	bg.corner_radius_bottom_right = 8
+	bg.content_margin_left = 12
+	bg.content_margin_right = 12
+	bg.content_margin_top = 10
+	bg.content_margin_bottom = 10
+	image_dialog.add_theme_stylebox_override("panel", bg)
+	image_dialog.add_theme_color_override("font_color", text)
+	image_dialog.add_theme_color_override("font_hover_color", accent2)
+	image_dialog.add_theme_color_override("font_selected_color", text)
+	image_dialog.add_theme_color_override("accent_color", accent)
+	image_dialog.add_theme_font_override("font", load("res://assets/fonts/ShareTechMono-Regular.ttf"))
 
 func _on_image_selected(path: String) -> void:
 	var media_dir := GameManager.vault_abs() + "/media"

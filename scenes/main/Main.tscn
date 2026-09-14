@@ -5,15 +5,15 @@
 [ext_resource type="Shader" uid="uid://d0udygsyay06s" path="res://shaders/crt.gdshader" id="3_crt"]
 [ext_resource type="Script" uid="uid://54xformjxgfq" path="res://scripts/render/graph_view.gd" id="4_graph"]
 [ext_resource type="PackedScene" path="res://scenes/components/toolbar.tscn" id="5_toolbar"]
-[ext_resource type="PackedScene" path="res://scenes/components/status_bar.tscn" id="6_status"]
+[ext_resource type="PackedScene" uid="uid://cj1ama86pqcoo" path="res://scenes/components/status_bar.tscn" id="6_status"]
 [ext_resource type="PackedScene" path="res://scenes/components/side_panel.tscn" id="7_side"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMat_crt"]
 shader = ExtResource("3_crt")
-shader_parameter/curve = 0.0
-shader_parameter/scanline_strength = 0.12
-shader_parameter/mask_strength = 0.1
-shader_parameter/wobble_strength = 0.0
+shader_parameter/curve = 0.0110000005225
+shader_parameter/scanline_strength = 0.07600000361
+shader_parameter/mask_strength = 0.2430000115425
+shader_parameter/wobble_strength = 0.1550000073625
 shader_parameter/mask_type = 2
 
 [node name="App" type="Control" unique_id=1238224295]
@@ -67,10 +67,10 @@ layout_mode = 2
 split_offsets = PackedInt32Array(230)
 split_offset = 230
 
-[node name="SidePanel" parent="Root/WorkspaceMargin/Workspace" instance=ExtResource("7_side")]
+[node name="SidePanel" parent="Root/WorkspaceMargin/Workspace" unique_id=1931687495 instance=ExtResource("7_side")]
 unique_name_in_owner = true
-
 custom_minimum_size = Vector2(220, 0)
+layout_mode = 2
 
 [node name="Content" type="PanelContainer" parent="Root/WorkspaceMargin/Workspace" unique_id=198102758]
 unique_name_in_owner = true
@@ -100,6 +100,7 @@ script = ExtResource("4_graph")
 
 [node name="StatusBar" parent="Root" unique_id=781581872 instance=ExtResource("6_status")]
 unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 33)
 layout_mode = 2
 
 [node name="CrtOverlay" type="ColorRect" parent="." unique_id=1821292982]

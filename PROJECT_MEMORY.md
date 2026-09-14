@@ -221,7 +221,14 @@ _Chronological, newest last._
     steps 4/5). All 41 checks pass at each commit (commits 41c2c2f, b003206).
   - **Remaining**: step 4 = DeleteService + SaveService; step 5 =
     NoteEditorController + Content.tscn (content subtree still in Main.tscn).
-  - **2026-09-13 — sidebar layout regression + fix**: side_panel.tscn was
+  - **2026-09-13 — image picker Android + responsive styling**: image embeds now
+  use Godot's native Storage Access Framework picker on Android (which can read
+  user-selected shared-storage images despite the app sandbox). The in-app
+  picker is constrained to 92% viewport width / 78% height and styled with the
+  active NeonNotes palette and ShareTechMono font; filters were consolidated
+  into one Android-friendly image filter. Desktop behavior remains the custom
+  styled FileDialog.
+- **2026-09-13 — sidebar layout regression + fix**: side_panel.tscn was
   authored with ALL nodes as `parent="."` (root children), so TreeDeleteBtn/
   SideTree/Backlinks/Palette/Vault/Sync overlapped at the root level instead
   of nesting in SideVBox — user saw a messy sidebar. Fixed to proper nesting
