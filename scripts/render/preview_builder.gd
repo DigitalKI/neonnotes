@@ -104,6 +104,22 @@ static func _restore_escapes(s: String, map: Dictionary) -> String:
 ## Inline markdown -> BBCode (input is escaped text)
 static func _inline(s: String) -> String:
 	var accent := _hex(_col("accent"))
+	# ---- code spans FIRST: their content must stay fully literal (no escape,
+	# emphasis, or effect processing inside). Placeholder sentinels differ from
+	# the escape ones so restore order cannot collide.
+	const C_OPEN := "\uE002"
+	const C_CLOSE := "\uE003"
+	var code_map := {}
+	var code_re := RegEx.create_from_string("`([^`\n]+)`")
+	var cn := 0
+	while true:
+		var cm := code_re.search(s)
+		if cm == null:
+			break
+		cn += 1
+		var ph := C_OPEN + str(cn) + C_CLOSE
+		code_map[ph] = "[code][color=#%s]%s[/color][/code]" % [_hex(_col("accent2")), cm.get_string(1)]
+		s = s.substr(0, cm.get_start()) + ph + s.substr(cm.get_end())
 	# protect \-escapes from every transform below, restore at the end
 	var prot: Array = _protect_escapes(s)
 	s = prot[0]
@@ -122,11 +138,13 @@ static func _inline(s: String) -> String:
 	s = RegEx.create_from_string(r"\*\*\*(.+?)\*\*\*").sub(s, "[b][i][color=#%s]$1[/color][/i][/b]" % accent, true)
 	s = RegEx.create_from_string(r"\*\*(.+?)\*\*").sub(s, "[b][color=#%s]$1[/color][/b]" % accent, true)
 	s = RegEx.create_from_string(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)").sub(s, "[i]$1[/i]", true)
-	s = RegEx.create_from_string(r"`(.+?)`").sub(s, "[code][color=#%s]$1[/color][/code]" % _hex(_col("accent2")), true)
 	s = RegEx.create_from_string(r"~~(.+?)~~").sub(s, "[s]$1[/s]", true)
 	s = RegEx.create_from_string(r"==(.+?)==").sub(s, "[bgcolor=#%s][color=#%s][b]$1[/b][/color][/bgcolor]"
 		% [_hex(_col("accent3")), "#14062b"], true)  # dark text on the neon bar — always readable
-	return _restore_escapes(s, prot[1])
+	s = _restore_escapes(s, prot[1])
+	for ph in code_map:
+		s = s.replace(ph, code_map[ph])
+	return s
 static func _rich(bb: String, default_col: Color) -> RichTextLabel:
 	var rt := RichTextLabel.new()
 	rt.name = "PreviewRichText"
@@ -265,9 +283,11 @@ static func _list_block(block: Dictionary, accent: Color, text_c: Color) -> Cont
 	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var ordered: bool = block.get("ordered", false)
 	var items: Array = block.get("items", [])
+	var numbers: Array = block.get("numbers", [])
 	for idx in items.size():
 		var item := str(items[idx])
-		var bullet := ("%d." % (idx + 1)) if ordered else "▸"
+		var num := int(numbers[idx]) if ordered and idx < numbers.size() else idx + 1
+		var bullet := ("%d." % num) if ordered else "▸"
 		var row := HBoxContainer.new()
 		row.name = "ListItem"
 		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL

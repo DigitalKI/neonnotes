@@ -262,13 +262,14 @@ static func parse(text: String) -> Dictionary:
 				var packed := PackedStringArray(); for c in cells: packed.append(c.strip_edges())
 				rows.append(packed); i += 1
 			blocks.append({"type":"table", "rows":rows}); continue
-		var list_match := RegEx.new(); list_match.compile("^(?:[-*+]\\s+|\\d+[.)]\\s+)(.*)$"); var m := list_match.search(t)
+		var list_match := RegEx.new(); list_match.compile("^(?:[-*+]\\s+|(\\d+)[.)]\\s+)(.*)$"); var m := list_match.search(t)
 		if m:
-			flush.call(); var ordered := t[0].is_valid_int(); var items: Array[String] = []
+			flush.call(); var ordered := t[0].is_valid_int(); var items: Array[String] = []; var numbers: Array[int] = []
 			while i < lines.size():
 				var mm := list_match.search(lines[i].strip_edges()); if mm == null: break
-				items.append(mm.get_string(1)); i += 1
-			blocks.append({"type":"list", "ordered":ordered, "items":items}); continue
+				items.append(mm.get_string(2)); i += 1
+				if ordered: numbers.append(int(mm.get_string(1)))
+			blocks.append({"type":"list", "ordered":ordered, "items":items, "numbers":numbers}); continue
 		para.append(t); i += 1
 	flush.call()
 	return {"meta":meta, "blocks":blocks}

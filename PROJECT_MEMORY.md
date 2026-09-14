@@ -32,6 +32,24 @@ _Last updated: 2026-09-14 (shared Markdown inline-span model + Obsidian callouts
 
 _Chronological, newest last._
 
+- **2026-09-14 — highlight/round-2 (user feedback)**:
+  - **Numbered lists keep source numbers**: parser stores `numbers` per item;
+    renderer uses them (previously renumbered from 1, so `3.`/`7.` rendered as
+    `1.`/`2.` — the reported "weird" behavior).
+  - **Highlighter: chart + table + fence awareness**: fence-state scan above
+    each line; ```chart rows tint their `key:` prefix, plain fenced bodies
+    render dim, table rows tint pipes and dash-separator rows entirely.
+    Inline spans are skipped inside fences (code bodies stay literal).
+  - **Renderer bug fixed**: `_inline` ran bold/italic regexes BEFORE the
+    code-span regex, so `*` inside backticks was eaten (`*s1*`-style false
+    italics inside code). Code spans are now extracted into placeholders
+    (own sentinels U+E002/E003) first and their content stays fully literal;
+    placeholders restored after all other transforms.
+  - **Help page rewritten**: "Formatting" section shows every construct
+    RENDERED then its ESCAPED source form (backslash escapes shown literally
+    inside code spans); showcases multiline quotes, both callouts, and a
+    sample table. Smoke visual block also saves /tmp/neon_help.png.
+
 - **2026-09-14 — shared Markdown parser (Phase 0+1 of the unified-parser plan)**:
   - **Motivation**: highlighter and preview interpreted markdown independently.
     Adopted the CommonMark/cmark/Markdig pattern: one block phase + one

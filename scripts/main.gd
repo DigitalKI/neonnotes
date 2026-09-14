@@ -29,7 +29,48 @@ Organize notes in folders from the New dialog. Link notes with `[[Note name]]`, 
 
 ## Formatting
 
-Use headings (`#`), **bold**, *italic*, ***bold italic***, ~~strikethrough~~, `inline code`, and ==highlight==. Neon effects use `%%glitch text%%` and `++flicker text++` (emoji work too). Markdown bullets, numbered lists, `> quotes`, fenced code blocks, and tables are supported.
+Every construct below is shown **rendered first**, then in its **escaped source form** so you can see exactly what to type.
+
+- **Heading** — `# Heading 1`, `## Subheading` · escaped: `\\# not a heading`
+- **Bold** — **bold** · escaped: `\\*\\*not bold\\*\\*`
+- **Italic** — *italic* · escaped: `\\*not italic\\*`
+- **Bold italic** — ***both*** · escaped: `\\*\\*\\*not both\\*\\*\\*`
+- **Strikethrough** — ~~gone~~ · escaped: `\\~\\~not struck\\~\\~`
+- **Inline code** — `code` · escaped: `\\`not code\\` — the ticks stay visible, the styling does not apply`
+- **Highlight** — ==highlight== · escaped: `\\=\\=not highlighted\\=\\=`
+- **Glitch** — %%glitch text%% · escaped: `\\%\\%not glitch\\%\\%`
+- **Flicker** — ++flicker++ · escaped: `\\+\\+not flicker\\+\\+`
+- **Wiki link** — [[Note name|custom label]] · escaped: `\\[\\[not a link\\]\\]`
+- **Quote** (multi-line OK) — shown below · escaped: `\\> not a quote`
+- **Callout** — first quote line reads `> [!type] optional title`; types: `note`, `info`, `tip`, `warning`, `danger`, `success`, `quote` · shown below
+- **Bullet list** — `- item` · escaped: `\\- not a list`
+- **Numbered list** — `1. first`, `2. second` — your numbers are kept exactly as written
+- **Table** — each row wrapped in pipes, second row is dashes · escaped: `\\| not a table`
+- **Code fence** — a line of three backticks (optionally followed by a language name), then everything until the closing fence stays literal
+- **Image** — `![alt](media/file.png)` · escaped: `\\![not an image](media/file.png)`
+
+These can all be **combined on one line**, and escaped characters always render literally: \\*not bold\\*, \\[\\[not a link\\]\\], \\%\\%not glitch\\%\\%.
+
+A multi-line quote:
+
+> This is a block quote.
+> It continues on the second line,
+> and a third — each line keeps the ❝ style.
+
+Callouts (Obsidian-style):
+
+> [!tip] Try this
+> The first quote line is the header: type, optional fold marker, optional title.
+
+> [!warning] Another one
+> Unknown types fall back to `note` styling. A blank quote line separates paragraphs inside the callout.
+
+A table:
+
+| Key | Action |
+| --- | --- |
+| `/` | formatting menu |
+| `[[name]]` | wiki link |
 
 Charts come from `chart` blocks with `type`, `title`, `labels`, and `values` — three types: `bar`, `line`, and `pie`:
 
@@ -84,6 +125,9 @@ title: \"Features\"
 
 - A list item that is deliberately very long so that when it wraps to the next line the wrapped text aligns under the item text rather than under the bullet, respecting indentation
 - A second item
+
+3. numbered lists keep the numbers you wrote
+7. like this — no renumbering to 1, 2
 """
 var code_edit := CodeEdit.new()
 var sidebar: PanelContainer
@@ -1049,6 +1093,21 @@ func _run_smoke() -> void:
 		if fimg:
 			fimg.save_png("/tmp/neon_features.png")
 			print("  [features preview] saved /tmp/neon_features.png %dx%d" % [fimg.get_width(), fimg.get_height()])
+		# Help page (rendered + escaped formatting showcase)
+		_show_help()
+		for i in 6:
+			await get_tree().process_frame
+		RenderingServer.force_draw()
+		var himg: Image = get_viewport().get_texture().get_image()
+		if himg:
+			himg.save_png("/tmp/neon_help.png")
+			print("  [help preview] saved /tmp/neon_help.png %dx%d" % [himg.get_width(), himg.get_height()])
+		# restore pre-smoke state for the remaining checks
+		help_mode = false
+		source_mode = false
+		code_edit.text = "---\ntitle: \"Smoke\"\n---\n\n[[Demo]]\n\n%%g%% ++f++"
+		note_title.text = "Smoke"
+		_render_preview()
 	# tree with folders
 	GameManager.write_note("sub/demo.md", "---\ntitle: \"Sub\"\n---\n\nhi\n")
 	GameManager.scan_notes()

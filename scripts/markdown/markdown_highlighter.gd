@@ -5,8 +5,9 @@ extends SyntaxHighlighter
 ## the preview renderer uses (MarkdownParser.compute_inline), so edit mode and
 ## view mode agree on what is emphasis, code, a link, an effect, etc.
 ##
-## Spans give the full construct INCLUDING markers, so we color the whole span
-## (content stays readable) and let the markers carry the strongest tint.
+## Block-level context (fences, chart blocks, tables) is resolved per line:
+## a fence-state scan above the line tells us whether we are inside a ```chart
+## block so its `key: value` rows can be tinted, and pipe-row shapes mark tables.
 
 var colors: Dictionary = {}
 
@@ -26,8 +27,51 @@ func _get_line_syntax_highlighting(line: int) -> Dictionary:
 	var accent4 := _c("accent4", Color("8b5cf6"))
 	var dim := _c("dim", Color("7780a8"))
 
-	# ---- block-level markers (headings / list bullets / fences / table pipes) ---
 	var s := text.strip_edges()
+
+	# ---- fenced-block state: which fence is open above this line? ------------
+	var lang := ""
+	var in_fence := false
+	if line > 0:
+		var above: PackedStringArray = te.text.split("\n")
+		for li in mini(line, above.size()):
+			var t := above[li].strip_edges()
+			if in_fence:
+				if t.begins_with("```"):
+					in_fence = false
+					lang = ""
+			elif t.begins_with("```"):
+				in_fence = true
+				lang = t.substr(3).strip_edges().to_lower()
+	# current line itself opens/closes a fence → tint the whole fence line
+	if s.begins_with("```"):
+		out[0] = {"color": accent2, "length": text.length() - text.lstrip(" ").length()}
+	elif in_fence and lang == "chart":
+		# chart rows: tint the `key:` part of type/title/labels/values lines
+		var colon := text.find(":")
+		if colon > 0 and not text.strip_edges().begins_with("```"):
+			var key := text.substr(0, colon).strip_edges().to_lower()
+			if key in ["type", "title", "labels", "values"]:
+				out[0] = {"color": accent2, "length": colon + 1}
+	elif in_fence:
+		# ordinary fenced code body: dim whole line so it reads as "code"
+		out[0] = {"color": dim.darkened(0.35), "length": text.length()}
+
+	# ---- table rows -----------------------------------------------------------
+	if s.begins_with("|"):
+		var sep_row := s.replace("|", "").replace("-", "").replace(":", "").strip_edges() == ""
+		if sep_row:
+			out[0] = {"color": dim, "length": text.length() - text.lstrip(" ").length()}
+		else:
+			var start := 0
+			while true:
+				var idx := text.find("|", start)
+				if idx == -1:
+					break
+				out[idx] = {"color": dim, "length": 1}
+				start = idx + 1
+
+	# ---- headings / list bullets ----------------------------------------------
 	if s.begins_with("#"):
 		var hs := 0
 		for ch in s:
@@ -38,9 +82,13 @@ func _get_line_syntax_highlighting(line: int) -> Dictionary:
 
 	if s.begins_with("- ") or s.begins_with("* ") or s.begins_with("+ ") or s.begins_with("1. "):
 		var off := text.length() - text.lstrip(" ").length()
-		out[off] = {"color": accent2, "length": 1}
+		var bullet_len := 1 if s[0] != "1" else s.find(".") + 1
+		if not out.has(off):
+			out[off] = {"color": accent2, "length": bullet_len}
 
 	# ---- inline constructs via the shared parser ------------------------------
+	if in_fence:
+		return out  # code/chart body: no inline formatting, the tint above rules
 	for sp in MarkdownParser.compute_inline(text):
 		var col := Color.WHITE
 		match int(sp["type"]):
