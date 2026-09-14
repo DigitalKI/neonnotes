@@ -41,17 +41,15 @@ static func build(doc: Dictionary, into: VBoxContainer) -> void:
 			"para":
 				into.add_child(_rich(_inline(escape(block["text"])), text_c))
 			"quote":
-				into.add_child(_rich("[bgcolor=#%s][color=#%s] ❝ %s [/color][/bgcolor]"
-					% [_hex(Color(accent.r, accent.g, accent.b, 0.15)), _hex(accent2), _inline(escape(block["text"]))], text_c))
+				# multi-line quote: one RichTextLabel per physical line so each
+				# wraps independently and all of them share the quote styling.
+				into.add_child(_quote_block(str(block.get("text", "")), accent, accent2, text_c))
+			"callout":
+				into.add_child(_callout_block(block, text_c))
 			"hr":
 				into.add_child(_rule(accent2))
 			"list":
-				var lines := ""
-				var n: int = block["items"].size()
-				for i in n:
-					var bullet := "▸" if not block["ordered"] else "%d." % (i + 1)
-					lines += "[color=#%s] %s [/color] %s\n" % [_hex(accent), bullet, _inline(escape(block["items"][i]))]
-				into.add_child(_rich(lines, text_c))
+				into.add_child(_list_block(block, accent, text_c))
 			"code":
 				into.add_child(_rich("[bgcolor=#%s][color=#%s][code]%s[/code][/color][/bgcolor]"
 					% [_hex(Color(0, 0, 0, 0.35)), _hex(accent2), escape(block["text"])], text_c))
@@ -202,6 +200,88 @@ static func _table(rows: Array, text_c: Color) -> Control:
 			bb += "[cell border=#%s bg=#%s padding=\"6,4,6,4\"]%s[/cell]" % [border, bg, content]
 	bb += "[/table]"
 	return _rich(bb, text_c)
+
+static func _quote_block(text: String, accent: Color, accent2: Color, text_c: Color) -> Control:
+	# A quote is a left-flush block: one styled RichTextLabel per source line so
+	# each wraps independently and continuation lines read like a quote.
+	var box := VBoxContainer.new()
+	box.name = "Quote"
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	for line in text.split("\n"):
+		if line.strip_edges() == "":
+			continue
+		box.add_child(_rich("[color=#%s] ❝ %s [/color]"
+			% [_hex(accent2), _inline(escape(line))], text_c))
+	return box
+
+static func _callout_block(block: Dictionary, text_c: Color) -> Control:
+	var kind := String(block.get("kind", "")).to_lower()
+	var title := String(block.get("title", "")).strip_edges()
+	if title == "":
+		title = kind.to_upper()
+	var body := String(block.get("text", ""))
+	var styles := {
+		"note": [Color("5c7cff"), "🗒"],
+		"info": [Color("00e5ff"), "ℹ"],
+		"tip": [Color("00d68f"), "💡"],
+		"warning": [Color("ffb400"), "⚠️"],
+		"danger": [Color("ff4d6d"), "✖"],
+		"success": [Color("4ade80"), "✔"],
+		"quote": [Color("c084fc"), "❝"],
+	}
+	# unknown kinds fall back to "note", matching Obsidian
+	var info: Array = styles.get(kind, styles["note"])
+	var col: Color = info[0]
+	var icon := String(info[1])
+
+	var panel := PanelContainer.new()
+	panel.name = "Callout"
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(col.r, col.g, col.b, 0.12)
+	sb.border_color = Color(col.r, col.g, col.b, 0.55)
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(6)
+	sb.set_content_margin_all(12)
+	panel.add_theme_stylebox_override("panel", sb)
+
+	var vb := VBoxContainer.new()
+	panel.add_child(vb)
+	vb.add_child(_rich("[color=#%s] %s %s [/color]"
+		% [_hex(col), icon, _inline(escape(title))], text_c))
+	if body.strip_edges() != "":
+		for line in body.split("\n"):
+			if line.strip_edges() == "":
+				continue
+			vb.add_child(_rich(_inline(escape(line)), text_c))
+	return panel
+
+static func _list_block(block: Dictionary, accent: Color, text_c: Color) -> Control:
+	# Each item gets its own RichTextLabel so wrapped continuation lines hang
+	# under the item text (not under the bullet). The bullet sits in a fixed-width
+	# label; the item expands to fill the remainder, keeping text aligned.
+	var box := VBoxContainer.new()
+	box.name = "List"
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var ordered: bool = block.get("ordered", false)
+	var items: Array = block.get("items", [])
+	for idx in items.size():
+		var item := str(items[idx])
+		var bullet := ("%d." % (idx + 1)) if ordered else "▸"
+		var row := HBoxContainer.new()
+		row.name = "ListItem"
+		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var be := _rich("[color=#%s]%s[/color]" % [_hex(accent), bullet], text_c)
+		be.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		be.custom_minimum_size = Vector2(28 if ordered else 22, 0)
+		be.fit_content = true
+		row.add_child(be)
+		var it := _rich(_inline(escape(item)), text_c)
+		it.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		it.fit_content = true
+		row.add_child(it)
+		box.add_child(row)
+	return box
 
 static func _chart(block: Dictionary) -> Control:
 	var cv := ChartView.new()

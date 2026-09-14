@@ -5,7 +5,7 @@
 > updated at the **end**, so context, decisions, and direction survive across
 > conversations. Keep it current — a stale memory file is worse than none.
 
-_Last updated: 2026-09-13 (side_panel.tscn parenting fix; visual check via screenshot) · Godot 4.7 · renderer: gl_compatibility_
+_Last updated: 2026-09-14 (shared Markdown inline-span model + Obsidian callouts + multiline quotes + hanging list indent) · Godot 4.7 · renderer: gl_compatibility_
 
 > ⚠️ **Path note:** the saved global memory says `/home/toshiwo/www/neonnotes`
 > but the project actually lives at **`/home/toshiwo/Projects/Godot/neonnotes`**.
@@ -31,6 +31,42 @@ _Last updated: 2026-09-13 (side_panel.tscn parenting fix; visual check via scree
 ## 2. What has been done (work log)
 
 _Chronological, newest last._
+
+- **2026-09-14 — shared Markdown parser (Phase 0+1 of the unified-parser plan)**:
+  - **Motivation**: highlighter and preview interpreted markdown independently.
+    Adopted the CommonMark/cmark/Markdig pattern: one block phase + one
+    character-based inline phase; both views consume one parse.
+  - **`MarkdownParser.SpanType` enum + `compute_inline(text)`** (in
+    markdown_parser.gd, no new class_name → no editor rescan needed): single
+    left-to-right scan emitting semantic spans (EMPHASIS/STRONG/CODE_SPAN/
+    STRIKE/HIGHLIGHT/GLITCH/FLICKER/WIKILINK/ESCAPE) with `start/length` for
+    the WHOLE construct (incl. markers) + `content_start/content_length`
+    inner range + `target` for wiki-links. Unmatched openers stay literal.
+  - **`NeonHighlighter` rewritten** to consume `compute_inline` (no more
+    `_mark` token searches — bugs like highlighting `**` inside code/escaped
+    text are structurally gone). Delimiter+content colored per construct.
+  - **Multiline block quotes**: consecutive `>` lines collapse into ONE quote
+    block (text joined with \n). `PreviewBuilder._quote_block` renders one
+    RichTextLabel per line (❝ styled).
+  - **Obsidian callouts copied**: `> [!type] optional title` on the first
+    quote line → `{"type":"callout","kind","title","fold","text"}` block.
+    Types: note/info/tip/warning/danger/success/quote (unknown → note, like
+    Obsidian). Fold markers `+`/`-` parsed into `fold` but NOT yet rendered.
+    Rendered by `PreviewBuilder._callout_block` (colored PanelContainer).
+  - **List hanging indent**: `PreviewBuilder._list_block` renders each item as
+    bullet-label + expanding item RichTextLabel → wrapped lines align under
+    the text, not under the bullet.
+  - **Smoke test**: non-headless runs render `features.md` (callout+quote+list)
+    and save `/tmp/neon_features.png` for visual checks; verified correct.
+  - **Unit tests**: span agreement matrix (emphasis/strong/escape/code-hides-
+    emphasis/wiki target/unmatched opener) + multiline quote + callout blocks.
+  - **Phase 1 known limits (by design, for later phases)**: `compute_inline`
+    pairs the nearest same-marker close (no full CommonMark delimiter stack:
+    `**bold *nested***` colors as STRONG only, inner emphasis not tinted);
+    nested callouts (`>>`) not yet parsed; fold markers not interactive.
+  - **Next**: Phase 4 — PreviewBuilder consumes spans directly (remove its own
+    `_inline` regex chain + escape sentinels); block-level spans for
+    headings/fences; per-block cache keyed by content hash for efficiency.
 
 - **v2** — Rewrite: authored `Main.tscn` UI shell, `main.gd` wiring. Sidebar
   vault **tree** (folder hierarchy), front-matter title peek, notes as plain

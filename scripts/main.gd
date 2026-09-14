@@ -69,6 +69,22 @@ The interface supports portrait and landscape. On narrow screens actions move in
 @onready var content_panel: PanelContainer = %Content
 @onready var graph_view: GraphView = %GraphView
 
+const _SMOKE_FEATURES := """---
+title: \"Features\"
+---
+
+> [!tip] Neon tip
+> This is a callout body that is intentionally long enough to wrap across several lines inside the panel, proving that wrapping works correctly.
+>
+> A second paragraph inside the callout.
+
+> A multi-line quote
+> that continues onto a second line
+> and even a third, to show line-by-line rendering.
+
+- A list item that is deliberately very long so that when it wraps to the next line the wrapped text aligns under the item text rather than under the bullet, respecting indentation
+- A second item
+"""
 var code_edit := CodeEdit.new()
 var sidebar: PanelContainer
 var new_dialog: AcceptDialog
@@ -993,7 +1009,6 @@ func _export_dest(ext: String) -> String:
 	return d + "/" + GameManager.current_rel.get_file().trim_suffix(".md") + "." + ext
 
 ## Recursively delete a vault directory (smoke-test fixture reset).
-## Recursively delete a vault directory (smoke-test fixture reset).
 func _rm_dir(rel: String) -> void:
 	var abs := GameManager.vault_abs().path_join(rel)
 	if not DirAccess.dir_exists_absolute(abs):
@@ -1005,8 +1020,8 @@ func _rm_dir(rel: String) -> void:
 		DirAccess.remove_absolute(abs.path_join(d))
 	DirAccess.remove_absolute(abs)
 
-
-# ------------------------------------------------------------ smoke test
+func _write_smoke_features_note() -> void:
+	GameManager.write_note("features.md", _SMOKE_FEATURES)
 
 func _run_smoke() -> void:
 	var fails := 0
@@ -1017,6 +1032,23 @@ func _run_smoke() -> void:
 	code_edit.text = "---\ntitle: \"Smoke\"\n---\n\n[[Demo]]\n\n%%g%% ++f++"
 	_render_preview()
 	fails += _check(content_host.get_child_count() > 0, "preview children=%d" % content_host.get_child_count())
+	if DisplayServer.get_name() != "headless":
+		# Visual-only check: render the new block types (callout, multiline
+		# quote, hanging-indent list) into a real frame and screenshot it.
+		_write_smoke_features_note()
+		GameManager.current_file = GameManager.vault_abs() + "/features.md"
+		GameManager.current_rel = "features.md"
+		code_edit.text = _SMOKE_FEATURES
+		note_title.text = "Features"
+		_render_preview()
+		for i in 6:
+			await get_tree().process_frame
+		RenderingServer.force_draw()
+		var vp_tex: Texture2D = get_viewport().get_texture()
+		var fimg: Image = vp_tex.get_image()
+		if fimg:
+			fimg.save_png("/tmp/neon_features.png")
+			print("  [features preview] saved /tmp/neon_features.png %dx%d" % [fimg.get_width(), fimg.get_height()])
 	# tree with folders
 	GameManager.write_note("sub/demo.md", "---\ntitle: \"Sub\"\n---\n\nhi\n")
 	GameManager.scan_notes()
