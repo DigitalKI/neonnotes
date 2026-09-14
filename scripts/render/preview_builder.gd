@@ -154,6 +154,10 @@ static func _image_block(block: Dictionary) -> Control:
 	if src != "":
 		var img := Image.load_from_file(GameManager.vault_abs().path_join(src))
 		if img:
+			# A correctly rendered image is not an intractable placeholder:
+			# it should display as-is, never reopen the picker. Only an empty
+			# image embed opens the "choose image" flow (e.g. the `/` menu's
+			# `![]( )` snippet).
 			var tr := TextureRect.new()
 			tr.name = "ImageEmbed"
 			tr.texture = ImageTexture.create_from_image(img)
@@ -161,11 +165,8 @@ static func _image_block(block: Dictionary) -> Control:
 			tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 			tr.custom_minimum_size = Vector2(0, 300)
 			tr.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			tr.mouse_filter = Control.MOUSE_FILTER_STOP
-			tr.tooltip_text = (alt + "  — " if alt != "" else "") + src + " (click to replace)"
-			tr.gui_input.connect(func(ev: InputEvent):
-				if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
-					click.call())
+			tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			tr.tooltip_text = (alt + "  — " if alt != "" else "") + src
 			return tr
 	# empty embed (or missing file) → placeholder that opens the picker
 	var btn := Button.new()

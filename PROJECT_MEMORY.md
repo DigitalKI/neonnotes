@@ -291,6 +291,8 @@ _Chronological, newest last._
 - **2026-09-13 — sync UX improvements**: sync PIN is persisted in `settings.cfg` and restored into the pairing dialog; entering a remote PIN stores it immediately. The pairing dialog now emphasizes the PIN and shows peers with their colored/visible word IDs. Status bar has a tiny sync health dot (grey unconfigured, green successful sync, red failure) wired to the app-owned SyncService. Full local tests pass. Mobile dialog remains viewport-clamped; further device validation is still recommended.
 
 
+- **2026-09-14 — image import (Android content URIs, community approach):** The Android native picker returns a `content://` URI, not a filesystem path. Following the accepted Godot community approach (godot-proposals #14263 / #12669): read the URI with `FileAccess.open(uri, READ)`, take persistable permission via `AndroidRuntime.updatePersistableUriPermission(uri, true)`, sniff the bytes with magic-byte signatures and call the matching `Image.load_*_from_buffer()` decoder, then `save_png()` to `vault/media/`. Always `.png` destination so the rendered suffix matches the actual (PNG) encoding. No Java/`ContentResolver` JNI plumbing is used. Rendered images in the preview are inert (mouse_filter IGNORE, no tooltip "click to replace"); only an empty placeholder opens the image picker.
+
 - **Current goal:** v3 UX batch complete through round 2. Tree is now fully
   restructurable (drag notes/folders, folder-as-note, auto link rewrite).
 - **Next up:** live phone↔PC sync validation (trust flow + auto-sync over the

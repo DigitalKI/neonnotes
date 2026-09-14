@@ -730,7 +730,9 @@ func _on_image_click(src: String) -> void:
 		if OS.get_name() == "Android":
 			image_dialog.use_native_dialog = true
 		image_dialog.title = "CHOOSE IMAGE"
-		image_dialog.filters = ["*.png,*.jpg,*.jpeg,*.webp,*.gif ; IMAGE FILES"]
+		# Include upper-case suffixes explicitly: Android/Desktop pickers may apply
+		# these filters case-sensitively (camera files commonly use .JPG).
+		image_dialog.filters = ["*.png,*.PNG,*.jpg,*.JPG,*.jpeg,*.JPEG,*.webp,*.WEBP,*.gif,*.GIF ; IMAGE FILES"]
 		image_dialog.file_selected.connect(_on_image_selected)
 		_style_image_dialog()
 		add_child(image_dialog)
@@ -766,18 +768,121 @@ func _style_image_dialog() -> void:
 	image_dialog.add_theme_color_override("accent_color", accent)
 	image_dialog.add_theme_font_override("font", load("res://assets/fonts/ShareTechMono-Regular.ttf"))
 
+func _copy_android_content_uri(uri_text: String, dest: String) -> bool:
+	print("[NN image] importing content URI")
+	# Canonical Godot 4 Android approach: FileAccess.open() resolves content://
+	# URIs through Android's own content resolver, so no Java/JNI plumbing is
+	# needed. (This code only runs on Android; the desktop build compiles it out.)
+	# Godot 4.6+ ships SAF support; the community flow calls
+	# AndroidRuntime.updatePersistableUriPermission(uri, true) so the granted
+	# URI stays readable for this session (see godot-proposals #14263 / #12669).
+	if OS.get_name() == "Android" and Engine.has_singleton("AndroidRuntime"):
+		var rt: Variant = Engine.get_singleton("AndroidRuntime")
+		rt.call("updatePersistableUriPermission", uri_text, true)
+	var f := FileAccess.open(uri_text, FileAccess.READ)
+	if f == null:
+		print("[NN image] could not open content URI")
+		return false
+	var bytes := f.get_buffer(f.get_length())
+	f.close()
+	print("[NN image] content bytes=%d" % bytes.size())
+	if bytes.is_empty():
+		return false
+	var img := _decode_image(bytes)
+	if img == null:
+		_flash("✗ Unsupported image format (try JPG or PNG)")
+		return false
+	var save_result := img.save_png(dest)
+	print("[NN image] saved='%s' result=%s" % [dest, save_result])
+	return save_result == OK
+
+## Inspect the raw image bytes and dispatch to the matching decoder by file
+## signature (magic bytes), so the source never has to be trusted for its name
+## or extension. Mirrors the approach used across the Godot community for
+## Android SAF (Storage Access Framework) URIs.
+func _decode_image(bytes: PackedByteArray) -> Image:
+	var img := Image.new()
+	var magic := bytes.slice(0, min(12, bytes.size()))
+	# PNG 89 50 4E 47 0D 0A 1A 0A
+	if magic == bytes.slice(0, min(8, bytes.size())) and bytes.size() >= 8 \
+			and magic[0] == 0x89 and magic[1] == 0x50 and magic[2] == 0x4E and magic[3] == 0x47:
+		return img if img.load_png_from_buffer(bytes) == OK else null
+	# JPEG FF D8 FF
+	if bytes.size() >= 3 and bytes[0] == 0xFF and bytes[1] == 0xD8 and bytes[2] == 0xFF:
+		return img if img.load_jpg_from_buffer(bytes) == OK else null
+	# WebP RIFF....WEBP
+	if bytes.size() >= 12 and bytes[0] == 0x52 and bytes[1] == 0x49 and bytes[2] == 0x46 \
+			and bytes[3] == 0x46 and bytes[8] == 0x57 and bytes[9] == 0x45 and bytes[10] == 0x42 and bytes[11] == 0x50:
+		return img if img.load_webp_from_buffer(bytes) == OK else null
+	# GIF87a / GIF89a
+	if bytes.size() >= 6 and bytes[0] == 0x47 and bytes[1] == 0x49 and bytes[2] == 0x46:
+		return img if img.load_gif_from_buffer(bytes) == OK else null
+	# Fallback: let Godot probe based on its own internal heuristics.
+	if img.load_jpg_from_buffer(bytes) == OK:
+		return img
+	if img.load_png_from_buffer(bytes) == OK:
+		return img
+	if img.load_webp_from_buffer(bytes) == OK:
+		return img
+	if img.load_gif_from_buffer(bytes) == OK:
+		return img
+	return null
+
 func _on_image_selected(path: String) -> void:
 	var media_dir := GameManager.vault_abs() + "/media"
 	DirAccess.make_dir_recursive_absolute(media_dir)
-	var ext := path.get_extension()
-	var stem := path.get_file().trim_suffix("." + ext)
-	var dest := media_dir + "/" + stem + "." + ext
+	var raw_ext := path.get_extension().to_lower()
+	if raw_ext not in ["png", "jpg", "jpeg", "webp", "gif"]:
+		raw_ext = ""
+	var source_name := path.get_file()
+	# Debug aid: some SAF-backed pickers pass a content:// URI whose last
+	# segment is an internal id rather than the display name. Log the exact
+	# path so we know whether this is the folder-dependent case.
+	print("[NN image] selected path='%s' file='%s'" % [path, source_name])
+	# Android SAF can return a temporary filename such as image%3A2117. with
+	# no real extension. Decode the display-name portion and use a safe stem.
+	var decoded_name := source_name.uri_decode()
+	var source_ext := decoded_name.get_extension().to_lower()
+	var stem := decoded_name
+	if source_ext != "":
+		stem = decoded_name.substr(0, decoded_name.length() - source_ext.length() - 1)
+	stem = stem.replace(":", "-").replace("/", "-").replace("\\", "-")
+	var ext := source_ext if source_ext in ["png", "jpg", "jpeg", "webp", "gif"] else raw_ext
+	# Content-URI imports are always re-encoded with save_png(), so the
+	# destination must have a PNG suffix. Otherwise a PNG payload saved as
+	# `photo.jpg` is later loaded according to the wrong extension and won't
+	# render even though the import succeeded.
+	if path.begins_with("content://"):
+		ext = "png"
+	var dest := media_dir + "/" + stem + ("." + ext if ext != "" else ".png")
 	var i := 2
 	while FileAccess.file_exists(dest):
-		dest = "%s/%s-%d.%s" % [media_dir, stem, i, ext]
+		dest = "%s/%s-%d.%s" % [media_dir, stem, i, ext if ext != "" else "png"]
 		i += 1
-	if DirAccess.copy_absolute(path, dest) != OK:
-		_flash("✗ Could not copy image")
+	# Android SAF may deliver a path we cannot trust for its real extension
+	# (folder-dependent virtual names like `image%3A2117.`). To be robust we
+	# always import via Godot's image loader, which sniffs the actual format
+	# from the bytes, then re-encode safely. Direct copy is only a fast path
+	# when the source looks like a normal file with a supported extension.
+	var wrote := false
+	if path.begins_with("content://"):
+		# SAF returns a content URI, not a filesystem path. DirAccess cannot read
+		# it; use Android's ContentResolver to copy the provider stream first.
+		wrote = _copy_android_content_uri(path, dest)
+	elif ext != "":
+		if DirAccess.copy_absolute(path, dest) == OK:
+			wrote = true
+	if not wrote:
+		# Fallback: read the raw bytes directly and decode them, so the embed
+		# never depends on the source folder/name/extension.
+		var src := FileAccess.open(path, FileAccess.READ)
+		if src != null:
+			var imported := _decode_image(src.get_buffer(src.get_length()))
+			src.close()
+			if imported != null and imported.save_png(dest) == OK:
+				wrote = true
+	if not wrote:
+		_flash("✗ Could not import image")
 		return
 	var rel := "media/" + dest.get_file()
 	# update the embed that was clicked: empty-src form `![…]( )` when the
@@ -789,8 +894,21 @@ func _on_image_selected(path: String) -> void:
 	else:
 		re = RegEx.create_from_string("!\\[[^\\]]*\\]\\(\\s*" + vault_tree._re_escape(_image_target_src) + "\\s*\\)")
 	var m := re.search(t)
+	# The slash menu inserts `![]( )`; match that exact empty placeholder,
+	# including its optional whitespace, before falling back to another image.
+	if _image_target_src == "":
+		var empty_embed := RegEx.create_from_string("!\\[[^\\]]*\\]\\(\\s*\\)")
+		m = empty_embed.search(t)
+	if m == null:
+		var fallback := RegEx.create_from_string("(?m)^[^\\n]*!\\[[^\\]]*\\]\\([^\\n]*\\)[^\\n]*$")
+		m = fallback.search(t)
 	if m:
 		code_edit.text = t.substr(0, m.get_start()) + "![](" + rel + ")" + t.substr(m.get_end())
+		print("[NN image] embed updated rel='%s'" % rel)
+	else:
+		_flash("✗ Could not find image embed")
+		print("[NN image] embed not found; target='%s' rel='%s'" % [_image_target_src, rel])
+		return
 	# save directly — the click comes from preview mode where the editor is
 	# hidden and _flush_save would bail out
 	if GameManager.current_rel != "":

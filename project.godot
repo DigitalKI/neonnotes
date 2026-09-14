@@ -13,7 +13,7 @@ config_version=5
 config/name="NeonNotes"
 run/main_scene="res://scenes/main/Main.tscn"
 config/features=PackedStringArray("4.7")
-config/icon="uid://dj33s3plqfbbw"
+config/icon="uid://dyqqv3ie0uucf"
 
 [autoload]
 
