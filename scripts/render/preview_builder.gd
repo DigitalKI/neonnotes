@@ -101,8 +101,51 @@ static func _restore_escapes(s: String, map: Dictionary) -> String:
 		s = s.replace(ESC_OPEN + str(k) + ESC_CLOSE, str(map[k]))
 	return s
 
-## Inline markdown -> BBCode (input is escaped text)
+## Inline markdown -> BBCode from the shared parser span stream.
+## The parser owns recognition; this function only maps semantic spans to BBCode.
 static func _inline(s: String) -> String:
+	var parsed := MarkdownParser.compute_inline(s)
+	if parsed.is_empty():
+		return _inline_legacy(s)
+	var out := ""
+	var cursor := 0
+	for span in parsed:
+		var start: int = span["start"]
+		var length: int = span["length"]
+		if start < cursor:
+			continue
+		out += escape(s.substr(cursor, start - cursor))
+		var content_start: int = span.get("content_start", start)
+		var content_length: int = span.get("content_length", length)
+		var content := s.substr(content_start, content_length)
+		match int(span["type"]):
+			MarkdownParser.SpanType.CODE_SPAN:
+				out += "[code][color=#%s]%s[/color][/code]" % [_hex(_col("accent2")), escape(content)]
+			MarkdownParser.SpanType.STRONG:
+				out += "[b][color=#%s]%s[/color][/b]" % [_hex(_col("accent")), _inline(content)]
+			MarkdownParser.SpanType.EMPHASIS:
+				out += "[i]%s[/i]" % _inline(content)
+			MarkdownParser.SpanType.STRIKE:
+				out += "[s]%s[/s]" % _inline(content)
+			MarkdownParser.SpanType.HIGHLIGHT:
+				out += "[bgcolor=#%s][color=#14062b][b]%s[/b][/color][/bgcolor]" % [_hex(_col("accent3")), _inline(content)]
+			MarkdownParser.SpanType.GLITCH:
+				out += "[glitch][color=#%s][b]%s[/b][/color][/glitch]" % [_hex(_col("accent4")), _inline(content)]
+			MarkdownParser.SpanType.FLICKER:
+				out += "[flicker][color=#%s]%s[/color][/flicker]" % [_hex(_col("accent3")), _inline(content)]
+			MarkdownParser.SpanType.WIKILINK:
+				out += "[url=%s][color=#%s][u]%s[/u][/color][/url]" % [str(span["target"]), _hex(_col("accent2")), escape(content.split("|", false)[-1])]
+			MarkdownParser.SpanType.EXTERNAL_LINK:
+				out += "[url=ext:%s][color=#%s][u]%s[/u][/color][/url]" % [str(span["target"]), _hex(_col("accent2")), escape(content)]
+			MarkdownParser.SpanType.ESCAPE:
+				out += escape(content)
+		cursor = start + length
+	out += escape(s.substr(cursor))
+	return out
+
+## Compatibility renderer retained for constructs not yet represented by spans
+## (notably bare URL autolinks). It is no longer used for recognized spans.
+static func _inline_legacy(s: String) -> String:
 	var accent := _hex(_col("accent"))
 	# Protect backslash escapes BEFORE scanning code spans. This is important
 	# for an escaped backtick: \\` must remain literal and must not open code.

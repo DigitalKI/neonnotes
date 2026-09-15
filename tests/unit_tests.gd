@@ -42,6 +42,8 @@ func _check_markdown_spans() -> void:
 	var wl := MarkdownParser.compute_inline("[[Alpha|alias]]")
 	_check(wl.size() == 1 and wl[0]["type"] == S.WIKILINK and wl[0]["target"] == "Alpha",
 		"wiki-link target extraction")
+	var ext := MarkdownParser.compute_inline("[Godot](https://godotengine.org)")
+	_check(ext.size() == 1 and ext[0]["type"] == S.EXTERNAL_LINK and ext[0]["target"] == "https://godotengine.org", "external link span")
 	# incomplete editor input: an unmatched opener stays literal (no EMPHASIS)
 	var open := MarkdownParser.compute_inline("**unfinished")
 	_check(open.is_empty(), "unmatched bold opener not a marked span")

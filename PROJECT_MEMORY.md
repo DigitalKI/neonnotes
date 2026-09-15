@@ -32,6 +32,16 @@ _Last updated: 2026-09-14 (shared Markdown inline-span model + Obsidian callouts
 
 _Chronological, newest last._
 
+- **2026-09-14 — unified parser Phase 4A/4B started**: PreviewBuilder now
+  consumes `MarkdownParser.compute_inline()` spans for recognized inline syntax
+  (code, strong/emphasis, strike, highlight, glitch/flicker, wiki-links,
+  external Markdown links, and escapes). `_inline_legacy()` remains only as a
+  compatibility fallback for lines with no spans (including bare URL handling),
+  so the migration is incremental. Code-span source ranges now include their
+  content range. Added external-link span coverage to unit tests. Full suite
+  passes. Next: remove the legacy regex path after migrating bare URLs and
+  improve delimiter-stack nesting semantics.
+
 - **2026-09-14 — quote visual refinement**: multiline quotes now render as one
   subtle tinted PanelContainer with a thin accent border; the ❝ glyph appears
   only on the first nonblank line and later lines are indented continuation
@@ -368,6 +378,12 @@ _Chronological, newest last._
 
 
 - **2026-09-14 — image import (Android content URIs, community approach):** The Android native picker returns a `content://` URI, not a filesystem path. Following the accepted Godot community approach (godot-proposals #14263 / #12669): read the URI with `FileAccess.open(uri, READ)`, take persistable permission via `AndroidRuntime.updatePersistableUriPermission(uri, true)`, sniff the bytes with magic-byte signatures and call the matching `Image.load_*_from_buffer()` decoder, then `save_png()` to `vault/media/`. Always `.png` destination so the rendered suffix matches the actual (PNG) encoding. No Java/`ContentResolver` JNI plumbing is used. Rendered images in the preview are inert (mouse_filter IGNORE, no tooltip "click to replace"); only an empty placeholder opens the image picker.
+
+- **2026-09-14 — settings page in content panel:** Settings now owns all vault, sync, style, and graph controls; the tree bottom has only the Settings button. Settings stays open when style or graph values change; selecting a tree note now closes settings and opens that note, while the explicit Close Settings button remains available.
+
+- **2026-09-14 — settings page in content panel:** Settings is now a right-side content page replacing the active note. It shows vault path/name, vault selection, sync/pairing controls and paired devices, graph depth (1–10), and style selection. The tree bottom now contains only the Settings button.
+
+- **2026-09-14 — graph depth setting + settings panel:** Added a collapsible Settings panel at the bottom of the tree containing the theme/vault/sync area and a persisted Graph neighbor levels SpinBox (1–10, default 2). Graph expansion now traverses the selected number of relationship levels.
 
 - **2026-09-14 — focused graph + relationship styling:** Graph now opens around the current note and shows only one-hop neighbors. Direct wiki-links use solid edges; folder-as-note tree relationships use dashed edges. The focused node is centered and gently pulses. Backlinks remain a separate control rather than tree rows.
 

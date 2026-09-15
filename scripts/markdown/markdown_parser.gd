@@ -5,7 +5,7 @@ class_name MarkdownParser extends RefCounted
 # single, position-indexed token stream computed here, so a construct is
 # interpreted identically in both views. Offsets are into the *source* line.
 enum SpanType { TEXT, EMPHASIS, STRONG, CODE_SPAN, STRIKE, HIGHLIGHT, GLITCH,
-	FLICKER, WIKILINK, ESCAPE }
+	FLICKER, WIKILINK, ESCAPE, EXTERNAL_LINK }
 
 const QUOTE_CONTINUATION_MAX := 200
 
@@ -38,8 +38,21 @@ static func compute_inline(text: String) -> Array[Dictionary]:
 				continue
 			i += 1
 			continue
+		# ---- Markdown external links [label](https://...) -------------------
+		if c == "[" and i + 1 < text.length() and text[i + 1] != "[":
+			var rb := text.find("](", i + 1)
+			if rb >= 0:
+				var end := text.find(")", rb + 2)
+				var dest := text.substr(rb + 2, end - (rb + 2)) if end >= 0 else ""
+				if end >= 0 and (dest.begins_with("http://") or dest.begins_with("https://")):
+					spans.append({"type": SpanType.EXTERNAL_LINK, "start": i,
+						"length": end + 1 - i, "content_start": i + 1,
+						"content_length": rb - (i + 1), "target": dest})
+					i = end + 1
+					continue
 		# ---- wiki-links [[target]] / [[target|alias]] -----------------------
 		if c == "[" and i + 1 < text.length() and text[i + 1] == "[":
+			
 			var w := _find_closing(text, i + 2, "[[", "]]")
 			if w >= 0:
 				var inner := text.substr(i + 2, w - (i + 2))
@@ -174,7 +187,8 @@ static func _scan_code_span(text: String, p: int) -> Dictionary:
 	var marker := "`".repeat(ticks)
 	var close := text.find(marker, p + ticks)
 	if close >= 0:
-		return {"type": SpanType.CODE_SPAN, "start": p, "length": close + ticks - p}
+		return {"type": SpanType.CODE_SPAN, "start": p, "length": close + ticks - p,
+			"content_start": p + ticks, "content_length": close - (p + ticks)}
 	return {}
 
 static func parse(text: String) -> Dictionary:
