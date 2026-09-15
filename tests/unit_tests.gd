@@ -30,6 +30,8 @@ func _check_markdown_spans() -> void:
 	var st := MarkdownParser.compute_inline("**b**")
 	_check(st.size() == 1 and st[0]["type"] == S.STRONG and st[0]["length"] == 5 and st[0]["content_length"] == 1,
 		"strong span **b**")
+	var bi := MarkdownParser.compute_inline("***both***")
+	_check(bi.size() == 1 and bi[0]["type"] == S.BOLD_ITALIC, "bold italic span")
 	# escaped markers stay literal text (no emphasis)
 	var esc := MarkdownParser.compute_inline("\\*x\\*")
 	_check(esc.size() == 2 and esc[0]["type"] == S.ESCAPE and esc[1]["type"] == S.ESCAPE,

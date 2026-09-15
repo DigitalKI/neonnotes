@@ -128,6 +128,8 @@ static func _inline(s: String) -> String:
 				out += "[code][color=#%s]%s[/color][/code]" % [_hex(_col("accent2")), escape(content)]
 			MarkdownParser.SpanType.STRONG:
 				out += "[b][color=#%s]%s[/color][/b]" % [_hex(_col("accent")), _inline(content)]
+			MarkdownParser.SpanType.BOLD_ITALIC:
+				out += "[b][i][color=#%s]%s[/color][/i][/b]" % [_hex(_col("accent")), _inline(content)]
 			MarkdownParser.SpanType.EMPHASIS:
 				out += "[i]%s[/i]" % _inline(content)
 			MarkdownParser.SpanType.STRIKE:

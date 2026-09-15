@@ -39,6 +39,17 @@ _Chronological, newest last._
   suite passes. Remaining legacy renderer is now only a temporary migration
   fallback for empty/unrecognized lines.
 
+- **2026-09-15 — inline span parity**: added a shared BOLD_ITALIC span for
+  `***text***`; PreviewBuilder and NeonHighlighter now render/highlight it from
+  the same parser span. Added regression coverage.
+
+- **2026-09-15 — unified parser Phase 4A/4B continued**: bare `http://` and bare `http://` and
+  `https://` URLs are now recognized by `MarkdownParser.compute_inline()` as
+  EXTERNAL_LINK spans (trailing punctuation excluded), so PreviewBuilder no
+  longer needs its legacy regex path for bare URLs. Added unit coverage; full
+  suite passes. Remaining legacy renderer is now only a temporary migration
+  fallback for empty/unrecognized lines.
+
 - **2026-09-14 — unified parser Phase 4A/4B started**: PreviewBuilder now
   consumes `MarkdownParser.compute_inline()` spans for recognized inline syntax
   (code, strong/emphasis, strike, highlight, glitch/flicker, wiki-links,

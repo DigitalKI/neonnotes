@@ -106,6 +106,7 @@ func _get_line_syntax_highlighting(line: int) -> Dictionary:
 		match int(sp["type"]):
 			SP.CODE_SPAN: col = accent2
 			SP.STRONG: col = _c("heading", Color("ff2ea6"))
+			SP.BOLD_ITALIC: col = _c("heading", Color("ff2ea6"))
 			SP.EMPHASIS: col = dim
 			SP.STRIKE: col = dim
 			SP.HIGHLIGHT: col = accent3

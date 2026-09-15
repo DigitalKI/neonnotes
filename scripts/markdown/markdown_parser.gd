@@ -4,7 +4,7 @@ class_name MarkdownParser extends RefCounted
 # Both NeonHighlighter (edit mode) and PreviewBuilder (view mode) consume a
 # single, position-indexed token stream computed here, so a construct is
 # interpreted identically in both views. Offsets are into the *source* line.
-enum SpanType { TEXT, EMPHASIS, STRONG, CODE_SPAN, STRIKE, HIGHLIGHT, GLITCH,
+enum SpanType { TEXT, EMPHASIS, STRONG, BOLD_ITALIC, CODE_SPAN, STRIKE, HIGHLIGHT, GLITCH,
 	FLICKER, WIKILINK, ESCAPE, EXTERNAL_LINK }
 
 const QUOTE_CONTINUATION_MAX := 200
@@ -121,6 +121,13 @@ static func _scan_emphasis(text: String, p: int, spans: Array[Dictionary]) -> in
 	while p + run < text.length() and text[p + run] == text[p]:
 		run += 1
 	var ch := text[p]
+	if run >= 3:
+		var triple_close := text.find(ch.repeat(3), p + 3)
+		if triple_close >= 0:
+			spans.append({"type": SpanType.BOLD_ITALIC, "start": p,
+				"length": triple_close + 3 - p, "content_start": p + 3,
+				"content_length": triple_close - (p + 3)})
+			return triple_close + 3
 	var strong := run >= 2
 	var open_len := 2 if strong else 1
 	var close_marker := ch + ch if strong else ch
