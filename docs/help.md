@@ -38,7 +38,16 @@ Every construct below places the real Markdown and its escaped form on the same 
 
 [[Note name|custom label]] \[[not a link]]
 
+[Open Godot](https://godotengine.org) or paste `https://example.com`; clicking opens the default browser.
+
 > quote text \> not a quote
+
+**Callout syntax** — put `[!type]` on the first line of a quote block, then prefix each body line with `>`:
+
+> [!info] Information title
+> This is the callout body. It can contain normal Markdown.
+
+Use `note`, `info`, `tip`, `warning`, `danger`, `success`, or `quote`. Unknown types use the note style. Optional `+` or `-` after the type is recorded for future folding support.
 
 - List me \-List me
 - One or more times

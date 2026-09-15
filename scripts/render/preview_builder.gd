@@ -128,6 +128,12 @@ static func _inline(s: String) -> String:
 		s, "[glitch][color=#%s][b]$1$2[/b][/color][/glitch]" % _hex(_col("accent4")), true)
 	s = RegEx.create_from_string(r"\+\+(.+?)\+\+").sub(
 		s, "[flicker][color=#%s]$1[/color][/flicker]" % _hex(_col("accent3")), true)
+	# External Markdown links: [label](https://...) and bare autolinks
+	# become RichTextLabel URLs and open the system browser on click.
+	s = RegEx.create_from_string(r"\[lb\]([^\[\]]+?)\[rb\]\((https?://[^)\s]+)\)").sub(
+		s, "[url=ext:$2][color=#%s][u]$1[/u][/color][/url]" % _hex(_col("accent2")), true)
+	s = RegEx.create_from_string(r"(?<![\w\"=])(https?://[^\s\[\]]+)").sub(
+		s, "[url=ext:$1][color=#%s][u]$1[/u][/color][/url]" % _hex(_col("accent2")), true)
 	# wiki-links: [[Note]] / [[Note|alias]] — after escape() both brackets are
 	# masked. Alias form first, then plain form; label falls back to the target.
 	s = RegEx.create_from_string(r"\[lb\]\[lb\]([^\[|]+?)\|([^\[|]+?)\[rb\]\[rb\]").sub(
@@ -158,7 +164,12 @@ static func _rich(bb: String, default_col: Color) -> RichTextLabel:
 	rt.install_effect(GlitchFx.new())
 	rt.install_effect(FlickerFx.new())
 	if open_cb.is_valid():
-		rt.meta_clicked.connect(func(meta: Variant): open_cb.call(str(meta)))
+		rt.meta_clicked.connect(func(meta: Variant):
+			var value := str(meta)
+			if value.begins_with("ext:"):
+				OS.shell_open(value.trim_prefix("ext:"))
+			else:
+				open_cb.call(value))
 	return rt
 
 static func _image_block(block: Dictionary) -> Control:

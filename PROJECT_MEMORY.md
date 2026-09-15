@@ -32,6 +32,15 @@ _Last updated: 2026-09-14 (shared Markdown inline-span model + Obsidian callouts
 
 _Chronological, newest last._
 
+- **2026-09-14 — quote highlighting + external links**:
+  - Quote lines now highlight the `>` marker and quoted source text in edit mode;
+    callout headers continue through the same quote path.
+  - Help documents Obsidian callout creation explicitly (`> [!info] Title`,
+    followed by `>` body lines and supported types).
+  - Preview supports Markdown external links `[label](https://...)` and bare
+    `https://...` URLs. They render underlined and use `OS.shell_open()` for
+    the platform default browser; wiki-links remain routed to NeonNotes.
+
 - **2026-09-14 — Help as external markdown (user feedback)**: HELP_DOC const removed
   from main.gd; Help is now `res://docs/help.md`, loaded by `_load_help_doc()`
   (FileAccess, cached). Outside the vault → no GDScript escaping pitfalls and
@@ -353,6 +362,8 @@ _Chronological, newest last._
 
 
 - **2026-09-14 — image import (Android content URIs, community approach):** The Android native picker returns a `content://` URI, not a filesystem path. Following the accepted Godot community approach (godot-proposals #14263 / #12669): read the URI with `FileAccess.open(uri, READ)`, take persistable permission via `AndroidRuntime.updatePersistableUriPermission(uri, true)`, sniff the bytes with magic-byte signatures and call the matching `Image.load_*_from_buffer()` decoder, then `save_png()` to `vault/media/`. Always `.png` destination so the rendered suffix matches the actual (PNG) encoding. No Java/`ContentResolver` JNI plumbing is used. Rendered images in the preview are inert (mouse_filter IGNORE, no tooltip "click to replace"); only an empty placeholder opens the image picker.
+
+- **2026-09-14 — focused graph + relationship styling:** Graph now opens around the current note and shows only one-hop neighbors. Direct wiki-links use solid edges; folder-as-note tree relationships use dashed edges. The focused node is centered and gently pulses. Backlinks remain a separate control rather than tree rows.
 
 - **Current goal:** v3 UX batch complete through round 2. Tree is now fully
   restructurable (drag notes/folders, folder-as-note, auto link rewrite).

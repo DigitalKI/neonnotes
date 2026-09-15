@@ -71,6 +71,13 @@ func _get_line_syntax_highlighting(line: int) -> Dictionary:
 				out[idx] = {"color": dim, "length": 1}
 				start = idx + 1
 
+	# ---- block quote / callout markers ----------------------------------------
+	if s.begins_with(">"): 
+		var quote_start := text.find(">")
+		out[quote_start] = {"color": accent2, "length": 1}
+		if text.length() > quote_start + 1 and not in_fence:
+			out[quote_start + 1] = {"color": _c("text", Color("d9e1ff")), "length": text.length() - quote_start - 1}
+
 	# ---- headings / list bullets ----------------------------------------------
 	if s.begins_with("#"):
 		var hs := 0
