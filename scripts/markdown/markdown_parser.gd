@@ -38,6 +38,21 @@ static func compute_inline(text: String) -> Array[Dictionary]:
 				continue
 			i += 1
 			continue
+		# ---- bare external URLs ----------------------------------------------
+		if (text.substr(i).begins_with("https://") or text.substr(i).begins_with("http://")) \
+				and (i == 0 or not text[i - 1].is_valid_identifier()):
+			var url_end := i
+			while url_end < text.length() and not text[url_end] in [" ", "\t", "\n", "\r"] and not "[]<>\"".contains(text[url_end]):
+				url_end += 1
+			while url_end > i and ".,;:!?)]}".contains(text[url_end - 1]):
+				url_end -= 1
+			if url_end > i:
+				var url := text.substr(i, url_end - i)
+				spans.append({"type": SpanType.EXTERNAL_LINK, "start": i,
+					"length": url.length(), "content_start": i,
+					"content_length": url.length(), "target": url})
+				i = url_end
+				continue
 		# ---- Markdown external links [label](https://...) -------------------
 		if c == "[" and i + 1 < text.length() and text[i + 1] != "[":
 			var rb := text.find("](", i + 1)

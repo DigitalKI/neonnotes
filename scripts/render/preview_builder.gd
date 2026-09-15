@@ -143,8 +143,8 @@ static func _inline(s: String) -> String:
 	out += escape(s.substr(cursor))
 	return out
 
-## Compatibility renderer retained for constructs not yet represented by spans
-## (notably bare URL autolinks). It is no longer used for recognized spans.
+## Compatibility renderer retained only during incremental migration. It is no
+## longer used for recognized inline spans.
 static func _inline_legacy(s: String) -> String:
 	var accent := _hex(_col("accent"))
 	# Protect backslash escapes BEFORE scanning code spans. This is important
