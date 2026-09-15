@@ -140,7 +140,10 @@ static func _find_closing(text: String, from: int, open: String, close: String) 
 ## "> [!TYPE] Some title"  (the ">" is already stripped into `joined`).
 ## Returns a block dict {"type":"callout", "kind", "title", "text"} or null.
 static func _parse_callout(joined: String):
-	var first_line := joined.split("\n", false)[0].strip_edges()
+	var quote_lines := joined.split("\n", true)
+	if quote_lines.is_empty():
+		return null
+	var first_line := quote_lines[0].strip_edges()
 	if not first_line.begins_with("[!"):
 		return null
 	var close := first_line.find("]")

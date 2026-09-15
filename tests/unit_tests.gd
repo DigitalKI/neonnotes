@@ -64,6 +64,9 @@ func _check_markdown_blocks() -> void:
 		_check(cb[0]["text"] == "Works *every* time.", "callout body")
 	else:
 		_check(false, "callout parsed as callout block")
+	# an empty quote marker while typing is valid incomplete input
+	var empty_quote := MarkdownParser.parse(">")
+	_check(empty_quote["blocks"][0]["type"] == "quote", "empty quote marker is safe")
 	# a plain quote (no callout header) must NOT become a callout
 	var pq := MarkdownParser.parse("> just a quote")
 	_check(pq["blocks"][0]["type"] == "quote", "plain quote stays a quote")
