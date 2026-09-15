@@ -24,6 +24,37 @@ var _is_touch_dragging := false
 
 ## Wire behavior once the scene nodes are ready. The host connects
 ## palette_btn/vault_btn/sync_btn/tree_delete_btn signals itself.
+
+# ---------------------------------------------- backlinks panel (moved from main.gd)
+
+func toggle_backlinks() -> void:
+	backlinks_panel.visible = not backlinks_panel.visible
+	if backlinks_panel.visible:
+		refresh_backlinks()
+
+func refresh_backlinks() -> void:
+	for c in backlinks_box.get_children():
+		c.queue_free()
+	var title := Label.new()
+	title.name = "BacklinksTitle"
+	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	backlinks_box.add_child(title)
+	if GameManager.current_file == "":
+		title.text = "Open a note to see backlinks"
+		return
+	var target := GameManager.current_rel.get_file().trim_suffix(".md")
+	var links := WikiLinks.backlinks(target)
+	if links.is_empty():
+		title.text = "⇠ No notes link to “%s”" % target
+		return
+	title.text = "⇠ %d note(s) link here" % links.size()
+	for f in links:
+		var b := Button.new()
+		b.name = "Back_" + f.validate_filename()
+		b.text = "◈ " + f.trim_suffix(".md")
+		b.pressed.connect(select_note.bind(f))
+		backlinks_box.add_child(b)
+
 func build() -> void:
 	side_tree.item_activated.connect(_on_tree_selected)
 	# Trigger note opening on mouse/touch RELEASE so dragging a row never

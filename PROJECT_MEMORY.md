@@ -5,7 +5,7 @@
 > updated at the **end**, so context, decisions, and direction survive across
 > conversations. Keep it current — a stale memory file is worse than none.
 
-_Last updated: 2026-09-15 (sync diagnostics + vault comparison) · Godot 4.7 · renderer: gl_compatibility_
+_Last updated: 2026-09-15 (dead-code cleanup + smoke driver extraction) · Godot 4.7 · renderer: gl_compatibility_
 
 > ⚠️ **Path note:** the saved global memory says `/home/toshiwo/www/neonnotes`
 > but the project actually lives at **`/home/toshiwo/Projects/Godot/neonnotes`**.
@@ -32,6 +32,43 @@ _Last updated: 2026-09-15 (sync diagnostics + vault comparison) · Godot 4.7 · 
 
 _Chronological, newest last._
 
+- **2026-09-15 — backlinks moved into VaultTreeComponent + preload cleanup**:
+  `main.gd _toggle_backlinks()/_refresh_backlinks()` logic moved to
+  `VaultTreeComponent.toggle_backlinks()/refresh_backlinks()` (the component
+  already owns `backlinks_panel`/`backlinks_box`; backlink buttons now call
+  `select_note` internally instead of reaching back into main). main.gd keeps
+  one-line delegating wrappers (call sites unchanged). Runtime `load()` calls
+  replaced with preload consts: `MONO_FONT`, `SYNC_DIALOG_SCENE` in main.gd;
+  smoke_test now uses the `SyncService` global class and a local
+  `const PB := preload(...preview_builder...)`. Reassessed the planned
+  wiki/graph-glue extraction from main.gd and deliberately dropped it: what
+  remains is thin glue (5–7-line callbacks over WikiLinks/GraphView/vault_tree),
+  so extraction would add indirection without reducing size. Full suite passes
+  (unit/drag/smoke OK). Note: the pre-existing exit-time glibc abort
+  ("corrupted size vs. prev_size", exit 134) is intermittent and can hit any
+  Godot invocation in run_tests.sh; with `set -e` it may cut the suite short
+  after a passing step — all checks always pass before the abort.
+- **2026-09-15 — dead-code cleanup + smoke driver extraction**: removed unused
+  `main.gd _save_current()` (dead wrapper; autosave timer calls `_flush_save`
+  directly) and `sync_service.gen_words()` (superseded by PIN pairing; `WORDS`
+  const is still used elsewhere). Deleted unreferenced `icon.svg` and
+  `NeonNotesIco.png` (the app icon is `NN_icon.jpeg`, referenced by UID in
+  `project.godot`). Removed empty Godot-template scaffolding dirs (globals/,
+  resources/{items,stats}, scenes/{actors,levels,props,systems,ui},
+  scripts/{actors,systems,ui}, assets/{art,audio}). The ~200-line smoke-test
+  block moved out of `main.gd` into `scripts/dev/smoke_test.gd` (a Node added
+  to the tree as "SmokeDriver" by `Main._start_smoke()`; must be a Node — as a
+  RefCounted its coroutine died silently at the first `await process_frame`,
+  with no error printed). `_rm_dir` stayed in main.gd (used by real folder
+  deletes). Note: a Callable-level `.call_deferred()` on the RefCounted driver
+  was also a silent no-op; main now defers its own `_start_smoke()` wrapper.
+  Full suite passes. Pre-existing issue (not from this change): godot exits
+  with a glibc "corrupted size vs. prev_size" abort after the smoke scene
+  quits (exit code 134) — all checks pass before the abort; likely related to
+  the known RID/ObjectDB leak warnings at exit. Also fixed stale memory: the
+  PreviewBuilder legacy inline-regex fallback was already fully removed (no
+  `_inline_legacy` exists); all inline rendering now goes through
+  `MarkdownParser.compute_inline()` spans.
 - **2026-09-15 — high-resolution image exports**: PNG/GIF exports now render into a dedicated SubViewport at 2× the visible width (capped at 2400 px) instead of capturing screen-width content. The exporter adds an explicit background ColorRect using the active note palette, preserving themed backgrounds. Added native JPEG export at quality 95% as an optional menu item; PNG remains the lossless default for text and UI. Upscaling is done uniformly with a `Control.scale` transform over the whole content subtree (not by widening the viewport), so fonts, spacing and heights all scale together with no proportion drift; text is re-rasterized at the higher scale so it stays crisp. Note: `SubViewport.content_scale_*` is not available in this Godot 4.7 build (that API is Window-only), so the Control.scale approach is used instead. Export base width is now driven by a `width_cb` callback that returns the **logical content-pane width** (`content_panel.size.x`), not the full physical window width — this keeps exported proportions identical to the on-screen preview (it excludes the sidebar and is independent of the window `ui_scale` glob`al content_scale_factor). The background is sized to the full physical pixel dimensions of the scaled viewport so it fills the whole image. Earlier bugs fixed along the way: scaling the width without fonts distorted proportions (now uniform Control.scale), and the background ColorRect under-filling because it sat outside the scaled group.
 
 - **2026-09-15 — optional CRT FX on exports**: added a persistent `GameManager.export_crt` toggle (stored in `settings.cfg` under `export/crt`, default ON, set via `set_export_crt()`). The toggle is exposed in the Settings page (Settings → "Apply CRT FX on export" CheckButton, stored in `settings.cfg` under `export/crt`, default ON, wired via `SettingsComponent`), and there is also a checkable "🖥 CRT FX on export" entry in the Export menu that flips it. When enabled, the exporter composites a full-viewport ColorRect using the live CRT `ShaderMaterial` (fetched from the main `CrtOverlay` via `Exporter.crt_material_cb`, with a shader-defaults fallback), so scanlines/grille/curve/wobble match the app in exported PNG/JPEG/GIF. When disabled, exports are clean. Save PNG/JPEG/GIF now also runs `Share.save_to_gallery()` on all platforms, so desktop copies land in the OS `Pictures/NeonNotes` folder (Android registers them in the device media library) while the vault copy is still kept for portability. The export viewport uses a clean background (no CRT overlay); text/UI exports remain readable.

@@ -168,13 +168,6 @@ func set_pin(pin: String) -> void:
 func gen_pin() -> String:
 	return "%06d" % (randi() % 1000000)
 
-func gen_words() -> String:
-	var out := []
-	for i in 3:
-		out.append(WORDS[randi() % WORDS.size()])
-	return "-".join(out)
-
-# ---------------- Server ----------------
 
 func _ensure_server() -> bool:
 	if _server and _server.is_listening():
