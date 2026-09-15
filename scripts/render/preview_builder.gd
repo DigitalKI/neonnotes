@@ -231,17 +231,33 @@ static func _table(rows: Array, text_c: Color) -> Control:
 	return _rich(bb, text_c)
 
 static func _quote_block(text: String, accent: Color, accent2: Color, text_c: Color) -> Control:
-	# A quote is a left-flush block: one styled RichTextLabel per source line so
-	# each wraps independently and continuation lines read like a quote.
+	# Quotes use a quieter treatment than callouts: one subtle panel background,
+	# a left accent rule, and a single opening quote mark on the first line only.
+	# Subsequent source lines continue the quote without repeating the glyph.
+	var panel := PanelContainer.new()
+	panel.name = "Quote"
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(accent2.r, accent2.g, accent2.b, 0.07)
+	sb.border_color = Color(accent2.r, accent2.g, accent2.b, 0.32)
+	sb.border_width_left = 3
+	sb.set_corner_radius_all(4)
+	sb.set_content_margin(SIDE_LEFT, 12)
+	sb.set_content_margin(SIDE_RIGHT, 10)
+	sb.set_content_margin(SIDE_TOP, 7)
+	sb.set_content_margin(SIDE_BOTTOM, 7)
+	panel.add_theme_stylebox_override("panel", sb)
 	var box := VBoxContainer.new()
-	box.name = "Quote"
-	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	for line in text.split("\n"):
+	box.name = "QuoteLines"
+	panel.add_child(box)
+	var line_index := 0
+	for line in text.split("\\n"):
 		if line.strip_edges() == "":
 			continue
-		box.add_child(_rich("[color=#%s] ❝ %s [/color]"
-			% [_hex(accent2), _inline(escape(line))], text_c))
-	return box
+		var prefix := "[color=#%s]❝[/color] " % _hex(accent2) if line_index == 0 else "    "
+		box.add_child(_rich(prefix + _inline(escape(line)), text_c))
+		line_index += 1
+	return panel
 
 static func _callout_block(block: Dictionary, text_c: Color) -> Control:
 	var kind := String(block.get("kind", "")).to_lower()

@@ -32,6 +32,12 @@ _Last updated: 2026-09-14 (shared Markdown inline-span model + Obsidian callouts
 
 _Chronological, newest last._
 
+- **2026-09-14 — quote visual refinement**: multiline quotes now render as one
+  subtle tinted PanelContainer with a thin accent border; the ❝ glyph appears
+  only on the first nonblank line and later lines are indented continuation
+  lines. This intentionally differs from callouts (no icon/title bar and much
+  lower-opacity background). Smoke screenshot verified.
+
 - **2026-09-14 — quote highlighting + external links**:
   - Quote lines now highlight the `>` marker and quoted source text in edit mode;
     callout headers continue through the same quote path.
