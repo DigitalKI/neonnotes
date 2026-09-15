@@ -49,6 +49,7 @@ func _check_markdown_spans() -> void:
 	# incomplete editor input: an unmatched opener stays literal (no EMPHASIS)
 	var open := MarkdownParser.compute_inline("**unfinished")
 	_check(open.is_empty(), "unmatched bold opener not a marked span")
+	_check(PreviewBuilder._inline("plain text") == "plain text", "plain text uses shared renderer")
 
 func _check_markdown_blocks() -> void:
 	# multiline block quote collapses consecutive ">" lines into one container

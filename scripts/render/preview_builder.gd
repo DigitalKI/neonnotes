@@ -111,7 +111,7 @@ static func _inline(s: String) -> String:
 	s = s.replace("[lb]", "[").replace("[rb]", "]")
 	var parsed := MarkdownParser.compute_inline(s)
 	if parsed.is_empty():
-		return _inline_legacy(s)
+		return escape(s)
 	var out := ""
 	var cursor := 0
 	for span in parsed:
@@ -148,58 +148,6 @@ static func _inline(s: String) -> String:
 	out += escape(s.substr(cursor))
 	return out
 
-## Compatibility renderer retained only during incremental migration. It is no
-## longer used for recognized inline spans.
-static func _inline_legacy(s: String) -> String:
-	var accent := _hex(_col("accent"))
-	# Protect backslash escapes BEFORE scanning code spans. This is important
-	# for an escaped backtick: \\` must remain literal and must not open code.
-	var prot: Array = _protect_escapes(s)
-	s = prot[0]
-	# ---- code spans FIRST: their content must stay fully literal (no escape,
-	# emphasis, or effect processing inside). Placeholder sentinels differ from
-	# the escape ones so restore order cannot collide.
-	const C_OPEN := "\uE002"
-	const C_CLOSE := "\uE003"
-	var code_map := {}
-	var code_re := RegEx.create_from_string("`([^`\n]+)`")
-	var cn := 0
-	while true:
-		var cm := code_re.search(s)
-		if cm == null:
-			break
-		cn += 1
-		var ph := C_OPEN + str(cn) + C_CLOSE
-		code_map[ph] = "[code][color=#%s]%s[/color][/code]" % [_hex(_col("accent2")), cm.get_string(1)]
-		s = s.substr(0, cm.get_start()) + ph + s.substr(cm.get_end())
-	# v2 neon text effects (%%glitch%% — legacy %glitch% also accepted)
-	s = RegEx.create_from_string(r"%%(.+?)%%|%([^\s].*?)%").sub(
-		s, "[glitch][color=#%s][b]$1$2[/b][/color][/glitch]" % _hex(_col("accent4")), true)
-	s = RegEx.create_from_string(r"\+\+(.+?)\+\+").sub(
-		s, "[flicker][color=#%s]$1[/color][/flicker]" % _hex(_col("accent3")), true)
-	# External Markdown links: [label](https://...) and bare autolinks
-	# become RichTextLabel URLs and open the system browser on click.
-	s = RegEx.create_from_string(r"\[lb\]([^\[\]]+?)\[rb\]\((https?://[^)\s]+)\)").sub(
-		s, "[url=ext:$2][color=#%s][u]$1[/u][/color][/url]" % _hex(_col("accent2")), true)
-	s = RegEx.create_from_string(r"(?<![\w\"=])(https?://[^\s\[\]]+)").sub(
-		s, "[url=ext:$1][color=#%s][u]$1[/u][/color][/url]" % _hex(_col("accent2")), true)
-	# wiki-links: [[Note]] / [[Note|alias]] — after escape() both brackets are
-	# masked. Alias form first, then plain form; label falls back to the target.
-	s = RegEx.create_from_string(r"\[lb\]\[lb\]([^\[|]+?)\|([^\[|]+?)\[rb\]\[rb\]").sub(
-		s, "[url=$1][color=#%s][u]$2[/u][/color][/url]" % _hex(_col("accent2")), true)
-	s = RegEx.create_from_string(r"\[lb\]\[lb\]([^\[|]+?)\[rb\]\[rb\]").sub(
-		s, "[url=$1][color=#%s][u]$1[/u][/color][/url]" % _hex(_col("accent2")), true)
-	# bold / italic / code / strike / highlight
-	s = RegEx.create_from_string(r"\*\*\*(.+?)\*\*\*").sub(s, "[b][i][color=#%s]$1[/color][/i][/b]" % accent, true)
-	s = RegEx.create_from_string(r"\*\*(.+?)\*\*").sub(s, "[b][color=#%s]$1[/color][/b]" % accent, true)
-	s = RegEx.create_from_string(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)").sub(s, "[i]$1[/i]", true)
-	s = RegEx.create_from_string(r"~~(.+?)~~").sub(s, "[s]$1[/s]", true)
-	s = RegEx.create_from_string(r"==(.+?)==").sub(s, "[bgcolor=#%s][color=#%s][b]$1[/b][/color][/bgcolor]"
-		% [_hex(_col("accent3")), "#14062b"], true)  # dark text on the neon bar — always readable
-	s = _restore_escapes(s, prot[1])
-	for ph in code_map:
-		s = s.replace(ph, code_map[ph])
-	return s
 static func _rich(bb: String, default_col: Color) -> RichTextLabel:
 	var rt := RichTextLabel.new()
 	rt.name = "PreviewRichText"
