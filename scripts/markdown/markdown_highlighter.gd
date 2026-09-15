@@ -98,18 +98,9 @@ func _get_line_syntax_highlighting(line: int) -> Dictionary:
 	if in_fence:
 		return out  # code/chart body: no inline formatting, the tint above rules
 	var inline_spans := MarkdownParser.compute_inline(text)
-	# SyntaxHighlighter ranges are stateful in CodeEdit: explicitly terminate a
-	# formatted range with the editor's true text color, otherwise the previous
-	# colored range can visually bleed into the remainder of the line.
-	var plain := _c("text", Color("d9e1ff"))
-	var cursor := 0
-	for span in inline_spans:
-		var span_start: int = span["start"]
-		if span_start > cursor:
-			out[cursor] = {"color": plain, "length": span_start - cursor}
-		cursor = span_start + int(span["length"])
-	if cursor < text.length():
-		out[cursor] = {"color": plain, "length": text.length() - cursor}
+	# Do not emit ranges for ordinary text. CodeEdit's `font_color` is the
+	# canonical normal-text color; explicit gap ranges can recolor normal text
+	# and may cause a previous formatted range to appear to bleed.
 	for sp in inline_spans:
 		var col := Color.WHITE
 		match int(sp["type"]):
