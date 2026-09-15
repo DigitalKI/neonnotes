@@ -28,7 +28,15 @@ The left side of each example is rendered. Prefix a Markdown marker with `\` whe
 
 ~~strikethrough~~ \~~not strikethrough~~
 
-`inline code` \`not inline code`
+Inline code uses one backtick on each side. The text between them is rendered as code:
+
+`inline code`
+
+To show literal backticks, use a fenced code block instead:
+
+```text
+`this is shown as Markdown source`
+```
 
 ==highlight== \==not highlighted==
 
@@ -61,12 +69,28 @@ Tables use pipes around each row. The second row separates the headings from the
 | `/` | formatting menu |
 | `[[name]]` | wiki-link |
 
+To show a table as literal Markdown source, place the table inside a code block:
+
+```text
+| Key | Action |
+| --- | --- |
+| `/` | formatting menu |
+```
+
 Fenced code blocks preserve their contents. Add `chart` after the opening fence to create a chart instead of a plain code block:
 
 ```text
 This is a normal code block.
 Markdown markers such as **bold** remain literal here.
 ```
+
+To show the Markdown source of a fenced code block, wrap it in another code block. Use a longer outer fence:
+
+````text
+```text
+This inner fence is displayed as source.
+```
+````
 
 ## 5. Charts
 

@@ -104,6 +104,10 @@ static func _restore_escapes(s: String, map: Dictionary) -> String:
 ## Inline markdown -> BBCode (input is escaped text)
 static func _inline(s: String) -> String:
 	var accent := _hex(_col("accent"))
+	# Protect backslash escapes BEFORE scanning code spans. This is important
+	# for an escaped backtick: \\` must remain literal and must not open code.
+	var prot: Array = _protect_escapes(s)
+	s = prot[0]
 	# ---- code spans FIRST: their content must stay fully literal (no escape,
 	# emphasis, or effect processing inside). Placeholder sentinels differ from
 	# the escape ones so restore order cannot collide.
@@ -120,9 +124,6 @@ static func _inline(s: String) -> String:
 		var ph := C_OPEN + str(cn) + C_CLOSE
 		code_map[ph] = "[code][color=#%s]%s[/color][/code]" % [_hex(_col("accent2")), cm.get_string(1)]
 		s = s.substr(0, cm.get_start()) + ph + s.substr(cm.get_end())
-	# protect \-escapes from every transform below, restore at the end
-	var prot: Array = _protect_escapes(s)
-	s = prot[0]
 	# v2 neon text effects (%%glitch%% — legacy %glitch% also accepted)
 	s = RegEx.create_from_string(r"%%(.+?)%%|%([^\s].*?)%").sub(
 		s, "[glitch][color=#%s][b]$1$2[/b][/color][/glitch]" % _hex(_col("accent4")), true)
