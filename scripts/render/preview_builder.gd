@@ -104,6 +104,11 @@ static func _restore_escapes(s: String, map: Dictionary) -> String:
 ## Inline markdown -> BBCode from the shared parser span stream.
 ## The parser owns recognition; this function only maps semantic spans to BBCode.
 static func _inline(s: String) -> String:
+	# Callers historically pass PreviewBuilder.escape(s), which masks brackets
+	# as [lb]/[rb] for BBCode safety. Decode those transport markers before
+	# syntax parsing; a preceding backslash remains, so escaped brackets still
+	# correctly become literal text rather than wiki-links.
+	s = s.replace("[lb]", "[").replace("[rb]", "]")
 	var parsed := MarkdownParser.compute_inline(s)
 	if parsed.is_empty():
 		return _inline_legacy(s)
