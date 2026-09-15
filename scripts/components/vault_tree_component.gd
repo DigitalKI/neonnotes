@@ -13,9 +13,7 @@ signal delete_requested
 @onready var tree_delete_btn: Button = %TreeDeleteBtn
 @onready var backlinks_panel: PanelContainer = %BacklinksPanel
 @onready var backlinks_box: VBoxContainer = %BacklinksBox
-@onready var palette_btn: OptionButton = %PaletteBtn
-@onready var vault_btn: Button = %VaultBtn
-@onready var sync_btn: Button = %SyncBtn
+@onready var config_btn: Button = %ConfigBtn
 
 var save_cb: Callable
 var flash_cb: Callable
@@ -90,10 +88,7 @@ func build() -> void:
 
 ## Populate the palette selector (source of truth: GameManager.PALETTES).
 func build_palette() -> void:
-	palette_btn.clear()
-	for palette_name in GameManager.PALETTES.keys():
-		palette_btn.add_item(palette_name)
-	palette_btn.select(maxi(0, GameManager.PALETTES.keys().find(GameManager.palette_name)))
+	pass
 
 ## Active tag filter ("" = show all). Set by the tag chips above the tree.
 var active_tag := ""

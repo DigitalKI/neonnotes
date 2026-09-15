@@ -31,6 +31,8 @@ func _load_help_doc() -> String:
 @onready var content_body: VBoxContainer = %ContentBody
 @onready var content_panel: PanelContainer = %Content
 @onready var graph_view: GraphView = %GraphView
+var settings_page: VBoxContainer
+var settings_mode := false
 
 const _SMOKE_FEATURES := """---
 title: \"Features\"
@@ -97,18 +99,17 @@ func _ready() -> void:
 	add_child(layout_component)
 	GameManager.palette_changed.connect(func():
 		theme_component.apply()
-		_render_preview())
+		if settings_mode:
+			_show_settings()
+		else:
+			_render_preview())
 	vault_tree.save_cb = _flush_save
 	vault_tree.flash_cb = _flash
 	vault_tree.note_requested.connect(_on_note_selected)
 	vault_tree.delete_requested.connect(_delete_selected_node)
 	vault_tree.tree_delete_btn.pressed.connect(_delete_selected_node)
 	vault_tree.build()
-	vault_tree.build_palette()
-	vault_tree.palette_btn.item_selected.connect(func(index: int):
-		GameManager.set_palette(vault_tree.palette_btn.get_item_text(index)))
-	vault_tree.vault_btn.pressed.connect(_on_open_vault)
-	vault_tree.sync_btn.pressed.connect(_on_sync)
+	vault_tree.config_btn.pressed.connect(_toggle_settings)
 	graph_view.open_cb = _open_wikilink
 	PreviewBuilder.open_cb = _open_wikilink
 	PreviewBuilder.image_cb = _on_image_click
@@ -404,6 +405,9 @@ func _save_current() -> void:
 
 func _on_note_selected(fname: String) -> void:
 	autosave_timer.stop()
+	if settings_mode:
+		_close_settings()
+	# Continue opening the selected note after leaving settings.
 	_flush_save()  # flush previous note first — never lose changes
 	GameManager.current_file = GameManager.vault_abs() + "/" + fname
 	GameManager.current_rel = fname
@@ -672,6 +676,9 @@ func _show_help() -> void:
 	content_host.scroll_vertical = 0
 
 func _render_preview() -> void:
+	if settings_mode:
+		_show_settings()
+		return
 	code_edit.visible = false
 	content_host.visible = true
 	graph_view.visible = false
@@ -680,6 +687,40 @@ func _render_preview() -> void:
 	PreviewBuilder.pal_override = GameManager.PALETTES.get(str(doc.get("meta", {}).get("theme", "")), {})
 	PreviewBuilder.build(doc, content_body)
 	content_host.scroll_vertical = 0
+
+func _close_settings() -> void:
+	settings_mode = false
+	if settings_page: settings_page.visible = false
+	_set_mode()
+
+func _toggle_settings() -> void:
+	if settings_mode:
+		return
+	_flush_save()
+	settings_mode = not settings_mode
+	graph_view.visible = false
+	code_edit.visible = not settings_mode and source_mode
+	content_host.visible = settings_mode or not source_mode
+	if settings_mode: _show_settings()
+
+func _show_settings() -> void:
+	if settings_page == null:
+		settings_page = VBoxContainer.new()
+		settings_page.add_theme_constant_override("separation", 12)
+		var title := Label.new(); title.text = "⚙ SETTINGS"; title.add_theme_font_size_override("font_size", 20); settings_page.add_child(title)
+		var vault_label := Label.new(); vault_label.name = "VaultPath"; settings_page.add_child(vault_label)
+		var vault_button := Button.new(); vault_button.text = "📂 Select Vault"; vault_button.pressed.connect(_on_open_vault); settings_page.add_child(vault_button)
+		var sync_button := Button.new(); sync_button.text = "⇄ Sync / Pair Devices"; sync_button.pressed.connect(_on_sync); settings_page.add_child(sync_button)
+		var paired := Label.new(); paired.name = "PairedDevices"; paired.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; settings_page.add_child(paired)
+		var levels_label := Label.new(); levels_label.text = "Graph neighbor levels (1–10)"; settings_page.add_child(levels_label)
+		var levels := SpinBox.new(); levels.min_value = 1; levels.max_value = 10; levels.step = 1; levels.value = GameManager.graph_levels; levels.value_changed.connect(func(v: float): GameManager.graph_levels = clampi(int(v), 1, 10); GameManager._save_settings(); if graph_view.visible: graph_view.open(GameManager.current_rel)); settings_page.add_child(levels)
+		var style_label := Label.new(); style_label.text = "Style"; settings_page.add_child(style_label)
+		var style := OptionButton.new(); for p in GameManager.PALETTES.keys(): style.add_item(p); style.select(maxi(0, GameManager.PALETTES.keys().find(GameManager.palette_name))); style.item_selected.connect(func(i: int): GameManager.set_palette(style.get_item_text(i))); settings_page.add_child(style)
+		var close_button := Button.new(); close_button.text = "Close Settings"; close_button.pressed.connect(_close_settings); settings_page.add_child(close_button)
+		content_body.add_child(settings_page)
+	var path_label: Label = settings_page.get_node("VaultPath"); path_label.text = "Vault: " + GameManager.vault_abs() + "\nName: " + GameManager.vault_abs().get_file()
+	var paired_label: Label = settings_page.get_node("PairedDevices"); paired_label.text = "Paired devices: " + (str(GameManager.paired_peers.keys()) if not GameManager.paired_peers.is_empty() else "None")
+	settings_page.visible = true
 
 # ------------------------------------------------- v2: wiki / backlinks / graph
 
@@ -937,7 +978,7 @@ func _toggle_graph() -> void:
 	_flush_save()
 	code_edit.visible = false
 	content_host.visible = false
-	graph_view.open()
+	graph_view.open(GameManager.current_rel)
 
 # ------------------------------------------------------------ vault / sync
 
@@ -1097,7 +1138,7 @@ func _run_smoke() -> void:
 	# html exporter
 	var html := HtmlExporter.to_html(doc)
 	fails += _check(html.begins_with("<!DOCTYPE") or html.begins_with("<html"), "html export produces doc")
-	graph_view.open()
+	graph_view.open(GameManager.current_rel)
 	fails += _check(graph_view.visible, "graph view visible")
 	var svc: Node = load("res://scripts/sync/sync_service.gd").new()
 	fails += _check(svc.gen_pin().length() == 6, "pin gen")

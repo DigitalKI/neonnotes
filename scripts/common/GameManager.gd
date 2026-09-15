@@ -31,6 +31,7 @@ const PALETTES := {
 }
 
 var palette_name := "Synthwave"
+var graph_levels := 2
 var vault_dir := VAULT_DIR
 var current_file := ""  # absolute path of the open note ("" = none)
 var current_rel := ""   # vault-relative path of the open note ("" = none)
@@ -234,6 +235,7 @@ func _load_settings() -> void:
 	if cf.load(SETTINGS) != OK:
 		return
 	palette_name = cf.get_value("ui", "palette", palette_name)
+	graph_levels = clampi(int(cf.get_value("ui", "graph_levels", graph_levels)), 1, 10)
 	if not PALETTES.has(palette_name):
 		palette_name = "Synthwave"
 	vault_dir = cf.get_value("vault", "dir", VAULT_DIR)
@@ -249,6 +251,7 @@ func _load_settings() -> void:
 func _save_settings() -> void:
 	var cf := ConfigFile.new()
 	cf.set_value("ui", "palette", palette_name)
+	cf.set_value("ui", "graph_levels", graph_levels)
 	cf.set_value("vault", "dir", vault_dir)
 	cf.set_value("sync", "device_id", device_id)
 	cf.set_value("sync", "pin", sync_pin)

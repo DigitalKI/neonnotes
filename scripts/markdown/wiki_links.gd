@@ -9,11 +9,8 @@ static func extract_links(text: String) -> Array[String]:
 
 static func resolve(target: String) -> String:
 	var t := target.strip_edges().to_lower()
-	# Prefer an exact match on the vault-relative path without the .md
-	# extension, e.g. "vvv/aaa" -> "vvv/aaa.md".
 	for filename in GameManager.notes:
 		if filename.get_basename().to_lower() == t: return filename
-	# Fall back to a filename-only match (single-token targets).
 	for filename in GameManager.notes:
 		if filename.get_file().get_basename().to_lower() == t: return filename
 	return ""
@@ -35,6 +32,12 @@ static func graph() -> Dictionary:
 		for target in extract_links(file.get_as_text()):
 			var resolved := resolve(target)
 			if resolved == "" or resolved == source: continue
-			var a := source; var b := resolved; var key := (a + "|" + b) if a < b else (b + "|" + a)
-			if not seen.has(key): seen[key] = true; edges.append({"from":a, "to":b})
-	return {"nodes":nodes, "edges":edges}
+			var key := "direct|" + source + "|" + resolved
+			if not seen.has(key): seen[key] = true; edges.append({"from":source, "to":resolved, "kind":"direct"})
+	# A folder companion note is the visible tree parent of its children.
+	for child in GameManager.notes:
+		var parent := child.get_base_dir()
+		var parent_note := parent + ".md"
+		if parent != "." and GameManager.notes.has(parent_note):
+			edges.append({"from":parent_note, "to":child, "kind":"tree"})
+	return {"nodes":nodes, "links":edges}
