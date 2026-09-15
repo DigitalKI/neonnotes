@@ -125,6 +125,8 @@ func _get_line_syntax_highlighting(line: int) -> Dictionary:
 		if col != Color.WHITE:
 			var st: int = sp["start"]
 			var ln: int = sp["length"]
-			if not out.has(st):
-				out[st] = {"color": col, "length": ln}
+			# Inline semantic ranges take precedence over the plain gap ranges
+			# created above. Without this assignment, a gap beginning at the same
+			# offset would hide the effect color.
+			out[st] = {"color": col, "length": ln}
 	return out
