@@ -80,9 +80,10 @@ func _get_line_syntax_highlighting(line: int) -> Dictionary:
 			hs += 1
 		out[0] = {"color": _c("heading", Color("ff2ea6")), "length": hs}
 
-	if s.begins_with("- ") or s.begins_with("* ") or s.begins_with("+ ") or s.begins_with("1. "):
+	var list_prefix := RegEx.create_from_string("^(?:[-*+]\\s+|\\d+[.)]\\s+)").search(s)
+	if list_prefix != null:
 		var off := text.length() - text.lstrip(" ").length()
-		var bullet_len := 1 if s[0] != "1" else s.find(".") + 1
+		var bullet_len: int = list_prefix.get_string().length()
 		if not out.has(off):
 			out[off] = {"color": accent2, "length": bullet_len}
 

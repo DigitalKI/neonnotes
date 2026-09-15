@@ -16,43 +16,53 @@ Organize notes in folders from the New dialog. Link notes with `[[Note name]]`, 
 
 ## Formatting
 
-Every construct below is shown **rendered first**, then in its **escaped source form** so you can see exactly what to type.
+Every construct below places the real Markdown and its escaped form on the same line. The escaped form is rendered literally.
 
-**Heading** — `# Heading 1`, `## Subheading` · escaped: `\# not a heading`
+## Hola \## hola
 
-**Bold** — **bold** · escaped: `\*\*not bold\*\*`
+== hola == \== hola ==
 
-**Italic** — *italic* · escaped: `\*not italic\*`
+++ senku chan ++ \++ senku chan ++
 
-**Bold italic** — ***both*** · escaped: `\*\*\*not both\*\*\*`
+%% SuperFX %% \%% SuperFX %%
 
-**Strikethrough** — ~~gone~~ · escaped: `\~\~not struck\~\~`
+** bold ** \** bold **
 
-**Inline code** — `code` · escaped: `\`not code\`` — the ticks stay visible, the styling does not apply
+* italic * \* italic *
 
-**Highlight** — ==highlight== · escaped: `\=\=not highlighted\=\=`
+*** bold italic *** \*** bold italic ***
 
-**Glitch** — %%glitch text%% · escaped: `\%\%not glitch\%\%`
+~~ strikethrough ~~ \~~ strikethrough ~~
 
-**Flicker** — ++flicker++ · escaped: `\+\+not flicker\+\+`
+`inline code` \`inline code`
 
-**Wiki link** — [[Note name|custom label]] · escaped: `\[\[not a link\]\]`
+[[Note name|custom label]] \[[not a link]]
 
-**Quote** (multi-line OK) — shown below · escaped: `\> not a quote`
+> quote text \> not a quote
 
-**Callout** — first quote line reads `> [!type] optional title`; types: `note`, `info`, `tip`, `warning`, `danger`, `success`, `quote` · shown below
+- List me \-List me
+- One or more times
 
-**Bullet list** — `- item` · escaped: `\- not a list`
+1. As you wish
+2. No more time wasted
 
-**Numbered list** — `1. first`, `2. second` — your numbers are kept exactly as written
+> [!tip] Callout title
+> Callout body text
 
-**Table** — each row wrapped in pipes, second row is dashes · escaped: `\| not a table`
+| Key | Action | \| not a table |
+| --- | --- | --- |
+| `/` | formatting menu | `[[name]]` |
 
-**Code fence** — a line of three backticks (optionally followed by a language name), then everything until the closing fence stays literal
+```chart
+type: line
+title: Chart syntax is shown literally inside a fence
+labels: A, B
+values: 1, 2
+```
 
-**Image** — `![alt](media/file.png)` · escaped: `\![not an image](media/file.png)`
+`![alt](media/file.png)` \!\[not an image\]\(media/file.png\)
 
-These can all be **combined on one line**, and escaped characters always render literally: \*not bold\*, \[\[not a link\]\], \%\%not glitch\%\%.
+For a literal formatting marker, prefix it with a backslash. For example, `\*not bold\*`, `\[\[not a link\]\]`, and `\%\%not glitch\%\%` remain plain text.
 
 A multi-line quote:
 
