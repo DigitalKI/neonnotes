@@ -49,7 +49,7 @@ func apply() -> void:
 	var hl := NeonHighlighter.new()
 	hl.colors = {
 		"heading": c["accent"], "accent": c["accent"], "accent2": c["accent2"],
-		"accent3": c["accent3"], "code": c["accent2"],
+		"accent3": c["accent3"], "code": c["accent2"], "text": c["text"],
 		"dim": Color(c["text"].r, c["text"].g, c["text"].b, 0.5),
 	}
 	code_edit.syntax_highlighter = hl

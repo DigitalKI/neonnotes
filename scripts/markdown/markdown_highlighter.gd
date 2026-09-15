@@ -98,18 +98,9 @@ func _get_line_syntax_highlighting(line: int) -> Dictionary:
 	if in_fence:
 		return out  # code/chart body: no inline formatting, the tint above rules
 	var inline_spans := MarkdownParser.compute_inline(text)
-	# Explicitly color the gaps too. CodeEdit can otherwise retain a previous
-	# syntax range's color while the line is being edited (notably after typing
-	# a closing ++ or == marker), making text outside the construct look styled.
-	var plain := _c("text", Color("d9e1ff"))
-	var cursor := 0
-	for span in inline_spans:
-		var span_start: int = span["start"]
-		if span_start > cursor:
-			out[cursor] = {"color": plain, "length": span_start - cursor}
-		cursor = span_start + int(span["length"])
-	if cursor < text.length():
-		out[cursor] = {"color": plain, "length": text.length() - cursor}
+	# Unstyled gaps intentionally remain absent: CodeEdit uses its normal
+	# font_color for them. Adding explicit gap ranges can override the default
+	# source color and invert the visual hierarchy.
 	for sp in inline_spans:
 		var col := Color.WHITE
 		match int(sp["type"]):
