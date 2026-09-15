@@ -113,6 +113,7 @@ func _get_line_syntax_highlighting(line: int) -> Dictionary:
 			SP.GLITCH: col = accent4
 			SP.FLICKER: col = accent3
 			SP.WIKILINK: col = accent2
+			SP.EXTERNAL_LINK: col = accent2
 			SP.ESCAPE: col = dim
 		if col != Color.WHITE:
 			var st: int = sp["start"]

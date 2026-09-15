@@ -1,0 +1,67 @@
+[gd_scene format=3 uid="uid://dsdpg5sa7q611"]
+
+[ext_resource type="Script" uid="uid://b38wimry2d6e4" path="res://scripts/components/settings_component.gd" id="1_settings"]
+
+[node name="SettingsPage" type="MarginContainer" unique_id=1440352913]
+offset_right = 242.0
+offset_bottom = 336.0
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="VerticalContainer" type="VBoxContainer" parent="." unique_id=1961161869]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 12
+script = ExtResource("1_settings")
+
+[node name="Title" type="Label" parent="VerticalContainer" unique_id=412445970]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "⚙ SETTINGS"
+
+[node name="VaultPath" type="Label" parent="VerticalContainer" unique_id=735742386]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Vault:"
+autowrap_mode = 2
+
+[node name="VaultButton" type="Button" parent="VerticalContainer" unique_id=1085320143]
+unique_name_in_owner = true
+layout_mode = 2
+text = "📂 Select Vault"
+
+[node name="SyncButton" type="Button" parent="VerticalContainer" unique_id=1843274916]
+unique_name_in_owner = true
+layout_mode = 2
+text = "⇄ Sync / Pair Devices"
+
+[node name="PairedDevices" type="Label" parent="VerticalContainer" unique_id=396453928]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Paired devices: None"
+autowrap_mode = 2
+
+[node name="GraphLabel" type="Label" parent="VerticalContainer" unique_id=2012181544]
+layout_mode = 2
+text = "Graph neighbor levels (1–10)"
+
+[node name="GraphLevels" type="SpinBox" parent="VerticalContainer" unique_id=660931135]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 1.0
+max_value = 10.0
+value = 1.0
+
+[node name="StyleLabel" type="Label" parent="VerticalContainer" unique_id=342748218]
+layout_mode = 2
+text = "Style"
+
+[node name="Style" type="OptionButton" parent="VerticalContainer" unique_id=708483152]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="CloseButton" type="Button" parent="VerticalContainer" unique_id=1101333219]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Close Settings"

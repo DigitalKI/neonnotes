@@ -7,6 +7,7 @@
 [ext_resource type="PackedScene" path="res://scenes/components/toolbar.tscn" id="5_toolbar"]
 [ext_resource type="PackedScene" uid="uid://cj1ama86pqcoo" path="res://scenes/components/status_bar.tscn" id="6_status"]
 [ext_resource type="PackedScene" path="res://scenes/components/side_panel.tscn" id="7_side"]
+[ext_resource type="PackedScene" path="res://scenes/components/settings_page.tscn" id="8_settings"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMat_crt"]
 shader = ExtResource("3_crt")
@@ -90,6 +91,13 @@ unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 10
+
+[node name="SettingsPage" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=740001001 instance=ExtResource("8_settings")]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
 
 [node name="GraphView" type="Control" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=938625459]
 unique_name_in_owner = true

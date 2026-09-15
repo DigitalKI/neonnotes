@@ -1,7 +1,11 @@
 extends Node
 
 func _ready() -> void:
-	var vault := "user://test_vault_drag_%d" % int(Time.get_unix_time_from_system())
+	# Reuse one disposable vault so repeated test runs cannot accumulate
+	# timestamped user:// directories or accidentally resemble real vault data.
+	var original_vault := GameManager.vault_dir
+	var vault := "user://test-vault"
+	_rm_dir(vault)
 	DirAccess.make_dir_recursive_absolute(vault)
 	GameManager.set_vault_dir(vault)
 
@@ -63,6 +67,8 @@ func _ready() -> void:
 	assert(not DirAccess.dir_exists_absolute(GameManager.vault_abs().path_join("Note1/Note2-2")), "Note1/Note2-2 folder should NOT be created")
 
 	print("\nALL DRAG TESTS PASSED SUCCESSFULLY!")
+	GameManager.vault_dir = original_vault
+	GameManager._save_settings()
 	get_tree().quit(0)
 
 func _simulate_drop(vt: VaultTreeComponent, src_path: String, dst_meta: String, section: int) -> void:
@@ -96,6 +102,23 @@ func _simulate_drop(vt: VaultTreeComponent, src_path: String, dst_meta: String, 
 	vt.prune_empty_dirs()
 	GameManager.scan_notes()
 	vt.refresh()
+
+func _rm_dir(path: String) -> void:
+	var d := DirAccess.open(path)
+	if d == null:
+		return
+	d.list_dir_begin()
+	var name := d.get_next()
+	while name != "":
+		if name != "." and name != "..":
+			var child := path.path_join(name)
+			if d.current_is_dir():
+				_rm_dir(child)
+			else:
+				DirAccess.remove_absolute(ProjectSettings.globalize_path(child))
+		name = d.get_next()
+	d.list_dir_end()
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
 func _find_item(parent: TreeItem, meta: String) -> TreeItem:
 	if parent == null:

@@ -5,7 +5,7 @@
 > updated at the **end**, so context, decisions, and direction survive across
 > conversations. Keep it current — a stale memory file is worse than none.
 
-_Last updated: 2026-09-14 (shared Markdown inline-span model + Obsidian callouts + multiline quotes + hanging list indent) · Godot 4.7 · renderer: gl_compatibility_
+_Last updated: 2026-09-15 (sync diagnostics + vault comparison) · Godot 4.7 · renderer: gl_compatibility_
 
 > ⚠️ **Path note:** the saved global memory says `/home/toshiwo/www/neonnotes`
 > but the project actually lives at **`/home/toshiwo/Projects/Godot/neonnotes`**.
@@ -38,6 +38,13 @@ _Chronological, newest last._
   longer needs its legacy regex path for bare URLs. Added unit coverage; full
   suite passes. Remaining legacy renderer is now only a temporary migration
   fallback for empty/unrecognized lines.
+- **2026-09-15 — parser safety and bounded validation**: unmatched emphasis
+  delimiters now remain literal without recursive parsing or negative ranges;
+  nested emphasis/strong, escaped delimiters, and code-in-emphasis regression
+  tests were added. `tests/run_tests.sh` now bounds each Godot invocation with
+  `timeout` (default 60 seconds), preventing hung test scenes from becoming
+  runaway memory consumers. Complete suite passes; Godot reports exit-time UI
+  RID/ObjectDB leak warnings from smoke/drag scenes, but all checks return OK.
 
 - **2026-09-15 — inline span parity**: added a shared BOLD_ITALIC span for
   `***text***`; PreviewBuilder and NeonHighlighter now render/highlight it from
@@ -405,6 +412,17 @@ _Chronological, newest last._
 
 - **2026-09-14 — focused graph + relationship styling:** Graph now opens around the current note and shows only one-hop neighbors. Direct wiki-links use solid edges; folder-as-note tree relationships use dashed edges. The focused node is centered and gently pulses. Backlinks remain a separate control rather than tree rows.
 
+- **2026-09-15 — sync diagnostics:** added bounded `user://sync.log` diagnostics for outgoing manifests, incoming writes/skips/invalid paths, and transfer outcomes. Desktop active vault contains only `ergergf.md`, `gvsvr.md`, and `Test 1.md`; connected Android vault contains additional nested `Gamedev`, `JW`, `Note1`, and `Pruebas` notes. Both devices are mutually trusted; missing mobile notes are not caused by destination folder creation, which already uses recursive directory creation.
+
+- **2026-09-15 — live LAN sync fixes (phone↔PC over air, validated on device):**
+  - **Android internet permission**: `export_presets.cfg` had `permissions/internet=false`, so Android refused to open ANY TCP socket (`_inet_open`, `connect_failed`). Set to `true`.
+  - **Auto-sync gating**: `main.gd` only started `enable_auto_sync()` when `start_discovery()` bound UDP successfully; if the broadcast listener failed to bind, NO sync ran at all (phone sat "ready", nothing transferred, reverse sync dead). Now auto-sync always runs; discovery failure is only reported, not fatal.
+  - **Peer IP fallback**: when broadcast discovery is asymmetrical (phone's UDP listener misses LAN broadcasts — desktop→mobile works, mobile→desktop doesn't), phones now persist each trusted peer's IP at pair time (`_handle_message` stores `conn.get_connected_host()` into `paired_peers[id].ip`) and `auto_sync()` falls back to stored trusted peer IPs over TCP.
+  - **Frame size cap**: the receiver dropped any frame > 32 MB; the mobile's `media/` (~40 MB ⇒ ~60 MB base64) killed the connection. Raised cap to 256 MB, then…
+  - **Streaming (chunked) sync (preferred)**: new `push_stream`/`push_item`/`push_end` protocol pushes one file per frame (bounded memory; receiver writes each file as it arrives and interleaves). Legacy single-frame `push` remains for older peers. `push_item` frames intentionally get no reply (`no_reply`); only terminal `push_end` acks. Validated: desktop received mobile's full `wrote=35` cart and mobile received desktop's `wrote=22` cart bidirectionally.
+  - **Status-dot accounting**: a sync that completes but writes zero files (peer already current) previously reported failure → red dot. Worker now tracks `completed` separately from bytes written; transferred-but-empty is success.
+  - Note: `push_item` replies are suppressed so the `IN reply cmd=push_item ok=false` noise is gone; device name now relays as `Android-28`/`Linux-53` form.
+  - Still useful: always `GameManager.scan_notes()`/`_refresh_list()` happens on successful incoming sync (existing); timestamps for LWW come from `times` dict passed on the stream `push_item(m modified) ` (both md and media use `FileAccess.get_modified_time`).
 - **Current goal:** v3 UX batch complete through round 2. Tree is now fully
   restructurable (drag notes/folders, folder-as-note, auto link rewrite).
 - **Next up:** live phone↔PC sync validation (trust flow + auto-sync over the

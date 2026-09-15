@@ -200,6 +200,7 @@ func _poll_server() -> void:
 	while _server.is_connection_available():
 		var conn: StreamPeerTCP = _server.take_connection()
 		_partial[conn.get_instance_id()] = {"conn": conn, "buf": PackedByteArray(), "paired": false}
+		_sync_log("IN accept from=%s" % conn.get_connected_host())
 	var done_ids := []
 	for id in _partial.keys():
 		var st: Dictionary = _partial[id]
@@ -216,7 +217,9 @@ func _poll_server() -> void:
 		var buf: PackedByteArray = st["buf"]
 		while buf.size() >= 4:
 			var length := buf.decode_u32(0)
-			if length > 32 * 1024 * 1024:
+			# Allow large sync carts: vault media is embedded as base64 in a single
+			# frame, which can be tens of MB. 256 MB is ample for a whole vault.
+			if length > 256 * 1024 * 1024:
 				conn.disconnect_from_host()
 				done_ids.append(id)
 				break
@@ -231,24 +234,31 @@ func _poll_server() -> void:
 				conn.disconnect_from_host()
 				done_ids.append(id)
 				break
-			var reply := _handle_message(conn, msg, st)
-			_send_json(conn, reply)
+			var reply := _handle_message(conn, msg, st, conn.get_connected_host())
+			if not st.get("no_reply", false):
+				_sync_log("IN reply cmd=%s ok=%s" % [String(msg.get("cmd", "")), str(reply.get("ok", false))])
+				_send_json(conn, reply)
+			st["no_reply"] = false
 			if not st.get("paired", false):
 				# unauthenticated: drop connection after reply
 				conn.disconnect_from_host()
 				done_ids.append(id)
 				break
-			if String(msg.get("cmd", "")) == "push":
+			var was_legacy_push := String(msg.get("cmd", "")) == "push"
+			if was_legacy_push:
 				conn.disconnect_from_host()
 				done_ids.append(id)
 				break
+			# Streaming batches keep the connection open until push_end arrives.
+			# reset per-message no_reply so the terminal push_end always ack
 		if done_ids.has(id):
 			continue
 	for id in done_ids:
 		_partial.erase(id)
 
-func _handle_message(_conn: StreamPeerTCP, msg: Dictionary, st: Dictionary) -> Dictionary:
+func _handle_message(conn: StreamPeerTCP, msg: Dictionary, st: Dictionary, peer_ip := "") -> Dictionary:
 	var cmd := String(msg.get("cmd", ""))
+	_sync_log("IN recv cmd=%s id=%s ip=%s" % [cmd, str(msg.get("id", "")), peer_ip])
 	if cmd == "pair":
 		var sender_id := String(msg.get("id", ""))
 		var trusted_ok: bool = sender_id != "" and GameManager.trusted.has(sender_id)
@@ -256,7 +266,36 @@ func _handle_message(_conn: StreamPeerTCP, msg: Dictionary, st: Dictionary) -> D
 			return {"ok": false, "error": "auth"}
 		st["paired"] = true
 		st["peer_id"] = sender_id
+		# Record the sender's IP so our own auto-sync can connect back to them
+		# even when broadcast discovery is asymmetrical (mobile's UDP listener
+		# often isn't reached by LAN broadcasts, but TCP reverse-connect works).
+		if sender_id != "" and GameManager.paired_peers.has(sender_id):
+			var rec: Dictionary = GameManager.paired_peers[sender_id]
+			rec["ip"] = peer_ip
+			GameManager.paired_peers[sender_id] = rec
+			GameManager._save_settings()
 		return {"ok": true, "name": device_name, "id": GameManager.device_id, "vault_id": GameManager.vault_id, "pin": expected_pin}
+	if cmd == "push_stream":
+		if not st.get("paired", false):
+			return {"ok": false, "error": "auth"}
+		var stream_id := str(msg.get("id", ""))
+		st["batch_peer_id"] = stream_id
+		st["batch_peer_name"] = str(msg.get("name", stream_id))
+		st["pending"] = int(msg.get("pending", 0))
+		st["count"] = 0
+		_sync_log("IN stream begin peer=%s pending=%d" % [st["batch_peer_name"], st["pending"]])
+		return {"ok": true, "expected": int(msg.get("pending", 0))}
+	if cmd == "push_item":
+		if not st.get("paired", false):
+			return {"ok": false, "error": "auth"}
+		st["no_reply"] = true
+		_receive_item(st, msg)
+		return {}
+	if cmd == "push_end":
+		var stream_summary := _finish_stream(st)
+		_sync_log("IN stream done peer=%s wrote=%d" % [st.get("batch_peer_name", "peer"), stream_summary.get("count", 0)])
+		var stream_ok: bool = stream_summary.get("ok", false)
+		return {"ok": stream_ok, "count": int(stream_summary.get("count", 0)), "summary": stream_summary}
 	if cmd == "push":
 		if not st.get("paired", false):
 			return {"ok": false, "error": "auth"}
@@ -267,8 +306,10 @@ func _handle_message(_conn: StreamPeerTCP, msg: Dictionary, st: Dictionary) -> D
 		if typeof(times) != TYPE_DICTIONARY:
 			times = {}
 		var count := 0
-		var tombstone_count := 0
+		var skipped := 0
+		var invalid := 0
 		var vault := GameManager.vault_abs()
+		_sync_log("IN start peer=%s files=%d" % [str(msg.get("name", "peer")), files.size()])
 		if vault == "":
 			return {"ok": false, "error": "no_vault"}
 		for fname in files.keys():
@@ -276,6 +317,8 @@ func _handle_message(_conn: StreamPeerTCP, msg: Dictionary, st: Dictionary) -> D
 			# allow subfolders; reject traversal/absolute paths and exports
 			if name == "" or name.begins_with("/") or name.contains("\\") or name.contains("..") \
 					or name.get_base_dir() == GameManager.EXPORTS_SUBDIR:
+				invalid += 1
+				_sync_log("IN invalid path=%s" % name)
 				continue
 			var dest := vault.path_join(name)
 			var text := String(files[fname])
@@ -290,6 +333,8 @@ func _handle_message(_conn: StreamPeerTCP, msg: Dictionary, st: Dictionary) -> D
 					_tombstones.merge(remote_tombs, true)
 				continue
 			if _tombstones.has(name):
+				skipped += 1
+				_sync_log("IN tombstone-skip path=%s" % name)
 				continue
 			var binary := not name.ends_with(".md") and not name.ends_with(".json")
 			# last-writer-wins: skip if our local copy is strictly newer
@@ -297,10 +342,14 @@ func _handle_message(_conn: StreamPeerTCP, msg: Dictionary, st: Dictionary) -> D
 				var local_t := FileAccess.get_modified_time(dest)
 				var remote_t := int(times[fname])
 				if local_t > remote_t:
+					skipped += 1
+					_sync_log("IN newer-local path=%s local=%d remote=%d" % [name, local_t, remote_t])
 					continue
 			DirAccess.make_dir_recursive_absolute(dest.get_base_dir())
 			var f := FileAccess.open(dest, FileAccess.WRITE)
 			if f == null:
+				skipped += 1
+				_sync_log("IN open-failed path=%s" % name)
 				continue
 			if binary:
 				f.store_buffer(Marshalls.base64_to_raw(text))
@@ -308,6 +357,8 @@ func _handle_message(_conn: StreamPeerTCP, msg: Dictionary, st: Dictionary) -> D
 				f.store_string(text)
 			f.close()
 			count += 1
+			_sync_log("IN wrote path=%s bytes=%d" % [name, text.to_utf8_buffer().size()])
+		_sync_log("IN done peer=%s wrote=%d skipped=%d invalid=%d" % [str(msg.get("name", "peer")), count, skipped, invalid])
 		if count > 0:
 			GameManager.scan_notes()
 		var peer_id := String(msg.get("id", ""))
@@ -317,8 +368,75 @@ func _handle_message(_conn: StreamPeerTCP, msg: Dictionary, st: Dictionary) -> D
 		return {"ok": true, "count": count}
 	return {"ok": false, "error": "unknown_cmd"}
 
+# ---------------- Stream receive (bounded memory) ----------------
+
+func _receive_item(st: Dictionary, msg: Dictionary) -> void:
+	var name := String(msg.get("name", ""))
+	# allow subfolders; reject traversal/absolute paths and exports
+	if name == "" or name.begins_with("/") or name.contains("\\") or name.contains("..") \
+			or name.get_base_dir() == GameManager.EXPORTS_SUBDIR:
+		st["invalid"] = int(st.get("invalid", 0)) + 1
+		_sync_log("IN invalid path=%s" % name)
+		return
+	var text := String(msg.get("text", ""))
+	if name == ".neonnotes-tombstones.json":
+		var remote_tombs = JSON.parse_string(text)
+		if typeof(remote_tombs) == TYPE_DICTIONARY:
+			var vault := GameManager.vault_abs()
+			for deleted_path in remote_tombs.keys():
+				var deleted_file := vault.path_join(str(deleted_path))
+				if FileAccess.file_exists(deleted_file):
+					DirAccess.remove_absolute(deleted_file)
+				_tombstones[str(deleted_path)] = remote_tombs[deleted_path]
+			_tombstones.merge(remote_tombs, true)
+		return
+	if _tombstones.has(name):
+		st["skipped"] = int(st.get("skipped", 0)) + 1
+		_sync_log("IN tombstone-skip path=%s" % name)
+		return
+	var vault := GameManager.vault_abs()
+	if vault == "":
+		return
+	var dest := vault.path_join(name)
+	if FileAccess.file_exists(dest) and msg.get("modified", 0) > 0:
+		var local_t := FileAccess.get_modified_time(dest)
+		var remote_t := int(msg.get("modified", 0))
+		if local_t > remote_t:
+			st["skipped"] = int(st.get("skipped", 0)) + 1
+			_sync_log("IN newer-local path=%s local=%d remote=%d" % [name, local_t, remote_t])
+			return
+	DirAccess.make_dir_recursive_absolute(dest.get_base_dir())
+	var f := FileAccess.open(dest, FileAccess.WRITE)
+	if f == null:
+		st["skipped"] = int(st.get("skipped", 0)) + 1
+		_sync_log("IN open-failed path=%s" % name)
+		return
+	if bool(msg.get("binary", false)):
+		f.store_buffer(Marshalls.base64_to_raw(text))
+	else:
+		f.store_string(text)
+	f.close()
+	st["count"] = int(st.get("count", 0)) + 1
+	_sync_log("IN wrote path=%s bytes=%d" % [name, text.to_utf8_buffer().size()])
+
+func _finish_stream(st: Dictionary) -> Dictionary:
+	var wrote := int(st.get("count", 0))
+	var vault := GameManager.vault_abs()
+	if wrote > 0 and vault != "":
+		GameManager.scan_notes()
+	var peer_id := String(st.get("batch_peer_id", ""))
+	if peer_id != "" and vault != "":
+		GameManager.add_trusted(peer_id)
+	sync_done.emit(str(st.get("batch_peer_name", "peer")), wrote)
+	return {"ok": true, "count": wrote, "skipped": int(st.get("skipped", 0)), "invalid": int(st.get("invalid", 0))}
+
 func _send_json(conn: StreamPeerTCP, data: Dictionary) -> void:
-	var bytes := JSON.stringify(data).to_utf8_buffer()
+	_send_frame_bytes(conn, JSON.stringify(data).to_utf8_buffer())
+
+static func _send_frame(conn: StreamPeerTCP, data: Dictionary) -> void:
+	_send_frame_bytes(conn, JSON.stringify(data).to_utf8_buffer())
+
+static func _send_frame_bytes(conn: StreamPeerTCP, bytes: PackedByteArray) -> void:
 	var frame := PackedByteArray()
 	frame.resize(4)
 	frame.encode_u32(0, bytes.size())
@@ -327,7 +445,7 @@ func _send_json(conn: StreamPeerTCP, data: Dictionary) -> void:
 
 # ---------------- Client ----------------
 
-static func push_to(ip: String, port: int, pin: String, files: Dictionary, timeout_ms := 4000, times: Dictionary = {}) -> Dictionary:
+static func push_to(ip: String, port: int, pin: String, files: Dictionary, timeout_ms := 4000, times: Dictionary = {}, peer_ip := "") -> Dictionary:
 	var conn := StreamPeerTCP.new()
 	var err := conn.connect_to_host(ip, port)
 	if err != OK:
@@ -346,15 +464,36 @@ static func push_to(ip: String, port: int, pin: String, files: Dictionary, timeo
 	if peer_id != "":
 		GameManager.add_trusted(peer_id)
 		GameManager.paired_vault_id = String(reply.get("vault_id", ""))
-		GameManager.paired_peers[peer_id] = {"name": str(reply.get("name", peer_id)), "vault_id": GameManager.paired_vault_id, "pin": str(reply.get("pin", ""))}
+		if peer_ip == "":
+			peer_ip = ip
+		GameManager.paired_peers[peer_id] = {"name": str(reply.get("name", peer_id)), "vault_id": GameManager.paired_vault_id, "pin": str(reply.get("pin", "")), "ip": peer_ip}
 		GameManager._save_settings()
-	var reply2: Variant = _client_roundtrip(conn, {"cmd": "push", "files": files, "times": times, "name": device_display_name(), "id": GameManager.device_id})
+	# Stream the cart file-by-file so memory stays bounded (never hold the whole
+	# vault's base64 in one frame). The peer pushes one file per frame, and the
+	# receiver writes it immediately; only the terminal push_end gets a reply.
+	_send_frame(conn, {"cmd": "push_stream", "name": device_display_name(), "id": GameManager.device_id, "pending": files.size()})
+	for fname in files.keys():
+		var content = files[fname]
+		var is_binary: bool = (typeof(content) != TYPE_STRING) or (String(fname) != ".neonnotes-tombstones.json" and not String(fname).ends_with(".md") and not String(fname).ends_with(".json"))
+		var text := ""
+		if typeof(content) == TYPE_PACKED_BYTE_ARRAY:
+			text = Marshalls.raw_to_base64(content)
+		else:
+			text = String(content)
+		var mod := int(times.get(String(fname), 0))
+		var frame := {"cmd": "push_item", "name": String(fname), "text": text, "modified": mod, "binary": is_binary}
+		# Bounded memory per item; do not block waiting for a reply here.
+		_send_frame(conn, frame)
+		# Let the receiver interleave its frame processing between items instead
+		# of buffering the whole cart.
+		OS.delay_msec(10)
+	var reply2: Variant = _client_roundtrip(conn, {"cmd": "push_end", "id": peer_id})
 	conn.disconnect_from_host()
 	if typeof(reply2) != TYPE_DICTIONARY or not reply2.get("ok", false):
 		return {"ok": false, "error": str(reply2.get("error", "push_failed")) if typeof(reply2) == TYPE_DICTIONARY else "bad_reply"}
 	return {"ok": true, "count": int(reply2.get("count", 0))}
 
-static func _client_roundtrip(conn: StreamPeerTCP, msg: Dictionary) -> Variant:
+static func _client_roundtrip(conn: StreamPeerTCP, msg: Dictionary, wait_ms := 15000) -> Variant:
 	var bytes := JSON.stringify(msg).to_utf8_buffer()
 	var frame := PackedByteArray()
 	frame.resize(4)
@@ -363,7 +502,7 @@ static func _client_roundtrip(conn: StreamPeerTCP, msg: Dictionary) -> Variant:
 	conn.put_data(frame)
 	var start := Time.get_ticks_msec()
 	var buf := PackedByteArray()
-	while Time.get_ticks_msec() - start < 4000:
+	while Time.get_ticks_msec() - start < wait_ms:
 		conn.poll()
 		if conn.get_status() == StreamPeerTCP.STATUS_ERROR:
 			return null
@@ -376,6 +515,20 @@ static func _client_roundtrip(conn: StreamPeerTCP, msg: Dictionary) -> Variant:
 	return null
 
 # ---------------- Notes ----------------
+
+func _sync_log(message: String) -> void:
+	var path := "user://sync.log"
+	var f := FileAccess.open(path, FileAccess.READ_WRITE)
+	if f == null:
+		f = FileAccess.open(path, FileAccess.WRITE)
+	if f == null:
+		return
+	f.seek_end()
+	f.store_line("[%s] %s" % [Time.get_datetime_string_from_system(), message])
+	f.close()
+	var abs := ProjectSettings.globalize_path(path)
+	if FileAccess.get_file_as_bytes(path).size() > 1024 * 1024:
+		DirAccess.remove_absolute(abs)
 
 func collect_notes() -> Dictionary:
 	var files := {}
@@ -396,6 +549,7 @@ func collect_notes() -> Dictionary:
 	if not _tombstones.is_empty():
 		files[".neonnotes-tombstones.json"] = JSON.stringify(_tombstones)
 		times[".neonnotes-tombstones.json"] = Time.get_unix_time_from_system()
+	_sync_log("OUT collected notes=%d files=%d media=%d tombstones=%d" % [GameManager.notes.size(), files.size(), files.size() - GameManager.notes.size(), _tombstones.size()])
 	return {"files": files, "times": times}
 
 func _collect_media(dir_path: String, vault: String, paths: Array[String]) -> void:
@@ -455,10 +609,12 @@ func note_saved() -> void:
 	_auto_timer.start()  # short debounce: sync shortly after each edit
 
 func auto_sync() -> void:
-	if _syncing or _udp == null or GameManager.trusted.is_empty():
+	if _syncing or GameManager.trusted.is_empty():
 		return
 	# One single-flight transfer; periodic timer also discovers peers when edits are idle.
-	if not _pending_unsynced and peers.is_empty():
+	# When broadcast discovery failed (UDP bind error / null _udp), fall through so a
+	# stored trusted peer IP can still be used over TCP.
+	if not _pending_unsynced and _udp != null and peers.is_empty():
 		return
 	_syncing = true
 	var data: Dictionary = collect_notes()
@@ -472,6 +628,15 @@ func auto_sync() -> void:
 		if pid != "" and GameManager.trusted.has(pid):
 			targets.append({"ip": str(ip), "port": int(p.get("tcp", TCP_PORT)), "name": str(p.get("name", ip))})
 	if targets.is_empty():
+		# Broadcast discovery can fail asymmetrically (e.g. phone's UDP listener
+		# not reached). Fall back to the last known IP of trusted paired peers.
+		for pid in GameManager.trusted:
+			if not GameManager.paired_peers.has(pid):
+				continue
+			var rec: Dictionary = GameManager.paired_peers[pid]
+			if str(rec.get("ip", "")).is_valid_ip_address():
+				targets.append({"ip": str(rec["ip"]), "port": TCP_PORT, "name": str(rec.get("name", pid))})
+	if targets.is_empty():
 		_syncing = false
 		return
 	_sync_thread = Thread.new()
@@ -480,15 +645,22 @@ func auto_sync() -> void:
 
 func _sync_worker(targets: Array, files: Dictionary, times: Dictionary) -> void:
 	var successful := 0
+	var completed := false
 	var last_name := "peer"
 	var failure := ""
 	for target in targets:
 		last_name = str(target["name"])
-		var result: Dictionary = push_to(str(target["ip"]), int(target["port"]), "", files, 4000, times)
+		_sync_log("OUT start peer=%s files=%d" % [last_name, files.size()])
+		var result: Dictionary = push_to(str(target["ip"]), int(target["port"]), "", files, 4000, times, str(target["ip"]))
 		if result.get("ok", false):
+			completed = true
 			successful += int(result.get("count", 0))
+			_sync_log("OUT done peer=%s acknowledged=%d" % [last_name, int(result.get("count", 0))])
 		else:
 			failure = "%s: %s" % [last_name, str(result.get("error", "unavailable"))]
+			_sync_log("OUT failed peer=%s error=%s" % [last_name, failure])
 	_sync_mutex.lock()
-	_sync_result.append({"ok": successful > 0, "count": successful, "name": last_name, "error": failure})
+	# A transfer that completed but wrote zero files (peer already up to date) is
+	# still a successful sync, not a failure — otherwise the status dot stays red.
+	_sync_result.append({"ok": completed, "count": successful, "name": last_name, "error": failure})
 	_sync_mutex.unlock()

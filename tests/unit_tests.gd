@@ -51,7 +51,16 @@ func _check_markdown_spans() -> void:
 	# incomplete editor input: an unmatched opener stays literal (no EMPHASIS)
 	var open := MarkdownParser.compute_inline("**unfinished")
 	_check(open.is_empty(), "unmatched bold opener not a marked span")
-	_check(PreviewBuilder._inline("plain text") == "plain text", "plain text uses shared renderer")
+	var nested := MarkdownParser.compute_inline("*a **b** c*")
+	_check(nested.size() == 2 and nested[0]["type"] == S.EMPHASIS and nested[1]["type"] == S.STRONG,
+		"nested emphasis and strong spans")
+	var escaped_nested := MarkdownParser.compute_inline("*a \\*literal\\* b*")
+	_check(escaped_nested.size() == 3 and escaped_nested[0]["type"] == S.EMPHASIS
+		and escaped_nested[1]["type"] == S.ESCAPE and escaped_nested[2]["type"] == S.ESCAPE,
+		"escaped delimiters inside emphasis")
+	var code_nested := MarkdownParser.compute_inline("*a `**literal**` b*")
+	_check(code_nested.size() == 2 and code_nested[0]["type"] == S.EMPHASIS
+		and code_nested[1]["type"] == S.CODE_SPAN, "code remains literal inside emphasis")
 
 func _check_markdown_blocks() -> void:
 	# multiline block quote collapses consecutive ">" lines into one container

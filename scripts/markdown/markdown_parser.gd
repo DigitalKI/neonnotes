@@ -131,18 +131,42 @@ static func _scan_emphasis(text: String, p: int, spans: Array[Dictionary]) -> in
 	var strong := run >= 2
 	var open_len := 2 if strong else 1
 	var close_marker := ch + ch if strong else ch
-	var close := text.find(close_marker, p + open_len)
-	if close >= 0:
-		if strong:
-			spans.append({"type": SpanType.STRONG, "start": p,
-				"length": close + 2 - p, "content_start": p + 2,
-				"content_length": close - (p + 2)})
-			return close + 2
-		spans.append({"type": SpanType.EMPHASIS, "start": p,
-			"length": close + 1 - p, "content_start": p + 1,
-			"content_length": close - (p + 1)})
-		return close + 1
-	return p
+	var close := -1
+	var search := p + open_len
+	while search < text.length():
+		var candidate := text.find(close_marker, search)
+		if candidate < 0:
+			break
+		# An escaped marker is literal. Single markers cannot consume one
+		# character from a stronger delimiter run (the common `*a **b** c*`
+		# case); strong markers require the full run as well.
+		var escaped := candidate > 0 and text[candidate - 1] == "\\"
+		var left_same := candidate > 0 and text[candidate - 1] == ch
+		var right_same := candidate + open_len < text.length() and text[candidate + open_len] == ch
+		if not escaped and not (not strong and (left_same or right_same)) and not (strong and right_same):
+			close = candidate
+			break
+		search = candidate + 1
+	if close < 0:
+		# An unmatched opener is literal markdown. Do not manufacture a span:
+		# in particular, a negative content length can make recursive parsing
+		# repeatedly rescan the same suffix and grow without bound.
+		return p
+	var content_start := p + open_len
+	var content_length := close - content_start
+	spans.append({"type": SpanType.STRONG if strong else SpanType.EMPHASIS,
+		"start": p, "length": close + open_len - p,
+		"content_start": content_start, "content_length": content_length})
+	# Also expose nested inline constructs to the highlighter. The preview
+	# recursively renders the content, while the highlighter needs the inner
+	# source ranges explicitly because it receives one line at a time.
+	for inner in compute_inline(text.substr(content_start, content_length)):
+		var nested := inner.duplicate()
+		nested["start"] = int(inner["start"]) + content_start
+		if nested.has("content_start"):
+			nested["content_start"] = int(nested["content_start"]) + content_start
+		spans.append(nested)
+	return close + open_len
 
 ## Find the first occurrence of `close` at or after `from`, honouring paired
 ## bracket/paren nesting for "[[..]]". Returns the index of the closing-start,

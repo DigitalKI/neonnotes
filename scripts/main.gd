@@ -29,9 +29,10 @@ func _load_help_doc() -> String:
 @onready var note_title: Label = toolbar.note_title
 @onready var content_host: ScrollContainer = %ContentHost
 @onready var content_body: VBoxContainer = %ContentBody
+@onready var settings_page: MarginContainer = %SettingsPage
+@onready var settings_component: SettingsComponent = %SettingsPage.get_node("VerticalContainer")
 @onready var content_panel: PanelContainer = %Content
 @onready var graph_view: GraphView = %GraphView
-var settings_page: VBoxContainer
 var settings_mode := false
 
 const _SMOKE_FEATURES := """---
@@ -110,7 +111,10 @@ func _ready() -> void:
 	vault_tree.tree_delete_btn.pressed.connect(_delete_selected_node)
 	vault_tree.build()
 	vault_tree.config_btn.pressed.connect(_toggle_settings)
-	graph_view.open_cb = _open_wikilink
+	settings_component.vault_cb = _on_open_vault
+	settings_component.sync_cb = _on_sync
+	settings_component.close_requested.connect(_close_settings)
+	graph_view.open_cb = _open_graph_note
 	PreviewBuilder.open_cb = _open_wikilink
 	PreviewBuilder.image_cb = _on_image_click
 	layout_component.ready()
@@ -119,6 +123,8 @@ func _ready() -> void:
 	get_tree().root.content_scale_factor = ui_scale
 	if OS.get_environment("NEONNOTES_SMOKE") == "1":
 		_prepare_smoke_vault()
+	# Load the selected vault and tree completely before starting networking.
+	# Sync must never announce or transfer against a stale/default vault.
 	GameManager.scan_notes()
 	_refresh_list()
 	layout_component.update_layout()
@@ -127,10 +133,12 @@ func _ready() -> void:
 	add_child(sync_service)
 	# Paired vaults reconnect automatically; the dialog is only configuration UI.
 	if not GameManager.trusted.is_empty() or not GameManager.paired_peers.is_empty() or GameManager.paired_vault_id != "":
-		if sync_service.start_discovery():
-			sync_service.enable_auto_sync()
-		else:
-			sync_service.sync_failed.emit("Could not start background discovery")
+		# Auto-sync must run even when the UDP broadcast listener can't bind
+		# (e.g. another process holds the port, or a phone's UDP isn't reached).
+		# With stored peer IPs it can still sync directly over TCP.
+		sync_service.enable_auto_sync()
+		if not sync_service.start_discovery():
+			sync_service.sync_failed.emit("Could not start background discovery (auto-sync via stored peer IP still active)")
 	sync_service.sync_done.connect(func(_peer: String, _count: int):
 		GameManager.scan_notes()
 		_refresh_list()
@@ -167,6 +175,8 @@ func _prepare_smoke_vault() -> void:
 	if smoke_vault == "":
 		smoke_vault = "user://neonnotes-smoke"
 	GameManager.vault_dir = smoke_vault
+	# Smoke mode is isolated from normal settings and is never intended to
+	# become the user's persisted vault selection.
 	GameManager.current_file = ""
 	GameManager.current_rel = ""
 	GameManager.order.clear()
@@ -695,34 +705,27 @@ func _close_settings() -> void:
 
 func _toggle_settings() -> void:
 	if settings_mode:
+		_close_settings()
 		return
 	_flush_save()
-	settings_mode = not settings_mode
+	settings_mode = true
 	graph_view.visible = false
-	code_edit.visible = not settings_mode and source_mode
-	content_host.visible = settings_mode or not source_mode
-	if settings_mode: _show_settings()
+	code_edit.visible = false
+	content_host.visible = false
+	settings_page.visible = true
+	_show_settings()
 
 func _show_settings() -> void:
-	if settings_page == null:
-		settings_page = VBoxContainer.new()
-		settings_page.add_theme_constant_override("separation", 12)
-		var title := Label.new(); title.text = "⚙ SETTINGS"; title.add_theme_font_size_override("font_size", 20); settings_page.add_child(title)
-		var vault_label := Label.new(); vault_label.name = "VaultPath"; settings_page.add_child(vault_label)
-		var vault_button := Button.new(); vault_button.text = "📂 Select Vault"; vault_button.pressed.connect(_on_open_vault); settings_page.add_child(vault_button)
-		var sync_button := Button.new(); sync_button.text = "⇄ Sync / Pair Devices"; sync_button.pressed.connect(_on_sync); settings_page.add_child(sync_button)
-		var paired := Label.new(); paired.name = "PairedDevices"; paired.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; settings_page.add_child(paired)
-		var levels_label := Label.new(); levels_label.text = "Graph neighbor levels (1–10)"; settings_page.add_child(levels_label)
-		var levels := SpinBox.new(); levels.min_value = 1; levels.max_value = 10; levels.step = 1; levels.value = GameManager.graph_levels; levels.value_changed.connect(func(v: float): GameManager.graph_levels = clampi(int(v), 1, 10); GameManager._save_settings(); if graph_view.visible: graph_view.open(GameManager.current_rel)); settings_page.add_child(levels)
-		var style_label := Label.new(); style_label.text = "Style"; settings_page.add_child(style_label)
-		var style := OptionButton.new(); for p in GameManager.PALETTES.keys(): style.add_item(p); style.select(maxi(0, GameManager.PALETTES.keys().find(GameManager.palette_name))); style.item_selected.connect(func(i: int): GameManager.set_palette(style.get_item_text(i))); settings_page.add_child(style)
-		var close_button := Button.new(); close_button.text = "Close Settings"; close_button.pressed.connect(_close_settings); settings_page.add_child(close_button)
-		content_body.add_child(settings_page)
-	var path_label: Label = settings_page.get_node("VaultPath"); path_label.text = "Vault: " + GameManager.vault_abs() + "\nName: " + GameManager.vault_abs().get_file()
-	var paired_label: Label = settings_page.get_node("PairedDevices"); paired_label.text = "Paired devices: " + (str(GameManager.paired_peers.keys()) if not GameManager.paired_peers.is_empty() else "None")
+	settings_component.refresh()
 	settings_page.visible = true
 
 # ------------------------------------------------- v2: wiki / backlinks / graph
+
+func _open_graph_note(fname: String) -> void:
+	# Graph nodes behave like tree selections: close the graph, select the
+	# corresponding row, and let the normal note-opening path render preview.
+	graph_view.visible = false
+	vault_tree.select_note(fname)
 
 func _open_wikilink(target: String) -> void:
 	var fname := WikiLinks.resolve(target)
@@ -988,6 +991,10 @@ func _on_open_vault() -> void:
 
 func _on_vault_selected(path: String) -> void:
 	if GameManager.set_vault_dir(path):
+		# Settings is a live page; refresh its labels immediately after the
+		# vault switch instead of leaving the previous path cached on screen.
+		if settings_mode:
+			settings_component.refresh()
 		_refresh_list()
 		_flash("Vault: " + path)
 	else:
@@ -1157,10 +1164,8 @@ func _run_smoke() -> void:
 			has_img = b["src"] == ""
 	fails += _check(has_img, "image block parsed")
 	var pb: Variant = load("res://scripts/render/preview_builder.gd")
-	var prot: Array = pb._protect_escapes("\\*bold\\*")
-	fails += _check(pb._restore_escapes(prot[0], prot[1]) == "*bold*", "escape round-trip")
-	var rt: String = pb._inline(prot[0])
-	fails += _check(not rt.contains("[b]"), "escaped chars not formatted")
+	var escaped_source := "\\*bold\\*"
+	fails += _check(pb._inline(escaped_source).find("[b]") < 0, "escaped chars not formatted")
 	fails += _check(pb._inline(pb.escape("[[hola]]")).contains("[url=hola][color=") and pb._inline(pb.escape("[[hola]]")).contains("[u]hola[/u]"), "wiki-link renders with visible label")
 	fails += _check(pb._inline(pb.escape("[[a|my alias]]")).contains("[u]my alias[/u]"), "wiki-link alias label")
 	# image embed flow: pick → copy to media/ + md updated

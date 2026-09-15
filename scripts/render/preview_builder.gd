@@ -74,33 +74,6 @@ static func escape(s: String) -> String:
 			out += ch
 	return out
 
-# ---- backslash escapes (\* \[ \% \\ … render the literal character) ----
-const ESC_OPEN := "\uE000"  # private-use sentinels unlikely in real text
-const ESC_CLOSE := "\uE001"
-
-## Replace \x with sentinel tokens so markdown regexes skip them.
-## Returns [protected_string, Dictionary idx -> literal char]
-static func _protect_escapes(s: String) -> Array:
-	var map := {}
-	var out := ""
-	var idx := 0
-	var i := 0
-	while i < s.length():
-		if s[i] == "\\" and i + 1 < s.length():
-			idx += 1
-			map[idx] = s[i + 1]
-			out += ESC_OPEN + str(idx) + ESC_CLOSE
-			i += 2
-		else:
-			out += s[i]
-			i += 1
-	return [out, map]
-
-static func _restore_escapes(s: String, map: Dictionary) -> String:
-	for k in map.keys():
-		s = s.replace(ESC_OPEN + str(k) + ESC_CLOSE, str(map[k]))
-	return s
-
 ## Inline markdown -> BBCode from the shared parser span stream.
 ## The parser owns recognition; this function only maps semantic spans to BBCode.
 static func _inline(s: String) -> String:
