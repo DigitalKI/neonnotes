@@ -61,6 +61,21 @@ text = "Style"
 unique_name_in_owner = true
 layout_mode = 2
 
+[node name="CrtExportLabel" type="Label" parent="VerticalContainer" unique_id=2012189999]
+layout_mode = 2
+text = "Exports"
+
+[node name="CrtExport" type="CheckButton" parent="VerticalContainer" unique_id=2012188888]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Apply CRT FX on export"
+tooltip_text = "When enabled, exported PNG/JPEG/GIF images include the neon CRT overlay (scanlines, grille, curve, wobble). Persists between launches."
+
+[node name="CrtExportHint" type="Label" parent="VerticalContainer" unique_id=2012187777]
+layout_mode = 2
+text = "Adds the CRT scanline/grille look to exported images. Off = clean export."
+autowrap_mode = 2
+
 [node name="CloseButton" type="Button" parent="VerticalContainer" unique_id=1101333219]
 unique_name_in_owner = true
 layout_mode = 2

@@ -32,6 +32,10 @@ _Last updated: 2026-09-15 (sync diagnostics + vault comparison) · Godot 4.7 · 
 
 _Chronological, newest last._
 
+- **2026-09-15 — high-resolution image exports**: PNG/GIF exports now render into a dedicated SubViewport at 2× the visible width (capped at 2400 px) instead of capturing screen-width content. The exporter adds an explicit background ColorRect using the active note palette, preserving themed backgrounds. Added native JPEG export at quality 95% as an optional menu item; PNG remains the lossless default for text and UI. Upscaling is done uniformly with a `Control.scale` transform over the whole content subtree (not by widening the viewport), so fonts, spacing and heights all scale together with no proportion drift; text is re-rasterized at the higher scale so it stays crisp. Note: `SubViewport.content_scale_*` is not available in this Godot 4.7 build (that API is Window-only), so the Control.scale approach is used instead. Export base width is now driven by a `width_cb` callback that returns the **logical content-pane width** (`content_panel.size.x`), not the full physical window width — this keeps exported proportions identical to the on-screen preview (it excludes the sidebar and is independent of the window `ui_scale` glob`al content_scale_factor). The background is sized to the full physical pixel dimensions of the scaled viewport so it fills the whole image. Earlier bugs fixed along the way: scaling the width without fonts distorted proportions (now uniform Control.scale), and the background ColorRect under-filling because it sat outside the scaled group.
+
+- **2026-09-15 — optional CRT FX on exports**: added a persistent `GameManager.export_crt` toggle (stored in `settings.cfg` under `export/crt`, default ON, set via `set_export_crt()`). The toggle is exposed in the Settings page (Settings → "Apply CRT FX on export" CheckButton, stored in `settings.cfg` under `export/crt`, default ON, wired via `SettingsComponent`), and there is also a checkable "🖥 CRT FX on export" entry in the Export menu that flips it. When enabled, the exporter composites a full-viewport ColorRect using the live CRT `ShaderMaterial` (fetched from the main `CrtOverlay` via `Exporter.crt_material_cb`, with a shader-defaults fallback), so scanlines/grille/curve/wobble match the app in exported PNG/JPEG/GIF. When disabled, exports are clean. Save PNG/JPEG/GIF now also runs `Share.save_to_gallery()` on all platforms, so desktop copies land in the OS `Pictures/NeonNotes` folder (Android registers them in the device media library) while the vault copy is still kept for portability. The export viewport uses a clean background (no CRT overlay); text/UI exports remain readable.
+
 - **2026-09-15 — unified parser Phase 4A/4B continued**: bare `http://` and
   `https://` URLs are now recognized by `MarkdownParser.compute_inline()` as
   EXTERNAL_LINK spans (trailing punctuation excluded), so PreviewBuilder no
@@ -170,7 +174,7 @@ _Chronological, newest last._
 - **Responsive/mobile** — portrait/landscape, sidebar→drawer, toolbars→⋮
   overflow, Android safe-area (`_apply_safe_area`), DPI content scale,
   `ChartView.compact`, wide touch scrollbar.
-- **CRT shader** (`shaders/crt.gdshader`) — `CrtOverlay` ColorRect w/ ShaderMaterial:
+- **CRT shader** (`shaders/crt.gdshader`) — `CrtOverlay` ColorRect w/ ShaderMaterial: (credit: adapted from Godot Shaders community shader "CRT with Luminance Preservation", https://godotshaders.com/shader/crt-with-luminance-preservation/).
   subtle scanlines + aperture-grille mask, defaults "flat so reading isn't
   distorted" (curve 0, scanline 0.12, mask 0.10, wobble 0).
 - **Test/testability** — smoke test via `NEONNOTES_SMOKE=1` env →

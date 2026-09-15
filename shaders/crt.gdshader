@@ -1,3 +1,12 @@
+// CRT overlay: scanlines + aperture-grille mask + wobble + optional barrel
+// curve, luminance-preserving.
+//
+// CREDIT — Adapted from the Godot Shaders community shader
+//   "CRT with Luminance Preservation"
+//   https://godotshaders.com/shader/crt-with-luminance-preservation/
+// (original author/publication credits on the page above).
+// Defaults here are tuned flat so reading in-app/exported text isn't distorted.
+//
 shader_type canvas_item;
 // Subtle CRT overlay: scanlines + aperture-grille mask, luminance-preserving.
 // Defaults tuned flat so reading isn't distorted.

@@ -32,6 +32,7 @@ const PALETTES := {
 
 var palette_name := "Synthwave"
 var graph_levels := 2
+var export_crt := true  # apply CRT overlay to exported PNG/JPEG/GIF
 var vault_dir := VAULT_DIR
 var current_file := ""  # absolute path of the open note ("" = none)
 var current_rel := ""   # vault-relative path of the open note ("" = none)
@@ -69,6 +70,11 @@ func set_palette(name: String) -> void:
 		palette_name = name
 		palette_changed.emit()
 		_save_settings()
+
+## Toggle the CRT overlay on exports. Persists so it survives restarts.
+func set_export_crt(on: bool) -> void:
+	export_crt = on
+	_save_settings()
 
 # ------------------------------------------------------------ vault
 
@@ -235,6 +241,7 @@ func _load_settings() -> void:
 	if cf.load(SETTINGS) != OK:
 		return
 	palette_name = cf.get_value("ui", "palette", palette_name)
+	export_crt = bool(cf.get_value("export", "crt", export_crt))
 	graph_levels = clampi(int(cf.get_value("ui", "graph_levels", graph_levels)), 1, 10)
 	if not PALETTES.has(palette_name):
 		palette_name = "Synthwave"
@@ -251,6 +258,7 @@ func _load_settings() -> void:
 func _save_settings() -> void:
 	var cf := ConfigFile.new()
 	cf.set_value("ui", "palette", palette_name)
+	cf.set_value("export", "crt", export_crt)
 	cf.set_value("ui", "graph_levels", graph_levels)
 	cf.set_value("vault", "dir", vault_dir)
 	cf.set_value("sync", "device_id", device_id)

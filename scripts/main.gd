@@ -261,6 +261,18 @@ func _build_dynamic_ui() -> void:
 	export_component.dest_cb = _export_dest
 	export_component.flash_cb = _flash
 	export_component.get_code = func(): return code_edit.text
+	# Share the live CRT overlay material with the Exporter so exports that opt
+	# into CRT FX composite the exact same scanlines/grille/wobble/curve as the UI.
+	var crt_overlay := get_node_or_null("CrtOverlay")
+	Exporter.crt_material_cb = (
+		func() -> Variant:
+			var ov := get_node_or_null("CrtOverlay")
+			return ov.material if ov != null else null)
+	export_component.width_cb = func() -> float:
+		# The document preview lays out in the content pane; export at exactly
+		# that logical width so proportions match the on-screen preview, then
+		# the Exporter upscales uniformly.
+		return content_panel.size.x
 	export_component.build_menu(menu)
 	menu.id_pressed.connect(export_component.handle_action)
 

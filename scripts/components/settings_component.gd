@@ -10,6 +10,7 @@ signal close_requested
 @onready var vault_button: Button = %VaultButton
 @onready var sync_button: Button = %SyncButton
 @onready var close_button: Button = %CloseButton
+@onready var crt_export: CheckButton = %CrtExport
 
 var vault_cb: Callable
 var sync_cb: Callable
@@ -18,6 +19,7 @@ func _ready() -> void:
 	vault_button.pressed.connect(func(): vault_cb.call() if vault_cb.is_valid() else null)
 	sync_button.pressed.connect(func(): sync_cb.call() if sync_cb.is_valid() else null)
 	close_button.pressed.connect(func(): close_requested.emit())
+	crt_export.toggled.connect(_on_crt_export_toggled)
 	graph_levels.value_changed.connect(_on_graph_levels_changed)
 	for p in GameManager.PALETTES.keys():
 		style.add_item(p)
@@ -28,7 +30,12 @@ func refresh() -> void:
 	paired_devices.text = "Paired devices: " + (str(GameManager.paired_peers.keys()) if not GameManager.paired_peers.is_empty() else "None")
 	graph_levels.value = GameManager.graph_levels
 	style.select(maxi(0, GameManager.PALETTES.keys().find(GameManager.palette_name)))
+	crt_export.button_pressed = GameManager.export_crt
 
 func _on_graph_levels_changed(value: float) -> void:
 	GameManager.graph_levels = clampi(int(value), 1, 10)
 	GameManager._save_settings()
+
+
+func _on_crt_export_toggled(pressed: bool) -> void:
+	GameManager.set_export_crt(pressed)
