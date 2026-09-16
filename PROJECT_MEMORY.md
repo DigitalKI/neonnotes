@@ -5,7 +5,7 @@
 > updated at the **end**, so context, decisions, and direction survive across
 > conversations. Keep it current — a stale memory file is worse than none.
 
-_Last updated: 2026-09-15 (scene-authored view/edit content padding) · Godot 4.7 · renderer: gl_compatibility_
+_Last updated: 2026-09-15 (fixed mobile keyboard caret scrolling after editor padding refactor) · Godot 4.7 · renderer: gl_compatibility_
 
 > ⚠️ **Path note:** the saved global memory says `/home/toshiwo/www/neonnotes`
 > but the project actually lives at **`/home/toshiwo/Projects/Godot/neonnotes`**.
@@ -29,6 +29,8 @@ _Last updated: 2026-09-15 (scene-authored view/edit content padding) · Godot 4.
   folder via 📂 Vault). No proprietary DB — vault is grep/rsync/editor friendly.
 
 ## 2. What has been done (work log)
+
+- **2026-09-15 — mobile keyboard caret scrolling regression fixed**: `SourceEditor` is runtime-created under the scene-authored `EditPadding` container, but `LayoutComponent` was still searching for it directly under `Content`. The keyboard resize watcher therefore never found the editor after the padding refactor. Updated both lookup sites to `EditPadding/SourceEditor`, restoring repeated caret visibility adjustment while the Android IME resizes the editor.
 
 - **2026-09-15 — scene-authored view/edit content padding**: moved the 14px inner padding out of the runtime theme code and into dedicated `PreviewPadding` and `EditPadding` MarginContainers in `scenes/main/Main.tscn`. The ScrollContainer and its scrollbar remain flush with the content panel edge; edit mode uses the parallel padded container. Desktop Linux/Windows mouse input bypasses the mobile drag-scroll gesture so native text selection is preserved.
 
@@ -611,9 +613,20 @@ _These OVERRIDE the skill's defaults for this project._
 
 ## 8. Asset / naming notes
 
+- **2026-09-15 — Android keyboard caret scrolling**: edit-area taps now
+  explicitly retry `CodeEdit.adjust_viewport_to_caret()` after the default tap.
+  Layout changes are also watched directly, so the caret is adjusted after the
+  Android IME has actually resized the editor, not only when keyboard height
+  changes.
+
 - Fonts: Orbitron (display/headings) + ShareTechMono (UI/base). Ik font files in
   `assets/fonts/`.
 - Palette colors in `GameManager.PALETTES` are the source of truth (bg/panel/
   text/accent/accent2/accent3/accent4 per palette); add new palettes there.
 - Markdown sharing format is plain `.md` (user pref: "markdown-based sharing
   format"); export menu also offers PNG/GIF/HTML + copy.
+
+- **2026-09-15 — media source dialog**: clicking an empty/missing image now opens a
+  source dialog listing reusable images already in `vault/media/`, plus the
+  existing device/machine picker. Selecting a library item rewrites the embed
+  and saves immediately; imported media remains portable in the vault.

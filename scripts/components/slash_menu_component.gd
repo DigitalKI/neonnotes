@@ -45,15 +45,22 @@ func build(p_code_edit: CodeEdit, p_save_cb: Callable) -> void:
 	_list.custom_minimum_size = Vector2(360, 0)
 	for i in SLASH_ITEMS.size():
 		_list.add_item(SLASH_ITEMS[i][0])
-	_list.item_selected.connect(func(idx: int):
+	# Use item_clicked rather than item_selected: ItemList does not emit
+	# item_selected when the user clicks the item that is already selected.
+	# That made the last-used (brighter) entry appear to do nothing.
+	_list.item_clicked.connect(func(idx: int, _at_position: Vector2, _mouse_button: int):
 		_panel.hide()
+		_list.deselect_all()
 		_on_action(idx))
 	_panel.add_child(_list)
 	add_child(_panel)
 
 
 func menu_height() -> float:
-	return ceil(SLASH_ITEMS.size() / 2.0) * 44.0 + 16.0
+	# ItemList rows include theme separation/padding and are slightly taller than
+	# the nominal 44px touch target. Leave a full extra row of breathing room;
+	# without it the final row can be clipped by PopupPanel and appear inert.
+	return ceil(SLASH_ITEMS.size() / 2.0) * 44.0 + 32.0
 
 
 ## Typing "/" alone on a line pops the formatting menu.

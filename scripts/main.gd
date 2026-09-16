@@ -354,6 +354,11 @@ func _on_code_edit_gui_input(event: InputEvent) -> void:
 			_drag_is_scroll = false
 			_drag_is_select = false
 			_long_press_timer.start()
+			# Let CodeEdit perform its normal hit-test first, then explicitly
+			# resolve the tapped position to a caret and scroll that caret into
+			# the newly resized edit viewport. This is the important mobile path:
+			# the keyboard can open without a keyboard-height transition.
+			_scroll_tapped_caret.call_deferred(event.position)
 			# initial press is left unhandled so CodeEdit places the caret normally
 		else:
 			_long_press_timer.stop()
@@ -361,6 +366,12 @@ func _on_code_edit_gui_input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 			elif _drag_is_select and code_edit.has_selection():
 				_show_selection_menu()
+			else:
+				# CodeEdit places the caret and Android opens the IME after this
+				# input callback. The keyboard-height watcher is not sufficient:
+				# it may already have the same height from a previous focus. Follow
+				# this newly tapped caret explicitly after the default click runs.
+				_schedule_tapped_caret_scroll.call_deferred(10)
 			_drag_active = false
 			_drag_is_scroll = false
 			_drag_is_select = false
@@ -382,6 +393,28 @@ func _on_code_edit_gui_input(event: InputEvent) -> void:
 func _on_code_edit_long_press() -> void:
 	if _drag_active and not _drag_is_scroll:
 		_drag_is_select = true
+
+func _scroll_tapped_caret(local_pos: Vector2) -> void:
+	if not code_edit.visible:
+		return
+	# Convert the touch point to the exact line/column CodeEdit hit, rather
+	# than assuming the current caret is already the tapped location.
+	var caret_pos: Vector2i = code_edit.get_line_column_at_pos(local_pos)
+	code_edit.set_caret_line(caret_pos.x)
+	code_edit.set_caret_column(caret_pos.y)
+	code_edit.adjust_viewport_to_caret(0)
+	_schedule_tapped_caret_scroll(12)
+
+func _schedule_tapped_caret_scroll(frames: int) -> void:
+	if not code_edit.visible:
+		return
+	# Wait for CodeEdit's default mouse handling and the Android IME resize,
+	# then explicitly keep the resolved caret visible across layout frames.
+	for _i in range(frames):
+		await get_tree().process_frame
+		if not code_edit.visible:
+			return
+		code_edit.adjust_viewport_to_caret(0)
 
 ## Cut/Copy/Paste popup shown right after a long-press-drag selection ends.
 func _show_selection_menu() -> void:
@@ -681,7 +714,12 @@ func _set_mode() -> void:
 	edit_padding.visible = source_mode
 	content_host.visible = not source_mode
 	toolbar.mode_btn.text = "✎ Edit" if not source_mode else "◈ Preview"
-	if not source_mode:
+	if source_mode:
+		# Android may resize the viewport only after the mode switch and focus
+		# opens the IME. Let LayoutComponent observe that resize and follow the
+		# caret once the editor is actually visible.
+		code_edit.call_deferred("adjust_viewport_to_caret", 0)
+	else:
 		_render_preview()
 
 func _toggle_mode() -> void:
@@ -762,14 +800,115 @@ func _open_wikilink(target: String) -> void:
 # ------------------------------------------------- image embeds (v3)
 
 var image_dialog: FileDialog
+var media_dialog: AcceptDialog
 var _image_target_src := ""
 
-## An image embed was clicked in the preview: pick a file; it is copied into
+## An image embed was clicked in the preview: choose an existing vault asset or
+## import a new image from the device/machine.
+
 ## vault/media/ and the markdown is updated + saved.
 func _on_image_click(src: String) -> void:
 	if help_mode or GameManager.current_file == "":
 		return
 	_image_target_src = src
+	_show_media_dialog()
+
+func _show_media_dialog() -> void:
+	if media_dialog:
+		media_dialog.queue_free()
+	media_dialog = AcceptDialog.new()
+	media_dialog.name = "MediaDialog"
+	media_dialog.title = "CHOOSE MEDIA SOURCE"
+	media_dialog.ok_button_text = "CANCEL"
+	var box := VBoxContainer.new()
+	box.custom_minimum_size = Vector2(420, 260)
+	box.add_theme_constant_override("separation", 10)
+	var heading := Label.new()
+	heading.text = "LOCAL MEDIA LIBRARY"
+	box.add_child(heading)
+	var media_dir := GameManager.vault_abs().path_join("media")
+	# Sync/import failures can leave empty media files behind. Clean these up
+	# before building the library so broken entries are never presented.
+	_cleanup_empty_media(media_dir)
+	var files: Array[String] = []
+	_collect_media_images(media_dir, files)
+	if files.is_empty():
+		var empty := Label.new()
+		empty.text = "No imported images yet."
+		box.add_child(empty)
+	else:
+		var scroll := ScrollContainer.new()
+		scroll.custom_minimum_size = Vector2(0, 150)
+		var list := VBoxContainer.new()
+		for path in files:
+			var item := Button.new()
+			item.text = path.get_file()
+			item.alignment = HORIZONTAL_ALIGNMENT_LEFT
+			item.mouse_filter = Control.MOUSE_FILTER_STOP
+			item.custom_minimum_size = Vector2(0, 64)
+			item.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
+			item.expand_icon = true
+			var img := Image.load_from_file(path)
+			if img:
+				item.icon = ImageTexture.create_from_image(img)
+			item.pressed.connect(_use_local_media.bind(path))
+			list.add_child(item)
+		scroll.add_child(list)
+		box.add_child(scroll)
+	var device := Button.new()
+	device.text = "＋  CHOOSE FROM DEVICE / MACHINE"
+	device.pressed.connect(_choose_device_image)
+	box.add_child(device)
+	media_dialog.add_child(box)
+	add_child(media_dialog)
+	_style_image_dialog()
+	media_dialog.popup_centered(Vector2i(560, 430))
+
+func _cleanup_empty_media(dir_path: String) -> void:
+	var dir := DirAccess.open(dir_path)
+	if dir == null:
+		return
+	for name in dir.get_files():
+		var path := dir_path.path_join(name)
+		var file := FileAccess.open(path, FileAccess.READ)
+		var file_size := file.get_length() if file != null else 0
+		if file != null:
+			file.close()
+		if file_size <= 0:
+			DirAccess.remove_absolute(path)
+			continue
+		# Loading through Godot validates the actual image payload, not just its
+		# extension. Remove truncated/corrupt media that cannot be decoded.
+		if Image.load_from_file(path) == null:
+			DirAccess.remove_absolute(path)
+
+func _collect_media_images(dir_path: String, out: Array[String]) -> void:
+	var dir := DirAccess.open(dir_path)
+	if dir == null:
+		return
+	for name in dir.get_files():
+		if name.get_extension().to_lower() in ["png", "jpg", "jpeg", "webp", "gif"]:
+			out.append(dir_path.path_join(name))
+	out.sort()
+
+func _use_local_media(path: String) -> void:
+	if media_dialog:
+		media_dialog.hide()
+	var t := code_edit.text
+	var pattern := "!\\[[^\\]]*\\]\\(\\s*" + ("" if _image_target_src == "" else vault_tree._re_escape(_image_target_src)) + "\\s*\\)"
+	var m := RegEx.create_from_string(pattern).search(t)
+	if m == null:
+		_flash("✗ Could not find image embed")
+		return
+	var rel := "media/" + path.get_file()
+	code_edit.text = t.substr(0, m.get_start()) + "![](" + rel + ")" + t.substr(m.get_end())
+	GameManager.write_note(GameManager.current_rel, code_edit.text)
+	status_bar.flash("✓ Saved " + GameManager.current_rel)
+	_render_preview()
+
+func _choose_device_image() -> void:
+	if media_dialog:
+		media_dialog.hide()
 	if image_dialog == null:
 		image_dialog = FileDialog.new()
 		image_dialog.name = "ImageDialog"

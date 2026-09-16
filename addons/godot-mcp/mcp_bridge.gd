@@ -225,7 +225,7 @@ func _handle_call(msg: Dictionary) -> void:
 			_handle_set_node_property(call_id, args)
 		"call_node_method":
 			_handle_call_node_method(call_id, args)
-		"eval":
+		"eval_expression":
 			_handle_eval(call_id, args)
 		"simulate_input":
 			_handle_simulate_input(call_id, args)
@@ -355,7 +355,7 @@ func _handle_call(msg: Dictionary) -> void:
 				var ga_width := int(args.get("width", 800))
 				_send_json({"type": "result", "id": call_id, "result": assets.get_audio_pcm(ga_path, ga_width)})
 		"list_tools":
-			_send_json({"type": "result", "id": call_id, "result": {"tools": ["ping_game", "get_runtime_errors", "get_scene_tree", "inspect_node", "set_node_property", "call_node_method", "screenshot", "collector_status", "list_assets", "get_image_png", "slice_sprite_sheet", "describe_sprite", "refresh_filesystem", "reload_scene", "reload_resource", "reload_plugin", "find_references", "describe_audio", "get_audio_pcm", "get_console_output", "eval", "simulate_input", "clean_temp", "play_scene", "stop_scene", "get_play_status", "get_diagnostics", "set_breakpoint", "remove_breakpoint", "clear_breakpoints", "wait_for_breakpoint", "get_stack_dump", "get_stack_frame_vars", "continue_execution", "step_into", "step_over", "step_out", "evaluate_debug", "break_execution", "list_tools"]}})
+			_send_json({"type": "result", "id": call_id, "result": {"tools": ["ping_game", "get_runtime_errors", "get_scene_tree", "inspect_node", "set_node_property", "call_node_method", "screenshot", "collector_status", "list_assets", "get_image_png", "slice_sprite_sheet", "describe_sprite", "refresh_filesystem", "reload_scene", "reload_resource", "reload_plugin", "find_references", "describe_audio", "get_audio_pcm", "get_console_output", "eval_expression", "simulate_input", "clean_temp", "play_scene", "stop_scene", "get_play_status", "get_diagnostics", "set_breakpoint", "remove_breakpoint", "clear_breakpoints", "wait_for_breakpoint", "get_stack_dump", "get_stack_frame_vars", "continue_execution", "step_into", "step_over", "step_out", "evaluate_debug", "break_execution", "list_tools"]}})
 		_:
 			_send_json({"type": "result", "id": call_id, "error": "unknown tool: %s" % tool})
 
@@ -471,14 +471,14 @@ func _handle_eval(call_id: int, args: Dictionary) -> void:
 		_send_json({"type": "result", "id": call_id, "error": "code required (a GDScript expression)"})
 		return
 	var object_id: int = int(args.get("object_id", 0))
-	_pending[call_id] = {"time": Time.get_ticks_msec(), "tool": "eval"}
+	_pending[call_id] = {"time": Time.get_ticks_msec(), "tool": "eval_expression"}
 	# Send [call_id, code, object_id]; the in-game runtime evaluates the
 	# expression (Expression class — single expression) with object_id as base,
-	# replies mcp:eval_result with [call_id, ret, err].
-	var ok: bool = debugger.send_to_game("eval", [call_id, code, object_id])
+	# replies mcp:eval_expression_result with [call_id, ret, err].
+	var ok: bool = debugger.send_to_game("eval_expression", [call_id, code, object_id])
 	if not ok:
 		_pending.erase(call_id)
-		_send_json({"type": "result", "id": call_id, "error": "failed to send mcp:eval to game"})
+		_send_json({"type": "result", "id": call_id, "error": "failed to send mcp:eval_expression to game"})
 
 
 func _handle_simulate_input(call_id: int, args: Dictionary) -> void:
@@ -554,7 +554,7 @@ func on_game_message(kind: String, data: Array, session_id: int) -> void:
 						_send_json({"type": "result", "id": call_id, "result": {"return_value": data[1]}})
 					return
 			_send_json({"type": "event", "event": "call_result", "data": data})
-		"eval_result":
+		"eval_expression_result":
 			# data == [call_id, return_value, error_msg] — same shape as call_result.
 			if data.size() >= 3:
 				var call_id: int = int(data[0])
@@ -566,7 +566,7 @@ func on_game_message(kind: String, data: Array, session_id: int) -> void:
 					else:
 						_send_json({"type": "result", "id": call_id, "result": {"return_value": data[1]}})
 					return
-			_send_json({"type": "event", "event": "eval_result", "data": data})
+			_send_json({"type": "event", "event": "eval_expression_result", "data": data})
 		"simulate_input_result":
 			# data == [call_id, kind_injected, error_msg].
 			if data.size() >= 3:
@@ -745,7 +745,7 @@ func _send_json(obj: Dictionary) -> void:
 # Per-tool timeout limit (called by _check_timeouts).
 func _limit_for_tool(tool_name: String) -> int:
 	match tool_name:
-		"eval":
+		"eval_expression":
 			return _EVAL_TIMEOUT_MS
 		"wait_for_breakpoint":
 			return _BREAKPOINT_WAIT_MS

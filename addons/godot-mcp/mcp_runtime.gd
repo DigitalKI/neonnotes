@@ -55,7 +55,7 @@ func _capture(message: String, data: Array) -> bool:
 			if data.size() >= 4:
 				_do_call(int(data[0]), int(data[1]), str(data[2]), data[3])
 				return true
-		"eval":
+		"eval_expression":
 			# data == [call_id, code, object_id]; evaluate a GDScript expression
 			# (Expression class — single expression only) with optional object as
 			# base context, reply with its value. See _do_eval for the limits.
@@ -215,10 +215,10 @@ func _do_eval(call_id: int, code: String, object_id: int) -> void:
 
 
 # Reply with [call_id, return_value, error_message] (same shape as _reply_call,
-# but on the mcp:eval_result channel). return_value is JSON-friendly via
+# but on the mcp:eval_expression_result channel). return_value is JSON-friendly via
 # _serialize_ret.
 func _reply_eval(call_id: int, ret: Variant, error_msg: String) -> void:
-	EngineDebugger.send_message("mcp:eval_result", [call_id, ret, error_msg])
+	EngineDebugger.send_message("mcp:eval_expression_result", [call_id, ret, error_msg])
 
 
 # Inject a synthetic InputEvent into the running game's input system. event_dict

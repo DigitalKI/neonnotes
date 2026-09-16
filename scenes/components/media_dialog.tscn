@@ -1,0 +1,8 @@
+[gd_scene format=3]
+
+[node name="MediaDialog" type="AcceptDialog"]
+title = "CHOOSE MEDIA SOURCE"
+ok_button_text = "CANCEL"
+
+[node name="Content" type="VBoxContainer" parent="."]
+custom_minimum_size = Vector2(420, 260)

@@ -27,6 +27,8 @@ var export_btn: Control
 var drawer_open := false
 var is_mobile_layout := false
 var _kb_h := -1
+var _caret_adjust_frames := 0
+var _editor_size := Vector2.ZERO
 
 
 func ready() -> void:
@@ -41,6 +43,20 @@ func _process(_delta: float) -> void:
 		var kb := DisplayServer.virtual_keyboard_get_height()
 		if kb != _kb_h:
 			_apply_safe_area()
+	# The keyboard reports its height before the final Android viewport/layout
+	# resize. Keep correcting for a few frames so edit mode follows the caret,
+	# rather than relying on one adjustment at the wrong geometry.
+	var code_edit: CodeEdit = content.get_node_or_null("EditPadding/SourceEditor")
+	if code_edit != null and code_edit.visible:
+		# The editor's actual size is the reliable signal that Android has
+		# finished resizing the layout for the IME. Keyboard height alone can
+		# arrive before (or remain unchanged despite) that resize.
+		if code_edit.size != _editor_size:
+			_editor_size = code_edit.size
+			_caret_adjust_frames = 8
+		if _caret_adjust_frames > 0:
+			_caret_adjust_frames -= 1
+			_force_caret_visible(code_edit)
 
 
 func update_layout() -> void:
@@ -138,8 +154,30 @@ func _apply_safe_area() -> void:
 		workspace_margin.add_theme_constant_override("margin_right", side_margin)
 		workspace_margin.add_theme_constant_override("margin_bottom", base_bottom + bottom_inset)
 	_kb_h = kb
-	# editing area just resized around the keyboard — keep the caret visible
-	# (deferred so it runs after the new margin is actually laid out)
-	var code_edit: CodeEdit = content.get_node_or_null("SourceEditor")
+	_caret_adjust_frames = 12
+	# Editing area is resized around the keyboard. The first deferred call can
+	# still run before the container has completed its minimum-size pass on
+	# Android, so repeat after the next frame as well. This is important when
+	# the caret is near the bottom: resizing alone does not guarantee that
+	# TextEdit re-centres its viewport.
+	var code_edit: CodeEdit = content.get_node_or_null("EditPadding/SourceEditor")
 	if code_edit != null and code_edit.visible:
-		code_edit.adjust_viewport_to_caret.call_deferred(0)
+		_keep_caret_visible.call_deferred(code_edit)
+
+func _keep_caret_visible(code_edit: CodeEdit) -> void:
+	if not is_instance_valid(code_edit) or not code_edit.visible:
+		return
+	_force_caret_visible(code_edit)
+
+func _force_caret_visible(code_edit: CodeEdit) -> void:
+	# Use the caret's document line directly. adjust_viewport_to_caret can
+	# decline to move when the focus event happened before Android's resize.
+	var line := code_edit.get_caret_line()
+	var first := code_edit.get_first_visible_line()
+	var last := code_edit.get_last_full_visible_line()
+	if line < first:
+		code_edit.scroll_vertical = line
+	elif line > last:
+		code_edit.scroll_vertical = maxf(0.0, line - (last - first))
+	code_edit.adjust_viewport_to_caret(0)
+	code_edit.adjust_viewport_to_caret.call_deferred(0)
