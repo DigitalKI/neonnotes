@@ -17,10 +17,12 @@ signal delete_requested
 
 var save_cb: Callable
 var flash_cb: Callable
+var moved_cb: Callable
 var _tree_menu := PopupMenu.new()
 var _press_pos := Vector2.ZERO
 var _touch_src_path := ""
 var _is_touch_dragging := false
+var _root_homepage := ""
 
 ## Wire behavior once the scene nodes are ready. The host connects
 ## palette_btn/vault_btn/sync_btn/tree_delete_btn signals itself.
@@ -57,6 +59,16 @@ func refresh_backlinks() -> void:
 
 func build() -> void:
 	side_tree.item_activated.connect(_on_tree_selected)
+	# Match the editor's touch-friendly scrollbar width. Tree exposes its
+	# internal scrollbar as a child rather than via get_v_scroll_bar().
+	for child in side_tree.get_children():
+		if child is VScrollBar:
+			child.custom_minimum_size = Vector2(14, 0)
+	side_tree.item_collapsed.connect(_on_item_collapsed)
+	# Ensure the vault root always has a non-deletable homepage note.
+	_root_homepage = "_homepage.md"
+	if not FileAccess.file_exists(GameManager.vault_abs().path_join(_root_homepage)):
+		GameManager.write_note(_root_homepage, "# Home\n\nWelcome to NeonNotes.\n")
 	# Trigger note opening on mouse/touch RELEASE so dragging a row never
 	# accidentally opens a note or closes the mobile sidebar drawer.
 	side_tree.gui_input.connect(func(ev: InputEvent):
@@ -88,6 +100,12 @@ func build() -> void:
 						if it == null:
 							it = side_tree.get_item_at_position(side_tree.get_local_mouse_position())
 						if it != null and it.get_metadata(0) != null:
+							# The left folding arrow is a tree control, not a note
+							# activation. On mobile, never close the drawer for it.
+							if _is_tree_toggle_click(it, ev.position):
+								_touch_src_path = ""
+								get_viewport().set_input_as_handled()
+								return
 							it.select(0)
 							_on_tree_selected()
 					_touch_src_path = ""
@@ -181,7 +199,7 @@ func refresh() -> void:
 	root.set_metadata(0, "")
 	root.disable_folding = true
 	root.collapsed = false
-	root.set_selectable(0, false)
+	root.set_selectable(0, true)
 	# build folder hierarchy from relative paths
 	var folders := {}
 	# pass 1: folders first, so a note + folder sharing a name merge into one
@@ -207,6 +225,8 @@ func refresh() -> void:
 					it.set_tooltip_text(0, parts[i])
 					it.set_metadata(0, path)  # plain folder
 				it.set_selectable(0, true)
+				# Existing saved state wins; new folders start collapsed.
+				it.collapsed = bool(GameManager.collapsed_folders.get(path, true))
 				folders[path] = it
 			parent = folders[path]
 	# pass 2: note leaves in custom order (skipping those merged into folder rows)
@@ -221,6 +241,9 @@ func refresh() -> void:
 			_add_note_leaf(parent, n)
 	for n in ordered_notes(""):
 		if not n.contains("/"):
+			# The protected homepage is opened through the Vault root row.
+			if n == _root_homepage:
+				continue
 			# A companion note such as `help.md` is represented by the merged
 			# `help/` folder row above; never show it a second time at root.
 			var folder_abs := GameManager.vault_abs().path_join(n.trim_suffix(".md"))
@@ -260,6 +283,10 @@ func ordered_notes(dir: String) -> Array[String]:
 
 func _tree_get_drag(at_position: Vector2) -> Variant:
 	var it := side_tree.get_item_at_position(at_position)
+	if it == null or it == side_tree.get_root() or it.get_metadata(0) == null:
+		return null
+	if it.get_metadata(0) == _root_homepage:
+		return null
 	if it == null or it == side_tree.get_root() or it.get_metadata(0) == null:
 		return null
 	var meta := str(it.get_metadata(0))
@@ -456,6 +483,7 @@ func _apply_order(rel: String, dir: String, neighbor: String, before: bool) -> v
 ## Move a note or folder (vault-relative) into `dst_dir` ("" = vault root).
 ## Auto-renames on collision. Returns the new relative path ("" on failure).
 func move_path(src_rel: String, dst_dir: String) -> String:
+	var old_paths := _paths_under(src_rel)
 	var vault := GameManager.vault_abs()
 	var src := vault.path_join(src_rel)
 	if not FileAccess.file_exists(src) and not DirAccess.dir_exists_absolute(src):
@@ -500,7 +528,27 @@ func move_path(src_rel: String, dst_dir: String) -> String:
 	if GameManager.current_rel == src_rel:
 		GameManager.current_file = target
 		GameManager.current_rel = new_rel
+	if moved_cb.is_valid():
+		moved_cb.call(old_paths)
 	return new_rel
+
+func _paths_under(rel: String) -> Array[String]:
+	var out: Array[String] = []
+	var vault := GameManager.vault_abs()
+	var base := vault.path_join(rel)
+	if FileAccess.file_exists(base):
+		out.append(rel)
+		return out
+	if not DirAccess.dir_exists_absolute(base):
+		return out
+	for f in DirAccess.get_files_at(base):
+		out.append(rel.path_join(f))
+	for d in DirAccess.get_directories_at(base):
+		out.append_array(_paths_under(rel.path_join(d)))
+	var companion := rel + ".md"
+	if FileAccess.file_exists(vault.path_join(companion)):
+		out.append(companion)
+	return out
 
 ## Update [[wiki-links]] across the vault after a move/rename.
 func _rewrite_links(old_rel: String, new_rel: String) -> void:
@@ -551,16 +599,31 @@ func _re_escape(s: String) -> String:
 			out += ch
 	return out
 
+func _is_tree_toggle_click(item: TreeItem, pos: Vector2) -> bool:
+	if item == side_tree.get_root() or not item.collapsed and item.get_child_count() == 0:
+		return false
+	var area := side_tree.get_item_area_rect(item)
+	# Godot's folding arrow is in the leading ~24px of the row.
+	return pos.x <= area.position.x + 28.0
+
+func _on_item_collapsed(item: TreeItem) -> void:
+	var rel := node_rel(item)
+	if rel != "":
+		GameManager.collapsed_folders[rel] = item.collapsed
+		GameManager.save_order()
+
 func _on_tree_selected() -> void:
 	var it := side_tree.get_selected()
 	if it == null:
 		return
 	var meta: Variant = it.get_metadata(0)
+	if it == side_tree.get_root():
+		note_requested.emit(_root_homepage)
+		return
 	if meta == null:
 		return
 	var fname := str(meta)
-	# A merged folder+note row (e.g. "medic.md" + "medic/") opens the note.
-	# Clicking a plain folder row only expands/collapses it.
+	# A merged folder+note row opens its note; plain folders only fold.
 	if str(meta).ends_with(".md") and GameManager.notes.has(fname):
 		note_requested.emit(fname)
 

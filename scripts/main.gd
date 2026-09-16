@@ -57,11 +57,14 @@ var export_component := ExportComponent.new()
 
 # ---- editor drag gesture: plain drag scrolls, long-press-then-drag selects
 var _long_press_timer := Timer.new()
-var _drag_active := false
 var _drag_start_pos := Vector2.ZERO
 var _drag_is_scroll := false
 var _drag_is_select := false
+var _select_start := Vector2i.ZERO
 const DRAG_SCROLL_THRESHOLD := 12.0
+const LONG_PRESS_SECONDS := 1.0
+# Touch gesture state machine for the mobile editor.
+var _gesture_state := "IDLE"  # IDLE | PENDING | SCROLLING | SELECTING
 
 func _ready() -> void:
 	_build_dynamic_ui()
@@ -92,9 +95,15 @@ func _ready() -> void:
 			_render_preview())
 	vault_tree.save_cb = _flush_save
 	vault_tree.flash_cb = _flash
+	vault_tree.moved_cb = func(old_paths: Array[String]):
+		for old_path in old_paths:
+			sync_service.note_deleted(old_path)
+		sync_service.note_saved()
 	vault_tree.note_requested.connect(_on_note_selected)
 	vault_tree.delete_requested.connect(_delete_selected_node)
 	vault_tree.tree_delete_btn.pressed.connect(_delete_selected_node)
+	vault_tree.side_tree.item_selected.connect(_update_delete_controls)
+	_update_delete_controls(0)
 	vault_tree.build()
 	vault_tree.config_btn.pressed.connect(_toggle_settings)
 	settings_component.vault_cb = _on_open_vault
@@ -125,10 +134,8 @@ func _ready() -> void:
 		sync_service.enable_auto_sync()
 		if not sync_service.start_discovery():
 			sync_service.sync_failed.emit("Could not start background discovery (auto-sync via stored peer IP still active)")
-	sync_service.sync_done.connect(func(_peer: String, _count: int):
-		GameManager.scan_notes()
-		_refresh_list()
-		_refresh_open_note_after_sync.call_deferred())
+	# Refresh only when the sync reports changed content/structure.
+	sync_service.sync_changed.connect(_on_sync_changed)
 	status_bar.set_sync_service(sync_service)
 	if OS.get_environment("NEONNOTES_SMOKE") == "1":
 		_start_smoke.call_deferred()
@@ -150,6 +157,13 @@ func _refresh_list() -> void:
 		layout_component.drawer_open = mobile_drawer_was_open
 		layout_component.sidebar.visible = mobile_drawer_was_open
 		layout_component.content.visible = not mobile_drawer_was_open
+
+func _on_sync_changed(_peer: String, _count: int, changed_paths: Array, structure_changed: bool) -> void:
+	if structure_changed:
+		GameManager.scan_notes()
+		_refresh_list()
+	if GameManager.current_rel != "" and changed_paths.has(GameManager.current_rel):
+		_refresh_open_note_after_sync.call_deferred()
 
 func _refresh_open_note_after_sync() -> void:
 	# Auto-refresh the open note when it's in VIEW (preview) mode, so a sync that
@@ -198,6 +212,10 @@ func _build_dynamic_ui() -> void:
 	# All/Undo/Redo/direction submenus); still used as-is for desktop
 	# right-click. Touch uses _on_code_edit_gui_input's own popup instead.
 	code_edit.context_menu_enabled = true
+	# Mobile: CodeEdit's drag-and-drop-selected-text must never engage — the
+	# state machine owns selection and "moving text by dragging" was reported
+	# as a bug symptom.
+	code_edit.drag_and_drop_selection_enabled = false
 	var edit_menu := code_edit.get_menu()
 	for i in range(edit_menu.item_count - 1, -1, -1):
 		if edit_menu.get_item_id(i) > TextEdit.MENU_PASTE:
@@ -206,9 +224,11 @@ func _build_dynamic_ui() -> void:
 	code_edit.gui_input.connect(_on_code_edit_gui_input)
 	_long_press_timer.name = "LongPressTimer"
 	_long_press_timer.one_shot = true
-	_long_press_timer.wait_time = 0.8
+	_long_press_timer.wait_time = LONG_PRESS_SECONDS
 	_long_press_timer.timeout.connect(_on_code_edit_long_press)
 	add_child(_long_press_timer)
+	code_edit.get_menu().id_pressed.connect(_on_edit_menu_action)
+	code_edit.get_menu().popup_hide.connect(_on_edit_menu_closed)
 	edit_padding.add_child(code_edit)
 
 	# autosave: immediate — every keystroke/paste persists (no debounce);
@@ -342,57 +362,68 @@ func _build_dynamic_ui() -> void:
 ## drag. Once a long-press is confirmed we stop swallowing so CodeEdit's
 ## normal selection-drag takes back over from the still-held pointer.
 func _on_code_edit_gui_input(event: InputEvent) -> void:
-	# Desktop editors must retain native mouse selection. The touch gesture
-	# below is only for mobile; otherwise selecting text can accidentally turn
-	# into drag-to-scroll.
+	# Desktop uses native CodeEdit selection/scrolling — untouched.
 	if OS.get_name() == "Linux" or OS.get_name() == "Windows":
 		return
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+	# Explicit touch state machine (see constants above). Touch events are the
+	# source of truth on Android; mouse events are ignored so CodeEdit's own
+	# mouse emulation can't fight our gesture handling.
+	if event is InputEventScreenTouch:
+		# Touch events only DRIVE the state machine. Caret/selection coordinates
+		# always come from the emulated mouse pipeline instead: Android reports
+		# touch positions in window space (not adjusted for this project's
+		# content_scale_factor), which made manual get_line_column_at_pos
+		# hit-testing land on the wrong line. The emulated mouse events are
+		# transformed exactly like desktop mouse events, which the user
+		# confirmed hit correctly.
 		if event.pressed:
-			_drag_active = true
+			_gesture_state = "PENDING"
 			_drag_start_pos = event.position
-			_drag_is_scroll = false
-			_drag_is_select = false
 			_long_press_timer.start()
-			# Let CodeEdit perform its normal hit-test first, then explicitly
-			# resolve the tapped position to a caret and scroll that caret into
-			# the newly resized edit viewport. This is the important mobile path:
-			# the keyboard can open without a keyboard-height transition.
-			_scroll_tapped_caret.call_deferred(event.position)
-			# initial press is left unhandled so CodeEdit places the caret normally
+			# Do NOT consume: the following emulated mouse press places the
+			# caret natively at the right spot and opens the keyboard.
 		else:
+			match _gesture_state:
+				"PENDING":
+					_gesture_state = "IDLE"
+					_long_press_timer.stop()
+					# Native caret placement happened via the emulated click;
+					# keep following the caret across the IME layout frames.
+					_schedule_tapped_caret_scroll.call_deferred(10)
+				"SCROLLING":
+					_gesture_state = "IDLE"
+				"SELECTING":
+					_gesture_state = "IDLE"
+					if code_edit.has_selection():
+						_show_selection_menu()
+				_:
+					_gesture_state = "IDLE"
+	elif event is InputEventScreenDrag and _gesture_state != "IDLE":
+		if _gesture_state == "PENDING" and event.position.distance_to(_drag_start_pos) > DRAG_SCROLL_THRESHOLD:
 			_long_press_timer.stop()
-			if _drag_is_scroll:
-				get_viewport().set_input_as_handled()
-			elif _drag_is_select and code_edit.has_selection():
-				_show_selection_menu()
-			else:
-				# CodeEdit places the caret and Android opens the IME after this
-				# input callback. The keyboard-height watcher is not sufficient:
-				# it may already have the same height from a previous focus. Follow
-				# this newly tapped caret explicitly after the default click runs.
-				_schedule_tapped_caret_scroll.call_deferred(10)
-			_drag_active = false
-			_drag_is_scroll = false
-			_drag_is_select = false
-	elif event is InputEventMouseMotion and _drag_active:
-		if not _drag_is_scroll and not _drag_is_select:
-			if event.position.distance_to(_drag_start_pos) > DRAG_SCROLL_THRESHOLD:
-				_drag_is_scroll = true
-				# it's a scroll, not a hold — the long-press clock stops entirely
-				_long_press_timer.stop()
-		if _drag_is_scroll:
+			_gesture_state = "SCROLLING"
+		if _gesture_state == "SCROLLING":
 			code_edit.scroll_vertical -= event.relative.y / float(code_edit.get_line_height())
 			get_viewport().set_input_as_handled()
-		elif not _drag_is_select:
-			# still waiting to see if this becomes a long-press-select; don't
-			# let CodeEdit see the motion yet or it would start selecting
+	elif event is InputEventMouseButton:
+		# Emulated mouse press/release mirror the touch; let them through so
+		# CodeEdit's native caret placement works (same as desktop).
+		pass
+	elif event is InputEventMouseMotion:
+		# Block native drag-select/scroll while we own the gesture; allow it
+		# in SELECTING so native selection extends from the correctly placed
+		# caret, and in IDLE so taps/clicks settle normally.
+		if _gesture_state == "PENDING" or _gesture_state == "SCROLLING":
 			get_viewport().set_input_as_handled()
-		# else: long-press confirmed — let the motion through to CodeEdit
 
 func _on_code_edit_long_press() -> void:
-	if _drag_active and not _drag_is_scroll:
-		_drag_is_select = true
+	if _gesture_state == "PENDING":
+		_gesture_state = "SELECTING"
+		# The caret was already placed natively by the emulated mouse press at
+		# the correct tap point; start an empty selection there so the
+		# following emulated mouse motion extends it via native logic.
+		code_edit.select(code_edit.get_caret_line(), code_edit.get_caret_column(),
+				code_edit.get_caret_line(), code_edit.get_caret_column())
 
 func _scroll_tapped_caret(local_pos: Vector2) -> void:
 	if not code_edit.visible:
@@ -417,6 +448,20 @@ func _schedule_tapped_caret_scroll(frames: int) -> void:
 		code_edit.adjust_viewport_to_caret(0)
 
 ## Cut/Copy/Paste popup shown right after a long-press-drag selection ends.
+func _on_edit_menu_action(id: int) -> void:
+	if id == TextEdit.MENU_CUT or id == TextEdit.MENU_COPY or id == TextEdit.MENU_PASTE:
+		_reset_mobile_selection_mode(false)
+
+func _on_edit_menu_closed() -> void:
+	if _gesture_state == "IDLE":
+		_reset_mobile_selection_mode(true)
+
+func _reset_mobile_selection_mode(clear_selection: bool) -> void:
+	_gesture_state = "IDLE"
+	_long_press_timer.stop()
+	if clear_selection:
+		code_edit.deselect()
+
 func _show_selection_menu() -> void:
 	var menu := code_edit.get_menu()
 	var has_sel := code_edit.has_selection()
@@ -509,10 +554,22 @@ func _create_note() -> void:
 	_refresh_list()
 	vault_tree.select_note(fname)
 
+func _update_delete_controls(_column: int = 0) -> void:
+	var it := vault_tree.side_tree.get_selected()
+	var root_selected := it == null or it == vault_tree.side_tree.get_root()
+	vault_tree.tree_delete_btn.disabled = root_selected
+	var popup := toolbar.more_btn.get_popup()
+	var idx := popup.get_item_index(31)
+	if idx >= 0:
+		popup.set_item_disabled(idx, root_selected)
+
 ## Delete the current open note after confirmation.
 func _delete_current_note() -> void:
 	if GameManager.current_rel == "" or help_mode:
 		_flash("No note open")
+		return
+	if GameManager.current_rel == "_homepage.md":
+		_flash("⌂ The homepage cannot be deleted")
 		return
 	delete_node(GameManager.current_rel)
 
@@ -527,6 +584,9 @@ func _delete_selected_node() -> void:
 	var rel := vault_tree.node_rel(it)
 	if rel == "":
 		return
+	if rel == "_homepage.md":
+		_flash("⌂ The homepage cannot be deleted")
+		return
 	delete_node(rel)
 
 ## Determine if a path (folder or companion note) has child items in the vault.
@@ -535,6 +595,9 @@ func _has_children(rel: String) -> bool:
 
 ## Unified node/note/folder deletion. Automatically decides confirmation type based on tree structure.
 func delete_node(rel: String = "", keep_children: bool = false, confirm: bool = true) -> void:
+	if rel == "_homepage.md":
+		_flash("⌂ The homepage cannot be deleted")
+		return
 	if rel == "":
 		var it := vault_tree.selected_item()
 		if it != null and it.get_metadata(0) != null:
@@ -1175,7 +1238,8 @@ func _on_more_action(id: int) -> void:
 			_flush_save()
 			_flash("✓ Saved")
 		31:
-			_delete_current_note()
+			if not vault_tree.side_tree.get_selected() == vault_tree.side_tree.get_root():
+				_delete_current_note()
 		10:
 			_show_help()
 		11:

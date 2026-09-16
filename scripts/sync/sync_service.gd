@@ -3,6 +3,7 @@ extends Node
 
 signal peers_changed
 signal sync_done(peer_name: String, count: int)
+signal sync_changed(peer_name: String, count: int, changed_paths: Array, structure_changed: bool)
 signal sync_failed(reason: String)
 signal sync_pending
 
@@ -299,6 +300,7 @@ func _handle_message(conn: StreamPeerTCP, msg: Dictionary, st: Dictionary, peer_
 		if typeof(times) != TYPE_DICTIONARY:
 			times = {}
 		var count := 0
+		var changed_paths: Array[String] = []
 		var skipped := 0
 		var invalid := 0
 		var vault := GameManager.vault_abs()
@@ -356,6 +358,7 @@ func _handle_message(conn: StreamPeerTCP, msg: Dictionary, st: Dictionary, peer_
 				f.store_string(text)
 			f.close()
 			count += 1
+			changed_paths.append(name)
 			_sync_log("IN wrote path=%s bytes=%d" % [name, text.to_utf8_buffer().size()])
 		_sync_log("IN done peer=%s wrote=%d skipped=%d invalid=%d" % [str(msg.get("name", "peer")), count, skipped, invalid])
 		if count > 0:
@@ -363,7 +366,13 @@ func _handle_message(conn: StreamPeerTCP, msg: Dictionary, st: Dictionary, peer_
 		var peer_id := String(msg.get("id", ""))
 		if peer_id != "":
 			GameManager.add_trusted(peer_id)  # successfully paired+pushed → remember
+		var structural := false
+		for p in changed_paths:
+			if String(p).ends_with(".md") or String(p).get_base_dir() != "":
+				structural = true
+				break
 		sync_done.emit(str(msg.get("name", "peer")), count)
+		sync_changed.emit(str(msg.get("name", "peer")), count, changed_paths, structural)
 		return {"ok": true, "count": count}
 	return {"ok": false, "error": "unknown_cmd"}
 
@@ -424,17 +433,27 @@ func _receive_item(st: Dictionary, msg: Dictionary) -> void:
 		f.store_string(text)
 	f.close()
 	st["count"] = int(st.get("count", 0)) + 1
+	var changed: Array = st.get("changed_paths", [])
+	changed.append(name)
+	st["changed_paths"] = changed
 	_sync_log("IN wrote path=%s bytes=%d" % [name, text.to_utf8_buffer().size()])
 
 func _finish_stream(st: Dictionary) -> Dictionary:
 	var wrote := int(st.get("count", 0))
+	var changed_paths: Array = st.get("changed_paths", [])
 	var vault := GameManager.vault_abs()
 	if wrote > 0 and vault != "":
 		GameManager.scan_notes()
 	var peer_id := String(st.get("batch_peer_id", ""))
 	if peer_id != "" and vault != "":
 		GameManager.add_trusted(peer_id)
+	var structural := false
+	for p in changed_paths:
+		if String(p).ends_with(".md") or String(p).get_base_dir() != "":
+			structural = true
+			break
 	sync_done.emit(str(st.get("batch_peer_name", "peer")), wrote)
+	sync_changed.emit(str(st.get("batch_peer_name", "peer")), wrote, changed_paths, structural)
 	return {"ok": true, "count": wrote, "skipped": int(st.get("skipped", 0)), "invalid": int(st.get("invalid", 0))}
 
 func _send_json(conn: StreamPeerTCP, data: Dictionary) -> void:
@@ -553,6 +572,9 @@ func collect_notes(ts: Dictionary, vault: String, note_list: Array) -> Dictionar
 		var path := vault.path_join(name)
 		var f := FileAccess.open(path, FileAccess.READ)
 		if f:
+			if not name.ends_with(".md") and not name.ends_with(".json") and f.get_length() == 0:
+				f.close()
+				continue
 			files[name] = f.get_as_text() if name.ends_with(".md") or name.ends_with(".json") else Marshalls.raw_to_base64(f.get_buffer(f.get_length()))
 			times[name] = FileAccess.get_modified_time(path)
 			f.close()

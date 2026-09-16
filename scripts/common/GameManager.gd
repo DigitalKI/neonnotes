@@ -97,21 +97,26 @@ var tags := {}    # relative path -> Array[String] from front-matter "tags:"
 # vault/.neonnotes.json (synced like a note, tiny and human-readable)
 const ORDER_FILE := ".neonnotes.json"
 var order := {}
+var collapsed_folders: Dictionary = {}
 
 func load_order() -> void:
 	order = {}
+	collapsed_folders = {}
 	var f := FileAccess.open(vault_abs() + "/" + ORDER_FILE, FileAccess.READ)
 	if f == null:
 		return
 	var data = JSON.parse_string(f.get_as_text())
-	if typeof(data) == TYPE_DICTIONARY and typeof(data.get("order", {})) == TYPE_DICTIONARY:
-		order = data["order"]
+	if typeof(data) == TYPE_DICTIONARY:
+		if typeof(data.get("order", {})) == TYPE_DICTIONARY:
+			order = data["order"]
+		if typeof(data.get("collapsed", {})) == TYPE_DICTIONARY:
+			collapsed_folders = data["collapsed"]
 
 func save_order() -> void:
 	var f := FileAccess.open(vault_abs() + "/" + ORDER_FILE, FileAccess.WRITE)
 	if f == null:
 		return
-	f.store_string(JSON.stringify({"order": order}, "  "))
+	f.store_string(JSON.stringify({"order": order, "collapsed": collapsed_folders}, "  "))
 	f.close()
 
 func scan_notes() -> void:
