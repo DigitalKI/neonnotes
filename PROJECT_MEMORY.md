@@ -5,7 +5,7 @@
 > updated at the **end**, so context, decisions, and direction survive across
 > conversations. Keep it current — a stale memory file is worse than none.
 
-_Last updated: 2026-09-15 (dead-code cleanup + smoke driver extraction) · Godot 4.7 · renderer: gl_compatibility_
+_Last updated: 2026-09-15 (scene-authored view/edit content padding) · Godot 4.7 · renderer: gl_compatibility_
 
 > ⚠️ **Path note:** the saved global memory says `/home/toshiwo/www/neonnotes`
 > but the project actually lives at **`/home/toshiwo/Projects/Godot/neonnotes`**.
@@ -29,6 +29,8 @@ _Last updated: 2026-09-15 (dead-code cleanup + smoke driver extraction) · Godot
   folder via 📂 Vault). No proprietary DB — vault is grep/rsync/editor friendly.
 
 ## 2. What has been done (work log)
+
+- **2026-09-15 — scene-authored view/edit content padding**: moved the 14px inner padding out of the runtime theme code and into dedicated `PreviewPadding` and `EditPadding` MarginContainers in `scenes/main/Main.tscn`. The ScrollContainer and its scrollbar remain flush with the content panel edge; edit mode uses the parallel padded container. Desktop Linux/Windows mouse input bypasses the mobile drag-scroll gesture so native text selection is preserved.
 
 _Chronological, newest last._
 

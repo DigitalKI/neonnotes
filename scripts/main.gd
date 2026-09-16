@@ -33,6 +33,7 @@ func _load_help_doc() -> String:
 @onready var note_title: Label = toolbar.note_title
 @onready var content_host: ScrollContainer = %ContentHost
 @onready var content_body: VBoxContainer = %ContentBody
+@onready var edit_padding: MarginContainer = %EditPadding
 @onready var settings_page: MarginContainer = %SettingsPage
 @onready var settings_component: SettingsComponent = %SettingsPage.get_node("VerticalContainer")
 @onready var content_panel: PanelContainer = %Content
@@ -160,7 +161,7 @@ func _refresh_open_note_after_sync() -> void:
 	if latest == code_edit.text:
 		return
 	code_edit.text = latest
-	_render_preview()
+	_render_preview(true)  # keep reading position across the re-render
 	status_bar.flash("↻ Updated " + GameManager.current_rel)
 
 func _prepare_smoke_vault() -> void:
@@ -208,7 +209,7 @@ func _build_dynamic_ui() -> void:
 	_long_press_timer.wait_time = 0.8
 	_long_press_timer.timeout.connect(_on_code_edit_long_press)
 	add_child(_long_press_timer)
-	content_panel.add_child(code_edit)
+	edit_padding.add_child(code_edit)
 
 	# autosave: immediate — every keystroke/paste persists (no debounce);
 	# the Timer remains as a safety net for programmatic edits
@@ -341,6 +342,11 @@ func _build_dynamic_ui() -> void:
 ## drag. Once a long-press is confirmed we stop swallowing so CodeEdit's
 ## normal selection-drag takes back over from the still-held pointer.
 func _on_code_edit_gui_input(event: InputEvent) -> void:
+	# Desktop editors must retain native mouse selection. The touch gesture
+	# below is only for mobile; otherwise selecting text can accidentally turn
+	# into drag-to-scroll.
+	if OS.get_name() == "Linux" or OS.get_name() == "Windows":
+		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
 			_drag_active = true
@@ -672,6 +678,7 @@ func _scrub_order(old_rels: Array) -> void:
 
 func _set_mode() -> void:
 	code_edit.visible = source_mode
+	edit_padding.visible = source_mode
 	content_host.visible = not source_mode
 	toolbar.mode_btn.text = "✎ Edit" if not source_mode else "◈ Preview"
 	if not source_mode:
@@ -690,6 +697,7 @@ func _show_help() -> void:
 	autosave_timer.stop()
 	source_mode = false
 	code_edit.visible = false
+	edit_padding.visible = false
 	content_host.visible = true
 	graph_view.visible = false
 	note_title.text = "Style Guide"
@@ -697,18 +705,22 @@ func _show_help() -> void:
 	PreviewBuilder.build(MarkdownParser.parse(_load_help_doc()), content_body)
 	content_host.scroll_vertical = 0
 
-func _render_preview() -> void:
+func _render_preview(preserve_scroll := false) -> void:
 	if settings_mode:
 		_show_settings()
 		return
 	code_edit.visible = false
+	edit_padding.visible = false
 	content_host.visible = true
 	graph_view.visible = false
+	var prev_scroll: float = content_host.scroll_vertical if preserve_scroll else 0.0
 	var doc := MarkdownParser.parse(code_edit.text)
 	# per-note theme: front-matter  theme: <Palette>
 	PreviewBuilder.pal_override = GameManager.PALETTES.get(str(doc.get("meta", {}).get("theme", "")), {})
 	PreviewBuilder.build(doc, content_body)
-	content_host.scroll_vertical = 0
+	# Fresh renders (mode switch/new note) drop to the top; a sync re-render keeps
+	# the reader's scroll offset instead of jumping them.
+	content_host.scroll_vertical = prev_scroll
 
 func _close_settings() -> void:
 	settings_mode = false
@@ -723,6 +735,7 @@ func _toggle_settings() -> void:
 	settings_mode = true
 	graph_view.visible = false
 	code_edit.visible = false
+	edit_padding.visible = false
 	content_host.visible = false
 	settings_page.visible = true
 	_show_settings()
@@ -970,6 +983,7 @@ func _toggle_graph() -> void:
 		return
 	_flush_save()
 	code_edit.visible = false
+	edit_padding.visible = false
 	content_host.visible = false
 	graph_view.open(GameManager.current_rel)
 

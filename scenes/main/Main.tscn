@@ -7,7 +7,7 @@
 [ext_resource type="PackedScene" path="res://scenes/components/toolbar.tscn" id="5_toolbar"]
 [ext_resource type="PackedScene" uid="uid://cj1ama86pqcoo" path="res://scenes/components/status_bar.tscn" id="6_status"]
 [ext_resource type="PackedScene" path="res://scenes/components/side_panel.tscn" id="7_side"]
-[ext_resource type="PackedScene" path="res://scenes/components/settings_page.tscn" id="8_settings"]
+[ext_resource type="PackedScene" uid="uid://dsdpg5sa7q611" path="res://scenes/components/settings_page.tscn" id="8_settings"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMat_crt"]
 shader = ExtResource("3_crt")
@@ -86,11 +86,27 @@ size_flags_vertical = 3
 follow_focus = true
 horizontal_scroll_mode = 0
 
-[node name="ContentBody" type="VBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentHost" unique_id=1712346518]
+[node name="PreviewPadding" type="MarginContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentHost" unique_id=1712346517]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/margin_left = 14
+theme_override_constants/margin_top = 14
+theme_override_constants/margin_right = 14
+theme_override_constants/margin_bottom = 14
+
+[node name="ContentBody" type="VBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentHost/PreviewPadding" unique_id=1712346518]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 10
+
+[node name="EditPadding" type="MarginContainer" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=1712346519]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
 
 [node name="SettingsPage" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=740001001 instance=ExtResource("8_settings")]
 unique_name_in_owner = true
