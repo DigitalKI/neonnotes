@@ -151,14 +151,17 @@ func _refresh_list() -> void:
 		layout_component.content.visible = not mobile_drawer_was_open
 
 func _refresh_open_note_after_sync() -> void:
-	if help_mode or GameManager.current_rel == "" or not code_edit.visible:
+	# Auto-refresh the open note when it's in VIEW (preview) mode, so a sync that
+	# pulled a newer copy re-renders it. In edit mode we never clobber the user's
+	# in-progress typing — their edits take priority until they leave edit mode.
+	if help_mode or GameManager.current_rel == "" or source_mode:
 		return
 	var latest := GameManager.read_note(GameManager.current_rel)
-	if latest != code_edit.text:
-		code_edit.text = latest
-		if not source_mode:
-			_render_preview()
-		status_bar.flash("↻ Updated " + GameManager.current_rel)
+	if latest == code_edit.text:
+		return
+	code_edit.text = latest
+	_render_preview()
+	status_bar.flash("↻ Updated " + GameManager.current_rel)
 
 func _prepare_smoke_vault() -> void:
 	# Smoke tests must never read or persist changes to the user's real vault.

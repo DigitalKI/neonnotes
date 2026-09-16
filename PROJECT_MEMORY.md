@@ -70,6 +70,12 @@ _Chronological, newest last._
   `_inline_legacy` exists); all inline rendering now goes through
   `MarkdownParser.compute_inline()` spans.
 - **2026-09-15 — high-resolution image exports**: PNG/GIF exports now render into a dedicated SubViewport at 2× the visible width (capped at 2400 px) instead of capturing screen-width content. The exporter adds an explicit background ColorRect using the active note palette, preserving themed backgrounds. Added native JPEG export at quality 95% as an optional menu item; PNG remains the lossless default for text and UI. Upscaling is done uniformly with a `Control.scale` transform over the whole content subtree (not by widening the viewport), so fonts, spacing and heights all scale together with no proportion drift; text is re-rasterized at the higher scale so it stays crisp. Note: `SubViewport.content_scale_*` is not available in this Godot 4.7 build (that API is Window-only), so the Control.scale approach is used instead. Export base width is now driven by a `width_cb` callback that returns the **logical content-pane width** (`content_panel.size.x`), not the full physical window width — this keeps exported proportions identical to the on-screen preview (it excludes the sidebar and is independent of the window `ui_scale` glob`al content_scale_factor). The background is sized to the full physical pixel dimensions of the scaled viewport so it fills the whole image. Earlier bugs fixed along the way: scaling the width without fonts distorted proportions (now uniform Control.scale), and the background ColorRect under-filling because it sat outside the scaled group.
+- **2026-09-15 — export cleanup: removed JPEG, deterministic GIF**: the JPEG export (added earlier as an experiment) was removed — it is lossy and unsuited to NeonNotes text/UI/chart content; the Export menu is PNG (lossless) + GIF (animated) again. GIF export no longer captures a fixed 24 frames at real frame timing. `ChartView` now exposes `ANIMATION_DURATION` (0.9s) and `set_animation_time(seconds)`, and the exporter drives every chart deterministically at a fixed 30 FPS over the real animation duration, then passes the per-frame `delay_cs` to `GifWriter`. Investigated Godot native `MovieWriter` for MP4: this build only registers `MovieWriterMJPEG` (AVI) and `MovieWriterPNGWAV` (PNG) — no MP4 writer, and the AVI path segfaults in headless mode. MP4/social-video was deferred; GIF remains the animated export (needs bundled FFmpeg or a GDExtension for MP4 later).
+  - **2026-09-15 — GIF export: duration model + worker thread**: GIF now renders at 1x (lightweight share format; PNG keeps 2x) and captures a deterministic timeline over the LONGEST animation present, floored at `MIN_EXPORT_DURATION = 1.0s` so exports are never a too-fast flash. Duration = longest animated element present, computed from real code: `ChartView.ANIMATION_DURATION` = 0.9s; `FlickerFx.ANIMATION_DURATION` = 5.8/1.37 ≈ 4.23s (alpha-dip period, the longest effect); `GlitchFx.ANIMATION_DURATION` = 2.4s (phase-reset period). Text effects are detected via the rendered `[flicker]`/`[glitch]` bbcode. Capture is paced by real time (`create_timer(1/fps)`) so TIME-driven text/CRT effects play at on-screen speed, not faster.
+  - **2026-09-15 — content-aware export size + UI padding**: exports now auto-detect width from content — `Exporter._content_width()` measures the widest rendered line via `RichTextLabel.get_content_width()` and holds it open for full-width elements (charts/images), clamping to `[EXPORT_MIN_WIDTH=320, base_w]`, so narrow notes don't produce a sea of empty background. Exported content is padded (`EXPORT_PAD=18` around a MarginContainer) so text never touches image edges. In-app, the content pane (both CodeEdit editor and preview column) now gets a minimal inner padding (`CONTENT_PAD=14`) via a dedicated padded StyleBoxFlat in `ThemeComponent.apply()`; the sidebar keeps its own stylebox. GIF encoding runs on a worker `Thread` while the main thread yields frames — no more UI freeze on long exports. Project directive added to `AGENTS.md`: always use worker threads for intense calculations and yield frames instead of blocking on `wait_to_finish()` synchronously.
+  - **2026-09-15 — mobile freeze fix (sync I/O off main thread)**: intermittent ~1s freezes (esp. mobile) were caused by `SyncService.collect_notes()` reading the whole vault — every note + all media base64-encoded — synchronously on the UI thread every auto-sync (~every 4s). Collection now runs on the existing `_sync_worker` Thread with main-thread snapshots (tombstones, vault path, note list) so the worker never touches the `GameManager` node; `auto_sync()` only builds the cheap in-memory target list. Manual dialog send updated to the new signature (still main-thread, one-shot). Secondary candidate (falls out of scope for now): `_flush_save()` does a full `MarkdownParser.parse()` per keystroke just to check the front-matter title — a lightweight front-matter read would remove that per-keystroke cost on large notes.
+  - **2026-09-15 — sync guard: never let an empty binary overwrite a good file**: after a sync, referenced images could stop rendering because sync wrote 0-byte media files (e.g. `media/primary-*.png` became 0 bytes), so `Image.load_from_file()` fails and the preview shows the placeholder. Root cause: a truncated/empty base64 payload was written over a valid local file. Both receive paths (`_receive_item` stream path and the legacy `push` handler) now decode the binary first and SKIP overwriting when the payload is empty AND a local file already exists (LWW protection). This prevents recurrence; it does not repair already-broken files (those need a re-embed/backup). Note: the earlier `collect_notes()` worker move did not alter transfer bytes — content is identical; this was a pre-existing sync-data-integrity gap surfaced by that sync.
+  - **2026-09-15 — sync refresh in view mode**: the open note now re-renders from a freshly synced copy when it's in VIEW (preview) mode. Previously `_refresh_open_note_after_sync()` bailed on `not code_edit.visible` (which is always true in view mode) so the preview never updated after a sync pull. Guard is now `source_mode` — refresh only outside edit mode so in-progress typing is never clobbered; in view mode it swaps in the latest text and re-renders.
 
 - **2026-09-15 — optional CRT FX on exports**: added a persistent `GameManager.export_crt` toggle (stored in `settings.cfg` under `export/crt`, default ON, set via `set_export_crt()`). The toggle is exposed in the Settings page (Settings → "Apply CRT FX on export" CheckButton, stored in `settings.cfg` under `export/crt`, default ON, wired via `SettingsComponent`), and there is also a checkable "🖥 CRT FX on export" entry in the Export menu that flips it. When enabled, the exporter composites a full-viewport ColorRect using the live CRT `ShaderMaterial` (fetched from the main `CrtOverlay` via `Exporter.crt_material_cb`, with a shader-defaults fallback), so scanlines/grille/curve/wobble match the app in exported PNG/JPEG/GIF. When disabled, exports are clean. Save PNG/JPEG/GIF now also runs `Share.save_to_gallery()` on all platforms, so desktop copies land in the OS `Pictures/NeonNotes` folder (Android registers them in the device media library) while the vault copy is still kept for portability. The export viewport uses a clean background (no CRT overlay); text/UI exports remain readable.
 
@@ -116,12 +122,12 @@ _Chronological, newest last._
 
 - **2026-09-14 — quote highlighting + external links**:
   - Quote lines now highlight the `>` marker and quoted source text in edit mode;
-    callout headers continue through the same quote path.
+	callout headers continue through the same quote path.
   - Help documents Obsidian callout creation explicitly (`> [!info] Title`,
-    followed by `>` body lines and supported types).
+	followed by `>` body lines and supported types).
   - Preview supports Markdown external links `[label](https://...)` and bare
-    `https://...` URLs. They render underlined and use `OS.shell_open()` for
-    the platform default browser; wiki-links remain routed to NeonNotes.
+	`https://...` URLs. They render underlined and use `OS.shell_open()` for
+	the platform default browser; wiki-links remain routed to NeonNotes.
 
 - **2026-09-14 — Help as external markdown (user feedback)**: HELP_DOC const removed
   from main.gd; Help is now `res://docs/help.md`, loaded by `_load_help_doc()`
@@ -132,57 +138,57 @@ _Chronological, newest last._
 
 - **2026-09-14 — highlight/round-2 (user feedback)**:
   - **Numbered lists keep source numbers**: parser stores `numbers` per item;
-    renderer uses them (previously renumbered from 1, so `3.`/`7.` rendered as
-    `1.`/`2.` — the reported "weird" behavior).
+	renderer uses them (previously renumbered from 1, so `3.`/`7.` rendered as
+	`1.`/`2.` — the reported "weird" behavior).
   - **Highlighter: chart + table + fence awareness**: fence-state scan above
-    each line; ```chart rows tint their `key:` prefix, plain fenced bodies
-    render dim, table rows tint pipes and dash-separator rows entirely.
-    Inline spans are skipped inside fences (code bodies stay literal).
+	each line; ```chart rows tint their `key:` prefix, plain fenced bodies
+	render dim, table rows tint pipes and dash-separator rows entirely.
+	Inline spans are skipped inside fences (code bodies stay literal).
   - **Renderer bug fixed**: `_inline` ran bold/italic regexes BEFORE the
-    code-span regex, so `*` inside backticks was eaten (`*s1*`-style false
-    italics inside code). Code spans are now extracted into placeholders
-    (own sentinels U+E002/E003) first and their content stays fully literal;
-    placeholders restored after all other transforms.
+	code-span regex, so `*` inside backticks was eaten (`*s1*`-style false
+	italics inside code). Code spans are now extracted into placeholders
+	(own sentinels U+E002/E003) first and their content stays fully literal;
+	placeholders restored after all other transforms.
   - **Help page rewritten**: "Formatting" section shows every construct
-    RENDERED then its ESCAPED source form (backslash escapes shown literally
-    inside code spans); showcases multiline quotes, both callouts, and a
-    sample table. Smoke visual block also saves /tmp/neon_help.png.
+	RENDERED then its ESCAPED source form (backslash escapes shown literally
+	inside code spans); showcases multiline quotes, both callouts, and a
+	sample table. Smoke visual block also saves /tmp/neon_help.png.
 
 - **2026-09-14 — shared Markdown parser (Phase 0+1 of the unified-parser plan)**:
   - **Motivation**: highlighter and preview interpreted markdown independently.
-    Adopted the CommonMark/cmark/Markdig pattern: one block phase + one
-    character-based inline phase; both views consume one parse.
+	Adopted the CommonMark/cmark/Markdig pattern: one block phase + one
+	character-based inline phase; both views consume one parse.
   - **`MarkdownParser.SpanType` enum + `compute_inline(text)`** (in
-    markdown_parser.gd, no new class_name → no editor rescan needed): single
-    left-to-right scan emitting semantic spans (EMPHASIS/STRONG/CODE_SPAN/
-    STRIKE/HIGHLIGHT/GLITCH/FLICKER/WIKILINK/ESCAPE) with `start/length` for
-    the WHOLE construct (incl. markers) + `content_start/content_length`
-    inner range + `target` for wiki-links. Unmatched openers stay literal.
+	markdown_parser.gd, no new class_name → no editor rescan needed): single
+	left-to-right scan emitting semantic spans (EMPHASIS/STRONG/CODE_SPAN/
+	STRIKE/HIGHLIGHT/GLITCH/FLICKER/WIKILINK/ESCAPE) with `start/length` for
+	the WHOLE construct (incl. markers) + `content_start/content_length`
+	inner range + `target` for wiki-links. Unmatched openers stay literal.
   - **`NeonHighlighter` rewritten** to consume `compute_inline` (no more
-    `_mark` token searches — bugs like highlighting `**` inside code/escaped
-    text are structurally gone). Delimiter+content colored per construct.
+	`_mark` token searches — bugs like highlighting `**` inside code/escaped
+	text are structurally gone). Delimiter+content colored per construct.
   - **Multiline block quotes**: consecutive `>` lines collapse into ONE quote
-    block (text joined with \n). `PreviewBuilder._quote_block` renders one
-    RichTextLabel per line (❝ styled).
+	block (text joined with \n). `PreviewBuilder._quote_block` renders one
+	RichTextLabel per line (❝ styled).
   - **Obsidian callouts copied**: `> [!type] optional title` on the first
-    quote line → `{"type":"callout","kind","title","fold","text"}` block.
-    Types: note/info/tip/warning/danger/success/quote (unknown → note, like
-    Obsidian). Fold markers `+`/`-` parsed into `fold` but NOT yet rendered.
-    Rendered by `PreviewBuilder._callout_block` (colored PanelContainer).
+	quote line → `{"type":"callout","kind","title","fold","text"}` block.
+	Types: note/info/tip/warning/danger/success/quote (unknown → note, like
+	Obsidian). Fold markers `+`/`-` parsed into `fold` but NOT yet rendered.
+	Rendered by `PreviewBuilder._callout_block` (colored PanelContainer).
   - **List hanging indent**: `PreviewBuilder._list_block` renders each item as
-    bullet-label + expanding item RichTextLabel → wrapped lines align under
-    the text, not under the bullet.
+	bullet-label + expanding item RichTextLabel → wrapped lines align under
+	the text, not under the bullet.
   - **Smoke test**: non-headless runs render `features.md` (callout+quote+list)
-    and save `/tmp/neon_features.png` for visual checks; verified correct.
+	and save `/tmp/neon_features.png` for visual checks; verified correct.
   - **Unit tests**: span agreement matrix (emphasis/strong/escape/code-hides-
-    emphasis/wiki target/unmatched opener) + multiline quote + callout blocks.
+	emphasis/wiki target/unmatched opener) + multiline quote + callout blocks.
   - **Phase 1 known limits (by design, for later phases)**: `compute_inline`
-    pairs the nearest same-marker close (no full CommonMark delimiter stack:
-    `**bold *nested***` colors as STRONG only, inner emphasis not tinted);
-    nested callouts (`>>`) not yet parsed; fold markers not interactive.
+	pairs the nearest same-marker close (no full CommonMark delimiter stack:
+	`**bold *nested***` colors as STRONG only, inner emphasis not tinted);
+	nested callouts (`>>`) not yet parsed; fold markers not interactive.
   - **Next**: Phase 4 — PreviewBuilder consumes spans directly (remove its own
-    `_inline` regex chain + escape sentinels); block-level spans for
-    headings/fences; per-block cache keyed by content hash for efficiency.
+	`_inline` regex chain + escape sentinels); block-level spans for
+	headings/fences; per-block cache keyed by content hash for efficiency.
 
 - **v2** — Rewrite: authored `Main.tscn` UI shell, `main.gd` wiring. Sidebar
   vault **tree** (folder hierarchy), front-matter title peek, notes as plain
@@ -223,63 +229,63 @@ _Chronological, newest last._
 - **2026-09-12 — v3 batch 1** (from phone-vault review; synced via ADB with the
   phone at `com.neonnotes.app/files/vault`):
   - **Sync bug fix**: `PacketPeerUDP.bind()` returns Error; old `if not _udp.bind()`
-    treated success as failure and killed discovery everywhere. Now `!= OK`.
+	treated success as failure and killed discovery everywhere. Now `!= OK`.
   - **Device identity**: persistent 4-word code (65-word list, ~17.8M space) in
-    `settings.cfg` (`GameManager.device_id`); broadcast/pair/push carry it;
-    successfully paired peers are stored in `GameManager.trusted` and
-    reconnect PIN-less; peer ID shown in SyncDialog.
+	`settings.cfg` (`GameManager.device_id`); broadcast/pair/push carry it;
+	successfully paired peers are stored in `GameManager.trusted` and
+	reconnect PIN-less; peer ID shown in SyncDialog.
   - **Sync semantics**: last-writer-wins via file mtimes (`times` dict in push);
-    subfolder paths now allowed (exports/ excluded); no conflict backups.
+	subfolder paths now allowed (exports/ excluded); no conflict backups.
   - **Auto-sync**: main.gd owns a `SyncService` instance; `_flush_save` →
-    `note_saved()` → debounced 15 s push to all visible trusted peers;
-    periodic 15 s timer while discovery is on.
+	`note_saved()` → debounced 15 s push to all visible trusted peers;
+	periodic 15 s timer while discovery is on.
   - **Autosave**: immediate save on every keystroke/paste (`_flush_save` in
-    `_on_text_changed`); 0.3 s timer is only a safety net.
+	`_on_text_changed`); 0.3 s timer is only a safety net.
   - **New-note template**: minimal — front-matter title + `# heading` only.
   - **Exports folder**: all exports go to `vault/exports/` (`GameManager.EXPORTS_SUBDIR`),
-    hidden from the tree scan.
+	hidden from the tree scan.
   - **Delete note**: "⋮ → 🗑 Delete Note…" with ConfirmationDialog ( permanent).
   - **Tree drag & drop**: `set_drag_forwarding` on side_tree; drop into folder
-    rows/between rows; auto-rename on collision (`name-2.md`); wiki-links
-    rewritten vault-wide on move (`_rewrite_links`, case-insensitive); custom
+	rows/between rows; auto-rename on collision (`name-2.md`); wiki-links
+	rewritten vault-wide on move (`_rewrite_links`, case-insensitive); custom
 	order persisted in `vault/.neonnotes.json` (`{"order": {dir: [files]}}`,
-    synced, applied in `_ordered_notes`).
+	synced, applied in `_ordered_notes`).
   - **Slash menu**: typing `/` alone on a line pops a snippet menu (headings,
-    bold/italic, effects, lists, quote, code, table, chart, image).
+	bold/italic, effects, lists, quote, code, table, chart, image).
   - **Image embeds**: `![alt](vault-relative path)` full-line block; empty
-    `![]( )` renders a placeholder button; clicking in preview opens a
-    FileDialog, copies the image to `vault/media/`, rewrites the md, saves.
-    Clicking an existing image replaces it. (`PreviewBuilder.image_cb`.)
+	`![]( )` renders a placeholder button; clicking in preview opens a
+	FileDialog, copies the image to `vault/media/`, rewrites the md, saves.
+	Clicking an existing image replaces it. (`PreviewBuilder.image_cb`.)
   - **Escapes**: `\x` renders literal x in preview (`_protect_escapes` /
-    `_restore_escapes` with U+E000/E001 sentinels); Help copy updated.
+	`_restore_escapes` with U+E000/E001 sentinels); Help copy updated.
   - **Tags**: front-matter `tags: a, b` parsed in `GameManager._read_tags`;
-    tag chip bar above the tree filters notes (`active_tag`).
+	tag chip bar above the tree filters notes (`active_tag`).
   - **Android keyboard**: `_process` polls `virtual_keyboard_get_height()` and
-    re-applies safe-area insets so the editor resizes and the cursor stays
-    visible. Smoke test extended (tags/image/escape/device checks).
+	re-applies safe-area insets so the editor resizes and the cursor stays
+	visible. Smoke test extended (tags/image/escape/device checks).
 - **2026-09-12 — v3 batch 1 fixes (user feedback)**:
   - **Wiki-links were silently broken in preview**: `escape()` only masked `[`
-    so `[[x]]` ended `]]` while the regex expected `[lb][lb]` — never matched.
-    `escape()` now single-pass masks both brackets (`[lb]`/`[rb]`); regex
-    updated; smoke assertion added. (Never worked in v2 either — masked by
-    manual testing gaps.)
+	so `[[x]]` ended `]]` while the regex expected `[lb][lb]` — never matched.
+	`escape()` now single-pass masks both brackets (`[lb]`/`[rb]`); regex
+	updated; smoke assertion added. (Never worked in v2 either — masked by
+	manual testing gaps.)
   - **Slash menu**: removed nonexistent `PopupMenu.focus_by_index` call.
   - **⋮ menu always visible** on desktop; edit mode word-wraps always, wider
-    v-scrollbar, `context_menu_enabled` for cut/copy/paste.
+	v-scrollbar, `context_menu_enabled` for cut/copy/paste.
   - **Highlight `==x==`** readable: dark bold text on full-opacity accent3 bar.
   - **Delete** now auto-opens the closest remaining note (same-folder
-    neighbour in tree order, else first note).
+	neighbour in tree order, else first note).
 - **2026-09-12 — v3 batch 1 fixes, round 2 (user feedback)**:
   - **Newlines in preview**: parser joined paragraph lines with `" "` — single
 	Enter became a space. Now `"\n"` (blank line still splits paragraphs);
-    HTML exporter emits `<br>` for in-paragraph newlines.
+	HTML exporter emits `<br>` for in-paragraph newlines.
   - **Wiki-link labels invisible**: link BBCode used the alias group as label,
 	so `[[target]]` rendered empty (the "disappearing links" + lone ".").
-    Alias form and plain form are now two separate subs; plain falls back to
-    the target name.
+	Alias form and plain form are now two separate subs; plain falls back to
+	the target name.
   - **Slash menu**: caret placed inside formatting chars with the placeholder
-    (`text`) pre-selected; multi-line snippets put caret on first inner line.
-    Menu rebuilt as a 2-column `ItemList` in a PopupPanel (PopupMenu can't do
+	(`text`) pre-selected; multi-line snippets put caret on first inner line.
+	Menu rebuilt as a 2-column `ItemList` in a PopupPanel (PopupMenu can't do
     columns); flips above the caret when the keyboard/screen edge is near.
   - **Image embed flow fixed**: slash snippet `![]( )` (space) never matched
     the `]()` updater → regex now matches any empty embed; and `_flush_save`
@@ -287,25 +293,25 @@ _Chronological, newest last._
     picker now writes the note directly + triggers `note_saved()` auto-sync.
     Full smoke test for the pick→copy→md-update→save flow.
   - **Sync error flood**: main's SyncService polled `_ensure_server()` every
-    frame even when sync was off, emitting `sync_failed` per frame. TCP server
-    now only binds while discovery is active, released on stop; bind errors
-    emitted once per failure episode.
+	frame even when sync was off, emitting `sync_failed` per frame. TCP server
+	now only binds while discovery is active, released on stop; bind errors
+	emitted once per failure episode.
   - **Sync dialog fit**: size clamped to 92% width / 70% height of screen
-    (fixed 720×460 overflowed portrait phones).
+	(fixed 720×460 overflowed portrait phones).
   - **Help guide** fully updated: 3 chart types, image embeds, tags, `theme:`,
-    slash menu, drag&drop, trust-based sync, exports folder.
+	slash menu, drag&drop, trust-based sync, exports folder.
   - **Tree overhaul (folder-as-note)**:
-    - every folder without a same-named `folder.md` gets one auto-created on
-      scan (`GameManager._ensure_folder_notes`, FOLDER_NOTE_TEMPLATE);
-    - companion notes are never shown twice (root pass skips a note whose
-      folder row exists);
-    - dragging a merged folder row moves the FOLDER (children + companion +
-      link rewrite), not just the .md;
-    - dropping ON a plain note converts it into folder+note (container);
-    - folder→folder drop = move inside; above/below edges reorder;
-    - empty folders pruned bottom-up after moves (`_prune_empty_dirs`);
-    - folder link rewrite rescans first (stale `notes` list bug: moved
-      children's links were never updated);
+	- every folder without a same-named `folder.md` gets one auto-created on
+	  scan (`GameManager._ensure_folder_notes`, FOLDER_NOTE_TEMPLATE);
+	- companion notes are never shown twice (root pass skips a note whose
+	  folder row exists);
+	- dragging a merged folder row moves the FOLDER (children + companion +
+	  link rewrite), not just the .md;
+	- dropping ON a plain note converts it into folder+note (container);
+	- folder→folder drop = move inside; above/below edges reorder;
+	- empty folders pruned bottom-up after moves (`_prune_empty_dirs`);
+	- folder link rewrite rescans first (stale `notes` list bug: moved
+	  children's links were never updated);
     - folder-into-itself/descendant guarded;
     - drop feedback: status bar shows `MOVE INTO/PLACE ABOVE/PLACE BELOW › target`,
       hovered row tinted (bright = inside, light = above/below) — Android has
@@ -359,20 +365,20 @@ _Chronological, newest last._
     OWN `%` bindings and expose typed properties; Main.tscn instances them and
     flags the instance node `unique_name_in_owner = true` so `%Toolbar` /
     `%StatusBar` still resolve from main.gd. `flash()` moved into
-    StatusBarComponent; main's `_flash` just delegates.
+	StatusBarComponent; main's `_flash` just delegates.
   - **Step 3: SidePanel.tscn + VaultTreeComponent** (`vault_tree_component.gd`
-    is the SidePanel root, extends PanelContainer): owns tag chips, tree build
-    (folder-as-note merge), drag & drop + drop hints, ordering, move/rename,
-    wiki-link rewrite, empty-folder pruning, node_rel/has_children/selection.
-    Signals: `note_requested(fname)`, `delete_requested`; injected
-    `save_cb` (_flush_save) + `flash_cb`. It registers drag forwarding ONCE
-    (kept from refresh-time registration) and handles NOTIFICATION_DRAG_END
-    itself; main keeps WM_CLOSE_REQUEST. main.gd 1419 → 968 lines; Main.tscn
-    is now mostly a composition root. Backlinks panel/box + palette/vault/sync
-    buttons are exposed as component properties, logic still in main (until
-    steps 4/5). All 41 checks pass at each commit (commits 41c2c2f, b003206).
+	is the SidePanel root, extends PanelContainer): owns tag chips, tree build
+	(folder-as-note merge), drag & drop + drop hints, ordering, move/rename,
+	wiki-link rewrite, empty-folder pruning, node_rel/has_children/selection.
+	Signals: `note_requested(fname)`, `delete_requested`; injected
+	`save_cb` (_flush_save) + `flash_cb`. It registers drag forwarding ONCE
+	(kept from refresh-time registration) and handles NOTIFICATION_DRAG_END
+	itself; main keeps WM_CLOSE_REQUEST. main.gd 1419 → 968 lines; Main.tscn
+	is now mostly a composition root. Backlinks panel/box + palette/vault/sync
+	buttons are exposed as component properties, logic still in main (until
+	steps 4/5). All 41 checks pass at each commit (commits 41c2c2f, b003206).
   - **Remaining**: step 4 = DeleteService + SaveService; step 5 =
-    NoteEditorController + Content.tscn (content subtree still in Main.tscn).
+	NoteEditorController + Content.tscn (content subtree still in Main.tscn).
   - **2026-09-13 — image picker Android + responsive styling**: image embeds now
   use Godot's native Storage Access Framework picker on Android (which can read
   user-selected shared-storage images despite the app sandbox). The in-app

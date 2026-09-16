@@ -1,6 +1,11 @@
 class_name GlitchFx extends RichTextEffect
 
 var bbcode := "glitch"
+
+## Full loop period of the glitch effect in seconds. The offset/burst phase
+## resets on `fmod(_time, 2.4)` → 2.4s, the longest repeating event (color burst
+## is 31/17≈1.82s, dropout 17/9≈1.89s). Used by the exporter for a complete cycle.
+const ANIMATION_DURATION := 2.4
 var _time := 0.0
 
 func _process_custom_fx(char_fx: CharFXTransform) -> bool:

@@ -10,6 +10,10 @@ var color2: Color = Color("#25e7ff")
 var text_color: Color = Color("#e8f7ff")
 var _progress := 0.0
 var _running := false
+## Duration of the chart intro animation in seconds. The exporter uses this to
+## capture a deterministic timeline (exact length, fixed FPS) instead of a fixed
+## frame count at real frame timing.
+const ANIMATION_DURATION := 0.9
 
 func _ready() -> void:
 	custom_minimum_size.y = 200.0 if compact else 280.0
@@ -19,6 +23,14 @@ func start() -> void:
 	_progress = 0.0
 	_running = true
 	set_process(true)
+	queue_redraw()
+
+## Drive the animation to an explicit time in seconds (deterministic export).
+## Stops real-time processing so the exporter controls the timeline exactly.
+func set_animation_time(seconds: float) -> void:
+	_running = false
+	set_process(false)
+	_progress = clampf(seconds / ANIMATION_DURATION, 0.0, 1.0)
 	queue_redraw()
 
 func _process(delta: float) -> void:

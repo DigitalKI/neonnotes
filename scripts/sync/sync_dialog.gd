@@ -118,7 +118,7 @@ func _on_send() -> void:
 	var p: Dictionary = _service.peers.get(ip, {})
 	var port := int(p.get("tcp", SyncService.TCP_PORT))
 	var peer_name := str(p.get("name", ip))
-	var files: Dictionary = _service.collect_notes()["files"]
+	var files: Dictionary = _service.collect_notes({}, GameManager.vault_abs(), GameManager.notes)["files"]
 	if files.is_empty():
 		_status_label.text = "No notes to send."
 		return

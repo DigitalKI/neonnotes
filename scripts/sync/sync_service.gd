@@ -339,6 +339,12 @@ func _handle_message(conn: StreamPeerTCP, msg: Dictionary, st: Dictionary, peer_
 					_sync_log("IN newer-local path=%s local=%d remote=%d" % [name, local_t, remote_t])
 					continue
 			DirAccess.make_dir_recursive_absolute(dest.get_base_dir())
+			if binary:
+				var raw := Marshalls.base64_to_raw(text)
+				if raw.is_empty() and FileAccess.file_exists(dest):
+					skipped += 1
+					_sync_log("IN skip-empty-binary path=%s" % name)
+					continue
 			var f := FileAccess.open(dest, FileAccess.WRITE)
 			if f == null:
 				skipped += 1
@@ -399,13 +405,21 @@ func _receive_item(st: Dictionary, msg: Dictionary) -> void:
 			_sync_log("IN newer-local path=%s local=%d remote=%d" % [name, local_t, remote_t])
 			return
 	DirAccess.make_dir_recursive_absolute(dest.get_base_dir())
+	var is_bin := bool(msg.get("binary", false))
+	var raw := Marshalls.base64_to_raw(text) if is_bin else PackedByteArray()
+	# Guard: an empty/truncated binary transfer must never destroy a good local
+	# file (this turned a synced image into a 0-byte file that then won't render).
+	if is_bin and raw.is_empty() and FileAccess.file_exists(dest):
+		st["skipped"] = int(st.get("skipped", 0)) + 1
+		_sync_log("IN skip-empty-binary path=%s" % name)
+		return
 	var f := FileAccess.open(dest, FileAccess.WRITE)
 	if f == null:
 		st["skipped"] = int(st.get("skipped", 0)) + 1
 		_sync_log("IN open-failed path=%s" % name)
 		return
-	if bool(msg.get("binary", false)):
-		f.store_buffer(Marshalls.base64_to_raw(text))
+	if is_bin:
+		f.store_buffer(raw)
 	else:
 		f.store_string(text)
 	f.close()
@@ -523,13 +537,16 @@ func _sync_log(message: String) -> void:
 	if FileAccess.get_file_as_bytes(path).size() > 1024 * 1024:
 		DirAccess.remove_absolute(abs)
 
-func collect_notes() -> Dictionary:
+## Read the whole vault (notes + media base64) for transfer. Runs on the worker
+## thread so all disk I/O never blocks the UI; all inputs are snapshots taken on
+## the main thread (ts, vault path, note list) so the worker never touches the
+## GameManager node from another thread.
+func collect_notes(ts: Dictionary, vault: String, note_list: Array) -> Dictionary:
 	var files := {}
 	var times := {}
-	var vault := GameManager.vault_abs()
 	# Transfer markdown and embedded media, but never generated exports.
 	var paths: Array[String] = []
-	for fname in GameManager.notes:
+	for fname in note_list:
 		paths.append(String(fname))
 	_collect_media(vault.path_join("media"), vault, paths)
 	for name in paths:
@@ -539,10 +556,10 @@ func collect_notes() -> Dictionary:
 			files[name] = f.get_as_text() if name.ends_with(".md") or name.ends_with(".json") else Marshalls.raw_to_base64(f.get_buffer(f.get_length()))
 			times[name] = FileAccess.get_modified_time(path)
 			f.close()
-	if not _tombstones.is_empty():
-		files[".neonnotes-tombstones.json"] = JSON.stringify(_tombstones)
+	if not ts.is_empty():
+		files[".neonnotes-tombstones.json"] = JSON.stringify(ts)
 		times[".neonnotes-tombstones.json"] = Time.get_unix_time_from_system()
-	_sync_log("OUT collected notes=%d files=%d media=%d tombstones=%d" % [GameManager.notes.size(), files.size(), files.size() - GameManager.notes.size(), _tombstones.size()])
+	_sync_log("OUT collected notes=%d files=%d media=%d tombstones=%d" % [note_list.size(), files.size(), files.size() - note_list.size(), ts.size()])
 	return {"files": files, "times": times}
 
 func _collect_media(dir_path: String, vault: String, paths: Array[String]) -> void:
@@ -610,10 +627,6 @@ func auto_sync() -> void:
 	if not _pending_unsynced and _udp != null and peers.is_empty():
 		return
 	_syncing = true
-	var data: Dictionary = collect_notes()
-	if data["files"].is_empty() and _tombstones.is_empty():
-		_syncing = false
-		return
 	var targets: Array = []
 	for ip in peers.keys():
 		var p: Dictionary = peers[ip]
@@ -632,15 +645,30 @@ func auto_sync() -> void:
 	if targets.is_empty():
 		_syncing = false
 		return
+	# Snapshot tombstones on the main thread (small) and let the worker read the
+	# actual file payloads off the UI thread.
+	_sync_mutex.lock()
+	var ts: Dictionary = _tombstones.duplicate()
+	_sync_mutex.unlock()
+	var vault: String = GameManager.vault_abs()
+	var note_list: Array = GameManager.notes.duplicate()
 	_sync_thread = Thread.new()
-	_sync_thread.start(_sync_worker.bind(targets, data["files"], data["times"]))
+	_sync_thread.start(_sync_worker.bind(targets, ts, vault, note_list))
 	return
 
-func _sync_worker(targets: Array, files: Dictionary, times: Dictionary) -> void:
+func _sync_worker(targets: Array, ts: Dictionary, vault: String, note_list: Array) -> void:
 	var successful := 0
 	var completed := false
 	var last_name := "peer"
 	var failure := ""
+	var data: Dictionary = collect_notes(ts, vault, note_list)
+	var files: Dictionary = data["files"]
+	var times: Dictionary = data["times"]
+	if files.is_empty() and ts.is_empty():
+		_sync_mutex.lock()
+		_sync_result.append({"ok": true, "count": 0, "name": "peer", "error": ""})
+		_sync_mutex.unlock()
+		return
 	for target in targets:
 		last_name = str(target["name"])
 		_sync_log("OUT start peer=%s files=%d" % [last_name, files.size()])

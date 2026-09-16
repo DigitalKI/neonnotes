@@ -20,8 +20,7 @@ var width_cb: Callable
 
 ## ids shared with the ⋮ overflow menu (which routes export ids here too)
 const ID_PNG := 0
-const ID_JPG := 1
-const ID_GIF := 2
+const ID_GIF := 1
 const ID_COPY_MD := 3
 const ID_COPY_HTML := 4
 const ID_SAVE_HTML := 5
@@ -38,7 +37,6 @@ func build_menu(menu: PopupMenu) -> void:
 	menu.set_item_checked(menu.get_item_index(ID_CRT), GameManager.export_crt)
 	menu.add_separator()
 	menu.add_item("🖼 Save PNG (2× lossless)", ID_PNG)
-	menu.add_item("📷 Save JPEG (2× quality 95%)", ID_JPG)
 	menu.add_item("🎞 Save GIF", ID_GIF)
 	menu.add_separator()
 	menu.add_item("📤 Share PNG", ID_SHARE_PNG)
@@ -84,16 +82,14 @@ func handle_action(id: int) -> void:
 		flash_cb.call("CRT FX on export: " + ("ON" if on else "OFF"))
 		return
 	match id:
-		ID_PNG, ID_JPG, ID_GIF:  # Save PNG / JPEG / GIF
+		ID_PNG, ID_GIF:  # Save PNG / GIF
 			var doc: Variant = doc_cb.call()
 			if doc == null:
 				return
-			var ext := "png" if id == ID_PNG else ("jpg" if id == ID_JPG else "gif")
+			var ext := "png" if id == ID_PNG else "gif"
 			var dest: String = dest_cb.call(ext)
 			if ext == "png":
 				await Exporter.export_png(get_parent(), _export_width(), dest, doc)
-			elif ext == "jpg":
-				await Exporter.export_jpg(get_parent(), _export_width(), dest, doc)
 			else:
 				await Exporter.export_gif(get_parent(), _export_width(), dest, doc)
 			var saved_msg := "Saved %s: %s" % [ext.to_upper(), dest.get_file()]

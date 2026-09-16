@@ -1,5 +1,8 @@
 class_name ThemeComponent
 extends Node
+
+## Minimal inner padding for the editor + preview panes.
+const CONTENT_PAD := 14
 ## Applies the active GameManager palette to the authored UI shell.
 ## Owns: styleboxes/fonts/colors for SidePanel, Content, titles, toolbar
 ## buttons, and the source CodeEdit (incl. NeonHighlighter).
@@ -36,7 +39,12 @@ func apply() -> void:
 	panel.border_color = Color(c["accent"].r, c["accent"].g, c["accent"].b, 0.5)
 	panel.set_border_width_all(2)
 	side_panel.add_theme_stylebox_override("panel", panel)
-	content_panel.add_theme_stylebox_override("panel", panel)
+	# Minimal inner padding so both the editor (CodeEdit) and preview column sit
+	# off the panel edge instead of touching it. Shared panel stylebox is used for
+	# the sidebar; the content pane gets its own padded copy.
+	var content_style: StyleBoxFlat = panel.duplicate()
+	content_style.set_content_margin_all(CONTENT_PAD)
+	content_panel.add_theme_stylebox_override("panel", content_style)
 	title_label.add_theme_font_override("font", orb)
 	note_title.add_theme_font_override("font", orb)
 	for btn in toolbar.get_children():
