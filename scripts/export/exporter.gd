@@ -110,12 +110,18 @@ static func _render(host: Control, width: float, doc: Dictionary, animated: bool
 	var base_w := mini(EXPORT_BASE_MAX, maxi(1, int(round(width))))
 	var scale := mini(upscale, MAX_EXPORT_WIDTH / float(base_w))
 	host.get_tree().root.add_child(viewport)
+	# Inherit the main window's theme so exported text gets the same font
+	# fallbacks (emoji/system fonts) as the on-screen preview. The SubViewport
+	# otherwise starts from a bare default theme without those fallbacks.
 	var background := ColorRect.new()
 	background.color = PreviewBuilder._col("bg")
 	background.size = Vector2(base_w, 4096)
 	viewport.add_child(background)
 	var group := Control.new()
 	group.name = "Group"
+	# Inherit the app theme (incl. emoji/system font fallbacks) into export.
+	if host.get_tree().root.theme != null:
+		group.theme = host.get_tree().root.theme
 	group.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	group.scale = Vector2(scale, scale)
 	group.position = Vector2.ZERO

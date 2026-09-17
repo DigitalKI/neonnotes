@@ -123,6 +123,21 @@ static func _inline(s: String) -> String:
 	out += escape(s.substr(cursor))
 	return out
 
+## Shared emoji-capable font: a FontVariation over the theme default with
+## SystemFont fallbacks for the platform emoji fonts. Without this, emojis
+## only render when the OS default font happens to cover them — exported
+## SubViewports (and some Linux setups) lose them.
+static var _emoji_font: Font = null
+static func _font_with_emoji() -> Font:
+	if _emoji_font == null:
+		var emoji := SystemFont.new()
+		emoji.font_names = PackedStringArray(["Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol"])
+		var fv := FontVariation.new()
+		fv.base_font = null
+		fv.fallbacks = [emoji]
+		_emoji_font = fv
+	return _emoji_font
+
 static func _rich(bb: String, default_col: Color) -> RichTextLabel:
 	var rt := RichTextLabel.new()
 	rt.name = "PreviewRichText"
@@ -132,6 +147,14 @@ static func _rich(bb: String, default_col: Color) -> RichTextLabel:
 	rt.mouse_filter = Control.MOUSE_FILTER_PASS  # let touch drags reach the ScrollContainer
 	rt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	rt.add_theme_color_override("default_color", default_col)
+	# Attach the emoji fallback so 🚀🎉✨ etc. render in both the on-screen
+	# preview and PNG/GIF exports.
+	var ef := _font_with_emoji()
+	if ef != null:
+		rt.add_theme_font_override("normal_font", ef)
+		rt.add_theme_font_override("bold_font", ef)
+		rt.add_theme_font_override("italics_font", ef)
+		rt.add_theme_font_override("bold_italics_font", ef)
 	rt.text = bb
 	rt.install_effect(GlitchFx.new())
 	rt.install_effect(FlickerFx.new())

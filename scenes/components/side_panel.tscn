@@ -9,6 +9,12 @@ script = ExtResource("1_comp")
 layout_mode = 2
 theme_override_constants/separation = 8
 
+[node name="Search" type="LineEdit" parent="SideVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "Search notes (3+ characters)…"
+clear_button_enabled = true
+
 [node name="TreeDeleteBar" type="HBoxContainer" parent="SideVBox"]
 layout_mode = 2
 alignment = 2

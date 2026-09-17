@@ -53,6 +53,14 @@ min_value = 1.0
 max_value = 10.0
 value = 1.0
 
+[node name="OpenStartLabel" type="Label" parent="VerticalContainer"]
+layout_mode = 2
+text = "Open at startup"
+
+[node name="OpenStart" type="OptionButton" parent="VerticalContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+
 [node name="StyleLabel" type="Label" parent="VerticalContainer" unique_id=342748218]
 layout_mode = 2
 text = "Style"

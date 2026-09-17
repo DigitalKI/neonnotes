@@ -5,6 +5,7 @@
 [ext_resource type="Shader" uid="uid://d0udygsyay06s" path="res://shaders/crt.gdshader" id="3_crt"]
 [ext_resource type="Script" uid="uid://54xformjxgfq" path="res://scripts/render/graph_view.gd" id="4_graph"]
 [ext_resource type="PackedScene" path="res://scenes/components/toolbar.tscn" id="5_toolbar"]
+[ext_resource type="PackedScene" path="res://scenes/components/export_menu.tscn" id="9_export_menu"]
 [ext_resource type="PackedScene" uid="uid://cj1ama86pqcoo" path="res://scenes/components/status_bar.tscn" id="6_status"]
 [ext_resource type="PackedScene" path="res://scenes/components/side_panel.tscn" id="7_side"]
 [ext_resource type="PackedScene" uid="uid://dsdpg5sa7q611" path="res://scenes/components/settings_page.tscn" id="8_settings"]
@@ -59,6 +60,8 @@ horizontal_alignment = 1
 unique_name_in_owner = true
 layout_mode = 2
 
+[node name="ExportMenu" parent="." instance=ExtResource("9_export_menu")]
+
 [node name="WorkspaceMargin" type="MarginContainer" parent="Root" unique_id=1015672353]
 layout_mode = 2
 size_flags_vertical = 3
@@ -77,6 +80,12 @@ layout_mode = 2
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
+
+[node name="EditSearch" type="LineEdit" parent="Root/WorkspaceMargin/Workspace/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "Find in document…"
+visible = false
 
 [node name="ContentHost" type="ScrollContainer" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=1622826570]
 unique_name_in_owner = true

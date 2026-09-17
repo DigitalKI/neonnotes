@@ -33,6 +33,8 @@ const PALETTES := {
 var palette_name := "Synthwave"
 var graph_levels := 2
 var export_crt := true  # apply CRT overlay to exported PNG/JPEG/GIF
+var open_start_mode := "last"  # "last" or "homepage"
+var last_opened_rel := ""
 var vault_dir := VAULT_DIR
 var current_file := ""  # absolute path of the open note ("" = none)
 var current_rel := ""   # vault-relative path of the open note ("" = none)
@@ -248,6 +250,10 @@ func _load_settings() -> void:
 	palette_name = cf.get_value("ui", "palette", palette_name)
 	export_crt = bool(cf.get_value("export", "crt", export_crt))
 	graph_levels = clampi(int(cf.get_value("ui", "graph_levels", graph_levels)), 1, 10)
+	open_start_mode = String(cf.get_value("ui", "open_start_mode", open_start_mode))
+	if open_start_mode != "last" and open_start_mode != "homepage":
+		open_start_mode = "last"
+	last_opened_rel = String(cf.get_value("ui", "last_opened_rel", last_opened_rel))
 	if not PALETTES.has(palette_name):
 		palette_name = "Synthwave"
 	vault_dir = cf.get_value("vault", "dir", VAULT_DIR)
@@ -265,6 +271,8 @@ func _save_settings() -> void:
 	cf.set_value("ui", "palette", palette_name)
 	cf.set_value("export", "crt", export_crt)
 	cf.set_value("ui", "graph_levels", graph_levels)
+	cf.set_value("ui", "open_start_mode", open_start_mode)
+	cf.set_value("ui", "last_opened_rel", last_opened_rel)
 	cf.set_value("vault", "dir", vault_dir)
 	cf.set_value("sync", "device_id", device_id)
 	cf.set_value("sync", "pin", sync_pin)

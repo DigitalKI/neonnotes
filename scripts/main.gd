@@ -32,6 +32,7 @@ func _load_help_doc() -> String:
 @onready var status_bar: StatusBarComponent = %StatusBar
 @onready var note_title: Label = toolbar.note_title
 @onready var content_host: ScrollContainer = %ContentHost
+@onready var edit_search: LineEdit = %EditSearch
 @onready var content_body: VBoxContainer = %ContentBody
 @onready var edit_padding: MarginContainer = %EditPadding
 @onready var settings_page: MarginContainer = %SettingsPage
@@ -53,7 +54,7 @@ var help_folder := "Help"  # sidebar folder items get this metadata
 var theme_component := ThemeComponent.new()
 var layout_component := LayoutComponent.new()
 var slash_menu := SlashMenuComponent.new()
-var export_component := ExportComponent.new()
+@onready var export_component: ExportComponent = %ExportMenu
 
 # ---- editor drag gesture: plain drag scrolls, long-press-then-drag selects
 var _long_press_timer := Timer.new()
@@ -61,6 +62,7 @@ var _drag_start_pos := Vector2.ZERO
 var _drag_is_scroll := false
 var _drag_is_select := false
 var _select_start := Vector2i.ZERO
+var _select_anchor_set := false
 const DRAG_SCROLL_THRESHOLD := 12.0
 const LONG_PRESS_SECONDS := 1.0
 # Touch gesture state machine for the mobile editor.
@@ -68,6 +70,7 @@ var _gesture_state := "IDLE"  # IDLE | PENDING | SCROLLING | SELECTING
 
 func _ready() -> void:
 	_build_dynamic_ui()
+	edit_search.text_changed.connect(_find_in_editor)
 	theme_component.name = "ThemeComponent"
 	theme_component.setup(%Bg, %Title, toolbar.note_title, %SidePanel as PanelContainer,
 			%Content as PanelContainer, toolbar, code_edit)
@@ -123,6 +126,7 @@ func _ready() -> void:
 	GameManager.scan_notes()
 	_refresh_list()
 	layout_component.update_layout()
+	_open_start_page.call_deferred()
 	sync_service = SyncService.new()
 	sync_service.name = "SyncService"
 	add_child(sync_service)
@@ -145,6 +149,12 @@ func _start_smoke() -> void:
 	drv.name = "SmokeDriver"
 	add_child(drv)
 	drv._run_smoke()
+
+func _open_start_page() -> void:
+	if GameManager.open_start_mode == "last" and GameManager.last_opened_rel != "" and GameManager.notes.has(GameManager.last_opened_rel):
+		_on_note_selected(GameManager.last_opened_rel)
+	else:
+		_on_note_selected("_homepage.md")
 
 func _refresh_list() -> void:
 	var selected := GameManager.current_rel
@@ -252,26 +262,10 @@ func _build_dynamic_ui() -> void:
 	add_child(slash_menu)
 	slash_menu.build(code_edit, _flush_save)
 
-	# export menu (data-driven)
+	# ExportComponent owns the complete menu and the shared action IDs.
+	# Do not pre-populate this PopupMenu here: duplicate labels with different
+	# IDs caused Save/Share entries to dispatch to the wrong handlers.
 	var menu: PopupMenu = toolbar.export_btn.get_popup()
-	menu.add_item("🖼 Save PNG", 0)
-	menu.add_item("🎞 Save GIF", 1)
-	menu.add_separator()
-	menu.add_item("📤 Share PNG", 5)
-	menu.add_item("📤 Share GIF", 6)
-	menu.add_item("📤 Share Markdown", 7)
-	menu.add_separator()
-	menu.add_item("Copy Markdown", 2)
-	menu.add_item("Copy HTML", 3)
-	menu.add_item("Save HTML…", 4)
-	if OS.get_name() != "Android":
-		# On desktop, "share" falls back to clipboard/file manager; keep the
-		# menu lean there.
-		menu.remove_item(5)
-		menu.remove_item(6)
-		menu.remove_item(7)
-	export_component.name = "ExportComponent"
-	add_child(export_component)
 	export_component.doc_cb = _current_doc
 	export_component.dest_cb = _export_dest
 	export_component.flash_cb = _flash
@@ -288,8 +282,13 @@ func _build_dynamic_ui() -> void:
 		# that logical width so proportions match the on-screen preview, then
 		# the Exporter upscales uniformly.
 		return content_panel.size.x
-	export_component.build_menu(menu)
-	menu.id_pressed.connect(export_component.handle_action)
+	# MenuButton cannot replace its internal PopupMenu in Godot 4. Use its
+	# pressed signal to open the serialized scene popup instead.
+	var authored_popup := export_component.get_active_popup()
+	toolbar.export_btn.pressed.connect(func():
+		authored_popup.position = Vector2i(int(toolbar.export_btn.global_position.x), int(toolbar.export_btn.global_position.y + toolbar.export_btn.size.y))
+		authored_popup.popup())
+
 
 	# "⋮ more" overflow menu (shown when the toolbar is cramped)
 	# MenuButton uses its own auto-created popup — a plain child PopupMenu
@@ -303,15 +302,15 @@ func _build_dynamic_ui() -> void:
 	more.add_item("🔗 Backlinks", 11)
 	more.add_item("🕸 Graph", 12)
 	more.add_separator()
-	more.add_item("⬇ Save PNG", 0)
-	more.add_item("⬇ Save GIF", 1)
+	more.add_item("⬇ Save PNG", ExportComponent.ID_PNG)
+	more.add_item("⬇ Save GIF", ExportComponent.ID_GIF)
 	if OS.get_name() == "Android":
-		more.add_item("📤 Share PNG", 5)
-		more.add_item("📤 Share GIF", 6)
-		more.add_item("📤 Share Markdown", 7)
-	more.add_item("⬇ Copy Markdown", 2)
-	more.add_item("⬇ Copy HTML", 3)
-	more.add_item("⬇ Save HTML…", 4)
+		more.add_item("📤 Share PNG", ExportComponent.ID_SHARE_PNG)
+		more.add_item("📤 Share GIF", ExportComponent.ID_SHARE_GIF)
+		more.add_item("📤 Share Markdown", ExportComponent.ID_SHARE_MD)
+		more.add_item("📤 Share HTML", ExportComponent.ID_SHARE_HTML)
+	else:
+		more.add_item("💾 Save HTML", ExportComponent.ID_SAVE_HTML)
 	toolbar.more_btn.get_popup().id_pressed.connect(_on_more_action)
 	toolbar.more_btn.visible = true  # always available (delete/export/etc. on desktop too)
 	# new-note dialog: mobile-friendly row with Enter-to-submit
@@ -379,6 +378,7 @@ func _on_code_edit_gui_input(event: InputEvent) -> void:
 		if event.pressed:
 			_gesture_state = "PENDING"
 			_drag_start_pos = event.position
+			_select_anchor_set = false
 			_long_press_timer.start()
 			# Do NOT consume: the following emulated mouse press places the
 			# caret natively at the right spot and opens the keyboard.
@@ -406,24 +406,45 @@ func _on_code_edit_gui_input(event: InputEvent) -> void:
 			code_edit.scroll_vertical -= event.relative.y / float(code_edit.get_line_height())
 			get_viewport().set_input_as_handled()
 	elif event is InputEventMouseButton:
-		# Emulated mouse press/release mirror the touch; let them through so
-		# CodeEdit's native caret placement works (same as desktop).
-		pass
-	elif event is InputEventMouseMotion:
-		# Block native drag-select/scroll while we own the gesture; allow it
-		# in SELECTING so native selection extends from the correctly placed
-		# caret, and in IDLE so taps/clicks settle normally.
-		if _gesture_state == "PENDING" or _gesture_state == "SCROLLING":
+		# Emulated mouse press mirrors the touch and places the caret natively;
+		# record that (correctly-transformed) point as the selection anchor.
+		# NOTE: Android pushes the emulated mouse event BEFORE the matching
+		# touch event, so on press the state is still IDLE here. The anchor is
+		# therefore taken on the first motion while SELECTING instead.
+		if _gesture_state == "SCROLLING" or _gesture_state == "SELECTING":
+			# Mid-gesture clicks must not collapse the selection or move the
+			# caret.
 			get_viewport().set_input_as_handled()
+	elif event is InputEventMouseMotion:
+		if _gesture_state == "PENDING" or _gesture_state == "SCROLLING":
+			# We own the gesture: no native drag-select/scroll.
+			get_viewport().set_input_as_handled()
+		elif _gesture_state == "SELECTING":
+			# Extend the selection manually from the anchored point using the
+			# emulated mouse coordinates (correctly content-scale-transformed),
+			# plus edge auto-scroll so long selections past the screen work.
+			get_viewport().set_input_as_handled()
+			if not _select_anchor_set:
+				_select_anchor_set = true
+				_select_start = Vector2i(code_edit.get_caret_line(), code_edit.get_caret_column())
+			var cur: Vector2i = code_edit.get_line_column_at_pos(event.position)
+			code_edit.select(_select_start.x, _select_start.y, cur.x, cur.y)
+			var edge := 56.0
+			if event.position.y < edge:
+				code_edit.scroll_vertical -= 1
+			elif event.position.y > code_edit.size.y - edge:
+				code_edit.scroll_vertical += 1
 
 func _on_code_edit_long_press() -> void:
 	if _gesture_state == "PENDING":
 		_gesture_state = "SELECTING"
 		# The caret was already placed natively by the emulated mouse press at
-		# the correct tap point; start an empty selection there so the
-		# following emulated mouse motion extends it via native logic.
-		code_edit.select(code_edit.get_caret_line(), code_edit.get_caret_column(),
-				code_edit.get_caret_line(), code_edit.get_caret_column())
+		# the correct tap point; anchor the selection there.
+		_select_anchor_set = true
+		_select_start = Vector2i(code_edit.get_caret_line(), code_edit.get_caret_column())
+		# The caret was already placed natively by the emulated mouse press at
+		# the correct tap point; anchor the selection there.
+		_select_start = Vector2i(code_edit.get_caret_line(), code_edit.get_caret_column())
 
 func _scroll_tapped_caret(local_pos: Vector2) -> void:
 	if not code_edit.visible:
@@ -454,7 +475,9 @@ func _on_edit_menu_action(id: int) -> void:
 
 func _on_edit_menu_closed() -> void:
 	if _gesture_state == "IDLE":
-		_reset_mobile_selection_mode(true)
+		# Keep any existing selection so the IME backspace can delete it right
+		# after the menu closes; only the gesture state resets to scroll mode.
+		_reset_mobile_selection_mode(false)
 
 func _reset_mobile_selection_mode(clear_selection: bool) -> void:
 	_gesture_state = "IDLE"
@@ -470,6 +493,10 @@ func _show_selection_menu() -> void:
 	menu.set_item_disabled(menu.get_item_index(TextEdit.MENU_PASTE), DisplayServer.clipboard_get() == "")
 	var caret: Vector2 = code_edit.get_global_position() + code_edit.get_caret_draw_pos()
 	menu.popup(Rect2i(Vector2i(caret + Vector2(0, 8)), Vector2i.ZERO))
+	# Give keyboard focus back to the editor: PopupMenu grabs focus on show,
+	# which made the IME backspace stop deleting the selection. The menu still
+	# receives taps because windows get pointer input regardless of focus.
+	code_edit.grab_focus.call_deferred()
 
 # ------------------------------------------------- autosave
 
@@ -517,6 +544,8 @@ func _on_note_selected(fname: String) -> void:
 	_flush_save()  # flush previous note first — never lose changes
 	GameManager.current_file = GameManager.vault_abs() + "/" + fname
 	GameManager.current_rel = fname
+	GameManager.last_opened_rel = fname
+	GameManager._save_settings()
 	code_edit.text = GameManager.read_note(fname)
 	help_mode = false
 	note_title.text = fname.trim_suffix(".md")
@@ -774,6 +803,7 @@ func _scrub_order(old_rels: Array) -> void:
 
 func _set_mode() -> void:
 	code_edit.visible = source_mode
+	edit_search.visible = source_mode
 	edit_padding.visible = source_mode
 	content_host.visible = not source_mode
 	toolbar.mode_btn.text = "✎ Edit" if not source_mode else "◈ Preview"
@@ -784,6 +814,20 @@ func _set_mode() -> void:
 		code_edit.call_deferred("adjust_viewport_to_caret", 0)
 	else:
 		_render_preview()
+
+func _find_in_editor(query: String) -> void:
+	if query == "" or not source_mode:
+		return
+	var pos := code_edit.text.to_lower().find(query.to_lower())
+	if pos < 0:
+		return
+	var before := code_edit.text.substr(0, pos)
+	var line := before.count("\n")
+	var column := pos - (before.rfind("\n") + 1)
+	code_edit.select(line, column, line, column + query.length())
+	code_edit.set_caret_line(line)
+	code_edit.set_caret_column(column)
+	code_edit.adjust_viewport_to_caret(4)
 
 func _toggle_mode() -> void:
 	autosave_timer.stop()
@@ -1223,10 +1267,19 @@ func _current_doc() -> Variant:
 	return MarkdownParser.parse(code_edit.text)
 
 func _export_dest(ext: String) -> String:
-	# exports live in vault/exports/ — never mixed with notes
+	var filename := GameManager.current_rel.get_file().trim_suffix(".md") + "." + ext
+	# Desktop users expect rendered documents in the native Downloads folder.
+	# Keep Android exports in the vault so the media/share integration can
+	# register them with the device; other formats/platforms retain the vault
+	# export location for portability.
+	if ext == "html" and OS.get_name() in ["Linux", "Windows"]:
+		var downloads := OS.get_system_dir(OS.SYSTEM_DIR_DOWNLOADS)
+		if not downloads.is_empty():
+			DirAccess.make_dir_recursive_absolute(downloads)
+			return downloads.path_join(filename)
 	var d := GameManager.vault_abs() + "/" + GameManager.EXPORTS_SUBDIR
 	DirAccess.make_dir_recursive_absolute(d)
-	return d + "/" + GameManager.current_rel.get_file().trim_suffix(".md") + "." + ext
+	return d.path_join(filename)
 
 func _flash(msg: String) -> void:
 	status_bar.flash(msg)

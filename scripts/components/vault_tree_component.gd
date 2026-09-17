@@ -14,6 +14,7 @@ signal delete_requested
 @onready var backlinks_panel: PanelContainer = %BacklinksPanel
 @onready var backlinks_box: VBoxContainer = %BacklinksBox
 @onready var config_btn: Button = %ConfigBtn
+@onready var search: LineEdit = %Search
 
 var save_cb: Callable
 var flash_cb: Callable
@@ -23,6 +24,13 @@ var _press_pos := Vector2.ZERO
 var _touch_src_path := ""
 var _is_touch_dragging := false
 var _root_homepage := ""
+var _search_timer := Timer.new()
+var _search_thread: Thread
+var _search_cancel := false
+var _search_generation := 0
+var _search_query := ""
+var _search_results: Array = []
+var _search_snippets: Dictionary = {}
 
 ## Wire behavior once the scene nodes are ready. The host connects
 ## palette_btn/vault_btn/sync_btn/tree_delete_btn signals itself.
@@ -58,6 +66,11 @@ func refresh_backlinks() -> void:
 		backlinks_box.add_child(b)
 
 func build() -> void:
+	_search_timer.one_shot = true
+	_search_timer.wait_time = 2.0
+	_search_timer.timeout.connect(_start_search)
+	add_child(_search_timer)
+	search.text_changed.connect(_on_search_changed)
 	side_tree.item_activated.connect(_on_tree_selected)
 	# Match the editor's touch-friendly scrollbar width. Tree exposes its
 	# internal scrollbar as a child rather than via get_v_scroll_bar().
@@ -148,9 +161,13 @@ func note_visible(n: String) -> bool:
 
 func visible_notes() -> Array[String]:
 	var out: Array[String] = []
+	var search_active := _search_query.length() >= 3
 	for n in GameManager.notes:
-		if note_visible(n):
+		if note_visible(n) and (not search_active or _search_results.has(n)):
 			out.append(n)
+	if search_active:
+		out.sort_custom(func(a: String, b: String) -> bool:
+			return _search_results.find(a) < _search_results.find(b))
 	return out
 
 ## Row of tag chips above the tree: click to filter, click again to clear.
@@ -183,6 +200,57 @@ func _build_tag_bar() -> void:
 			refresh())
 		bar.add_child(clear)
 
+func _on_search_changed(value: String) -> void:
+	_search_query = value.strip_edges()
+	_search_generation += 1
+	_search_cancel = true
+	if _search_thread != null and _search_thread.is_started():
+		# The worker checks cancellation between files; never block the UI waiting.
+		_search_thread = null
+	_search_timer.start()
+	if _search_query.length() < 3:
+		_search_results = []
+		refresh()
+
+func _start_search() -> void:
+	if _search_query.length() < 3:
+		return
+	_search_cancel = false
+	var generation := _search_generation
+	var query := _search_query.to_lower()
+	var snapshot: Array = []
+	for n in GameManager.notes:
+		snapshot.append({"name": n, "title": String(GameManager.titles.get(n, "")), "text": GameManager.read_note(n)})
+	_search_thread = Thread.new()
+	_search_thread.start(_search_worker.bind(snapshot, query, generation))
+
+func _search_worker(snapshot: Array, query: String, generation: int) -> void:
+	var title_hits: Array = []
+	var content_hits: Array = []
+	for item in snapshot:
+		if _search_cancel or generation != _search_generation:
+			return
+		var title: String = String(item.title).to_lower()
+		var haystack: String = (String(item.title) + "\n" + String(item.text)).to_lower()
+		var matches_all := true
+		for word in query.split(" ", false):
+			if not haystack.contains(word):
+				matches_all = false
+				break
+		if not matches_all:
+			continue
+		if title.contains(query):
+			title_hits.append(item.name)
+		else:
+			content_hits.append(item.name)
+	_search_results = title_hits + content_hits
+	call_deferred("_apply_search_results", generation)
+
+func _apply_search_results(generation: int) -> void:
+	if generation != _search_generation or _search_query.length() < 3:
+		return
+	refresh()
+
 func refresh() -> void:
 	side_tree.clear()
 	side_tree.hide_root = false
@@ -200,6 +268,10 @@ func refresh() -> void:
 	root.disable_folding = true
 	root.collapsed = false
 	root.set_selectable(0, true)
+	if _search_query.length() >= 3:
+		for n in visible_notes():
+			_add_search_result(n)
+		return
 	# build folder hierarchy from relative paths
 	var folders := {}
 	# pass 1: folders first, so a note + folder sharing a name merge into one
@@ -250,6 +322,17 @@ func refresh() -> void:
 			if DirAccess.dir_exists_absolute(folder_abs):
 				continue
 			_add_note_leaf(root, n)
+func _add_search_result(n: String) -> void:
+	var base := n.get_file().trim_suffix(".md")
+	var label: String = GameManager.titles.get(n, base)
+	if label == "":
+		label = base
+	var leaf := side_tree.create_item(side_tree.get_root())
+	leaf.set_text(0, "◈ " + label)
+	var snippet: String = String(_search_snippets.get(n, ""))
+	leaf.set_tooltip_text(0, n + (" — " + snippet if snippet != "" else ""))
+	leaf.set_metadata(0, n)
+
 func _add_note_leaf(parent: TreeItem, n: String) -> void:
 	var base := n.get_file().trim_suffix(".md")
 	var label: String = GameManager.titles.get(n, base)

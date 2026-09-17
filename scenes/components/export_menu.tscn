@@ -1,0 +1,35 @@
+[gd_scene format=3 uid="uid://bge6o1gqm4xsx"]
+
+[ext_resource type="Script" uid="uid://cep5ojrbl7g2e" path="res://scripts/components/export_component.gd" id="1_export"]
+
+[node name="ExportMenu" type="Node" unique_id=469506072]
+unique_name_in_owner = true
+script = ExtResource("1_export")
+
+[node name="Mobile" type="PopupMenu" parent="." unique_id=1098167144]
+unique_name_in_owner = true
+visible = false
+item_count = 6
+item_0/text = "🖼 Save PNG"
+item_0/id = 0
+item_1/text = "🎞 Save GIF"
+item_1/id = 1
+item_2/text = "📤 Share PNG"
+item_2/id = 2
+item_3/text = "📤 Share GIF"
+item_3/id = 3
+item_4/text = "📤 Share Markdown"
+item_4/id = 4
+item_5/text = "📤 Share HTML"
+item_5/id = 5
+
+[node name="Desktop" type="PopupMenu" parent="." unique_id=1263141677]
+unique_name_in_owner = true
+visible = false
+item_count = 3
+item_0/text = "🖼 Save PNG"
+item_0/id = 0
+item_1/text = "🎞 Save GIF"
+item_1/id = 1
+item_2/text = "💾 Save HTML"
+item_2/id = 6
