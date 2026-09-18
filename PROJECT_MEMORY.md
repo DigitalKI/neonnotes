@@ -5,7 +5,7 @@
 > updated at the **end**, so context, decisions, and direction survive across
 > conversations. Keep it current — a stale memory file is worse than none.
 
-_Last updated: 2026-09-18 (godot-mcp MCP bridge tooling fixed: `eval` reserved-word SDK breakage + server/addon eval naming mismatch) · Godot 4.7 · renderer: gl_compatibility_
+_Last updated: 2026-09-18 (godot-mcp tooling plus note sorting and initial thread lifecycle hardening) · Godot 4.7 · renderer: gl_compatibility_
 
 > ⚠️ **Path note:** the saved global memory says `/home/toshiwo/www/neonnotes`
 > but the project actually lives at **`/home/toshiwo/Projects/Godot/neonnotes`**.
@@ -29,6 +29,9 @@ _Last updated: 2026-09-18 (godot-mcp MCP bridge tooling fixed: `eval` reserved-w
   folder via 📂 Vault). No proprietary DB — vault is grep/rsync/editor friendly.
 
 ## 2. What has been done (work log)
+
+- **2026-09-18 — note ordering and worker lifecycle hardening (partial task implementation)**:
+  Moved `notes.sort()` in `GameManager.write_note()` before its success return so the in-memory list is sorted after writes. Vault-tree search cancellation now retains the `Thread` reference until the worker exits, joins it before reuse/teardown, uses deferred cleanup polling between searches, and suppresses deferred results during `_exit_tree()`. `SyncService` now stops processing/timers/discovery and joins its active sync worker in `_exit_tree()`, while shutdown guards prevent new auto-sync work. Static GDScript diagnostics report no errors in the changed files. The receive-side `_poll_server()` parse/validation move, larger `main.gd`/parser refactors, and focused lifecycle/sync tests remain follow-up work; they were intentionally not forced into this first correctness pass. Full tests reached unit and drag success, then the documented native Godot exit abort (`double free or corruption (!prev)`) occurred during smoke.
 
 - **2026-09-18 — godot-mcp MCP bridge tooling fixed (dev tooling; no app code changed)**:
   Two independent defects broke the Godot MCP channel inside goose.

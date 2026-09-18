@@ -230,8 +230,10 @@ func write_note(fname: String, text: String) -> bool:
 		return false
 	f.store_string(text)
 	f.close()
-	return true
+	# Keep the in-memory note list deterministic for callers that write a note
+	# before the next full scan.
 	notes.sort()
+	return true
 
 func read_note(fname: String) -> String:
 	var f := FileAccess.open(vault_abs() + "/" + fname, FileAccess.READ)

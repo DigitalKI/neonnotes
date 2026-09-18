@@ -31,6 +31,8 @@ var _search_generation := 0
 var _search_query := ""
 var _search_results: Array = []
 var _search_snippets: Dictionary = {}
+var _search_shutting_down := false
+var _search_cleanup_scheduled := false
 
 ## Wire behavior once the scene nodes are ready. The host connects
 ## palette_btn/vault_btn/sync_btn/tree_delete_btn signals itself.
@@ -119,7 +121,7 @@ func build() -> void:
 								_touch_src_path = ""
 								get_viewport().set_input_as_handled()
 								return
-							it.select(0)
+							side_tree.set_selected(it, 0)
 							_on_tree_selected()
 					_touch_src_path = ""
 		elif ev is InputEventMouseMotion:
@@ -204,16 +206,21 @@ func _on_search_changed(value: String) -> void:
 	_search_query = value.strip_edges()
 	_search_generation += 1
 	_search_cancel = true
-	if _search_thread != null and _search_thread.is_started():
-		# The worker checks cancellation between files; never block the UI waiting.
-		_search_thread = null
-	_search_timer.start()
+	_retire_search_thread()
+	if _search_thread != null:
+		# Keep ownership until the worker exits and can be joined safely.
+		_schedule_search_cleanup()
+	else:
+		_search_timer.start()
 	if _search_query.length() < 3:
 		_search_results = []
 		refresh()
 
 func _start_search() -> void:
-	if _search_query.length() < 3:
+	if _search_shutting_down or _search_query.length() < 3:
+		return
+	if _search_thread != null:
+		_schedule_search_cleanup()
 		return
 	_search_cancel = false
 	var generation := _search_generation
@@ -223,6 +230,42 @@ func _start_search() -> void:
 		snapshot.append({"name": n, "title": String(GameManager.titles.get(n, "")), "text": GameManager.read_note(n)})
 	_search_thread = Thread.new()
 	_search_thread.start(_search_worker.bind(snapshot, query, generation))
+
+func _retire_search_thread() -> void:
+	if _search_thread != null and _search_thread.is_started():
+		_search_cancel = true
+
+func _schedule_search_cleanup() -> void:
+	if _search_cleanup_scheduled:
+		return
+	_search_cleanup_scheduled = true
+	call_deferred("_poll_search_cleanup")
+
+func _poll_search_cleanup() -> void:
+	_search_cleanup_scheduled = false
+	if _search_thread == null:
+		if not _search_shutting_down and _search_query.length() >= 3:
+			_search_timer.start()
+		return
+	if _search_thread.is_alive():
+		_schedule_search_cleanup()
+		return
+	_search_thread.wait_to_finish()
+	_search_thread = null
+	if not _search_shutting_down and _search_query.length() >= 3:
+		_search_timer.start()
+
+func _exit_tree() -> void:
+	_search_shutting_down = true
+	_search_generation += 1
+	_search_cancel = true
+	_retire_search_thread()
+	# Joining is required before the node is freed: the worker captures this
+	# instance through its cancellation/generation checks. Search workers only
+	# read their immutable snapshot and stop between files, so this is bounded.
+	if _search_thread != null:
+		_search_thread.wait_to_finish()
+		_search_thread = null
 
 func _search_worker(snapshot: Array, query: String, generation: int) -> void:
 	var title_hits: Array = []
@@ -247,7 +290,7 @@ func _search_worker(snapshot: Array, query: String, generation: int) -> void:
 	call_deferred("_apply_search_results", generation)
 
 func _apply_search_results(generation: int) -> void:
-	if generation != _search_generation or _search_query.length() < 3:
+	if _search_shutting_down or generation != _search_generation or _search_query.length() < 3:
 		return
 	refresh()
 
@@ -717,7 +760,7 @@ func select_note(fname: String, open_note := true) -> void:
 		var it: TreeItem = stack.pop_back()
 		if it.get_metadata(0) == fname:
 			side_tree.scroll_to_item(it, false)
-			it.select(0)
+			side_tree.set_selected(it, 0)
 			if open_note:
 				note_requested.emit(fname)
 			return

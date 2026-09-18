@@ -612,8 +612,25 @@ var _tombstones: Dictionary = {}
 var _sync_thread: Thread
 var _sync_result: Array = []
 var _sync_mutex := Mutex.new()
+var _shutting_down := false
+
+func _exit_tree() -> void:
+	_shutting_down = true
+	set_process(false)
+	if _auto_timer:
+		_auto_timer.stop()
+	if _retry_timer:
+		_retry_timer.stop()
+	stop_discovery()
+	if _sync_thread != null:
+		# The worker uses bounded socket timeouts; join before the node is
+		# released so no worker can access this service after teardown.
+		_sync_thread.wait_to_finish()
+		_sync_thread = null
 
 func enable_auto_sync() -> void:
+	if _shutting_down:
+		return
 	if _auto_timer:
 		return
 	_auto_timer = Timer.new()
@@ -641,7 +658,7 @@ func note_saved() -> void:
 	_auto_timer.start()  # short debounce: sync shortly after each edit
 
 func auto_sync() -> void:
-	if _syncing or GameManager.trusted.is_empty():
+	if _shutting_down or _syncing or GameManager.trusted.is_empty():
 		return
 	# One single-flight transfer; periodic timer also discovers peers when edits are idle.
 	# When broadcast discovery failed (UDP bind error / null _udp), fall through so a
