@@ -5,7 +5,7 @@
 > updated at the **end**, so context, decisions, and direction survive across
 > conversations. Keep it current — a stale memory file is worse than none.
 
-_Last updated: 2026-09-15 (fixed mobile keyboard caret scrolling after editor padding refactor) · Godot 4.7 · renderer: gl_compatibility_
+_Last updated: 2026-09-18 (godot-mcp MCP bridge tooling fixed: `eval` reserved-word SDK breakage + server/addon eval naming mismatch) · Godot 4.7 · renderer: gl_compatibility_
 
 > ⚠️ **Path note:** the saved global memory says `/home/toshiwo/www/neonnotes`
 > but the project actually lives at **`/home/toshiwo/Projects/Godot/neonnotes`**.
@@ -29,6 +29,30 @@ _Last updated: 2026-09-15 (fixed mobile keyboard caret scrolling after editor pa
   folder via 📂 Vault). No proprietary DB — vault is grep/rsync/editor friendly.
 
 ## 2. What has been done (work log)
+
+- **2026-09-18 — godot-mcp MCP bridge tooling fixed (dev tooling; no app code changed)**:
+  Two independent defects broke the Godot MCP channel inside goose.
+  (1) **Reserved-word tool name** — `@letsagents/godot-mcp` registers a tool
+  named literally `eval`; goose's `execute_typescript` (pctx code mode) compiles
+  the tool set into a strict-mode ES module, so `export async function eval(...)`
+  is an illegal binding (TS1215). One bad tool name broke **every**
+  `execute_typescript` call (all SDK tools, not just Godot). Fixed without
+  touching the root-owned npm package via a stdio proxy
+  `~/.local/bin/godot-mcp-safe` that renames `eval`->`eval_expr` on the wire
+  (outward in `tools/list`, back to `eval` in `tools/call`); goose's
+  `~/.config/goose/config.yaml` now runs it
+  (`cmd: /home/toshiwo/.local/bin/godot-mcp-safe`, `enabled: true`). goose
+  snapshots the tool list per session and does not watch config, so the fix
+  needs an extension respawn (reenable / restart the session).
+  (2) **Server<->addon naming mismatch** — the npm server dispatches
+  `bridge.call("eval", ...)` but the addon bridge only implemented
+  `eval_expression`, so `eval` returned `unknown tool: eval`. Fixed in-repo by
+  accepting both names in `addons/godot-mcp/mcp_bridge.gd` (`match` branch
+  `"eval", "eval_expression":`) — reload the plugin to apply (the npm server
+  auto-reconnects). Verified end-to-end: 41 tools exposed, and editor-time,
+  runtime, screenshot, and eval all exercised (`evalExpr "6*7"` -> `42`).
+  Side effect: the plugin's auto-registered `McpRuntime` autoload now appears
+  in `project.godot` (required for runtime eval / breakpoints).
 
 - **2026-09-15 — mobile keyboard caret scrolling regression fixed**: `SourceEditor` is runtime-created under the scene-authored `EditPadding` container, but `LayoutComponent` was still searching for it directly under `Content`. The keyboard resize watcher therefore never found the editor after the padding refactor. Updated both lookup sites to `EditPadding/SourceEditor`, restoring repeated caret visibility adjustment while the Android IME resizes the editor.
 
@@ -562,6 +586,13 @@ _These OVERRIDE the skill's defaults for this project._
 
 - **The ⚠ path note in section 1** — global memory entry is stale (`www/`);
   actual project is under `Projects/Godot/neonnotes`.
+- **godot-mcp exposes the `eval` tool as `eval_expr`** — intentional. goose's
+  code-mode SDK cannot bind an `eval` function (strict-mode ES module), so the
+  stdio proxy `~/.local/bin/godot-mcp-safe` renames it. Don't "fix" the
+  `eval_expr` name, and don't reintroduce a bare `eval` tool name. The underlying
+  bridge tool is `eval_expression` (the addon now also accepts the server's
+  `eval`). If the Godot MCP tools disappear mid-session, the extension needs a
+  respawn — goose caches tools per session and ignores config changes live.
 - **"⋮ More" menu** — non-`unique_name_in_owner` child PopupMenu nodes named in
   the scene are never shown by MenuButton; that's why individual items are
   added in code. Don't try to author items into the scene popup.

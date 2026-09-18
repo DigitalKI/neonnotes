@@ -225,7 +225,10 @@ func _handle_call(msg: Dictionary) -> void:
 			_handle_set_node_property(call_id, args)
 		"call_node_method":
 			_handle_call_node_method(call_id, args)
-		"eval_expression":
+		# "eval" is the name the MCP server (@letsagents/godot-mcp) dispatches
+		# for this tool; the bridge's canonical name is "eval_expression".
+		# Accept both so the server<->addon naming mismatch cannot break eval.
+		"eval", "eval_expression":
 			_handle_eval(call_id, args)
 		"simulate_input":
 			_handle_simulate_input(call_id, args)
