@@ -7,6 +7,7 @@ func _init() -> void:
 	_check_markdown_spans()
 	_check_markdown_blocks()
 	_check_html_exporter()
+	_check_move_path_remap()
 	print("UNIT RESULT: %s (%d failures)" % ["FAIL" if failures > 0 else "OK", failures])
 	quit(failures)
 
@@ -44,6 +45,10 @@ func _check_markdown_spans() -> void:
 	var wl := MarkdownParser.compute_inline("[[Alpha|alias]]")
 	_check(wl.size() == 1 and wl[0]["type"] == S.WIKILINK and wl[0]["target"] == "Alpha",
 		"wiki-link target extraction")
+	var nested_wl := MarkdownParser.compute_inline("[[Outer [[Inner]] Tail]]")
+	_check(nested_wl.size() == 1 and nested_wl[0]["type"] == S.WIKILINK
+		and nested_wl[0]["target"] == "Outer [[Inner]] Tail",
+		"nested wiki-link closing scan")
 	var ext := MarkdownParser.compute_inline("[Godot](https://godotengine.org)")
 	_check(ext.size() == 1 and ext[0]["type"] == S.EXTERNAL_LINK and ext[0]["target"] == "https://godotengine.org", "external link span")
 	var bare := MarkdownParser.compute_inline("Read https://example.com now")
@@ -93,6 +98,43 @@ func _check_html_exporter() -> void:
 	_check(html.begins_with("<!DOCTYPE html>"), "HTML document wrapper")
 	_check(html.contains("<title>HTML</title>"), "HTML title")
 	_check(html.contains("first<br>second"), "HTML paragraph newline")
+
+## Post-move path remap: a move changes paths only, so the in-memory index is
+## remapped exactly instead of rescanning the whole vault (drag/drop hot path).
+func _check_move_path_remap() -> void:
+	# note move — exact path only, prefix look-alikes untouched
+	_check(PathRemap.moved("a/note.md", "a/note.md", "b/note.md") == "b/note.md",
+		"note move remaps the note itself")
+	_check(PathRemap.moved("a/notes.md", "a/note.md", "b/note.md") == "a/notes.md",
+		"note move leaves siblings alone")
+	_check(PathRemap.moved("a/note.md.bak", "a/note.md", "b/note.md") == "a/note.md.bak",
+		"note move leaves prefix look-alikes alone")
+	# folder move — dir, children and companion note travel together
+	_check(PathRemap.moved("medic", "medic", "new") == "new",
+		"folder move remaps the folder key")
+	_check(PathRemap.moved("medic/a.md", "medic", "new") == "new/a.md",
+		"folder move remaps children")
+	_check(PathRemap.moved("medic.md", "medic", "new") == "new.md",
+		"folder move remaps the companion note")
+	_check(PathRemap.moved("medicnotes.md", "medic", "new") == "medicnotes.md",
+		"folder move leaves name look-alikes alone")
+	_check(PathRemap.moved("other.md", "medic", "new") == "other.md",
+		"folder move leaves unrelated notes alone")
+	# link-target matching drives which notes get rewritten after a move
+	_check(PathRemap.link_target_matches("a/note", "a/note.md"),
+		"full target matches a moved note")
+	_check(PathRemap.link_target_matches("note", "a/note.md"),
+		"bare file name matches a moved note")
+	_check(PathRemap.link_target_matches("NOTE", "a/Note.md"),
+		"link matching is case-insensitive")
+	_check(not PathRemap.link_target_matches("notes", "a/note.md"),
+		"name look-alike does not match a moved note")
+	_check(PathRemap.link_target_matches("medic/child", "medic"),
+		"folder child link matches a moved folder")
+	_check(not PathRemap.link_target_matches("medicnotes", "medic"),
+		"folder look-alike does not match a moved folder")
+	_check(not PathRemap.link_target_matches("other", "medic"),
+		"unrelated link does not match a moved folder")
 
 func _check(ok: bool, label: String) -> void:
 	if ok:

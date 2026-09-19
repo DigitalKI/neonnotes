@@ -1,11 +1,8 @@
 class_name WikiLinks extends RefCounted
 
 static func extract_links(text: String) -> Array[String]:
-	var result: Array[String] = []; var re := RegEx.new(); re.compile("\\[\\[([^\\]|]+)(?:\\|[^\\]]+)?\\]\\]")
-	for m in re.search_all(text):
-		var target := m.get_string(1).strip_edges()
-		if target != "" and not result.has(target): result.append(target)
-	return result
+	# Delegates so the GameManager link index is built by the same parser.
+	return GameManager.extract_wiki_links(text)
 
 static func resolve(target: String) -> String:
 	var t := target.strip_edges().to_lower()
@@ -16,20 +13,24 @@ static func resolve(target: String) -> String:
 	return ""
 
 static func backlinks(target: String) -> Array[String]:
+	# Answers from the cached link index — previously this read every note
+	# body off disk each time the backlinks panel refreshed.
 	var result: Array[String] = []
+	var want := target.strip_edges().get_basename().to_lower()
 	for filename in GameManager.notes:
-		if filename.get_basename().to_lower() == target.strip_edges().get_basename().to_lower(): continue
-		var file := FileAccess.open(GameManager.vault_abs().path_join(filename), FileAccess.READ)
-		if file and extract_links(file.get_as_text()).any(func(x: String): return x.get_basename().to_lower() == target.strip_edges().get_basename().to_lower()): result.append(filename)
+		if filename.get_basename().to_lower() == want: continue
+		for link in GameManager.links.get(filename, []):
+			if String(link).get_basename().to_lower() == want:
+				result.append(filename)
+				break
 	return result
 
 static func graph() -> Dictionary:
 	var nodes: Array[String] = []; var edges: Array[Dictionary] = []; var seen: Dictionary = {}
 	for filename in GameManager.notes: nodes.append(filename)
 	for source in GameManager.notes:
-		var file := FileAccess.open(GameManager.vault_abs().path_join(source), FileAccess.READ)
-		if not file: continue
-		for target in extract_links(file.get_as_text()):
+		# Cached link index: no per-note file reads when opening the graph.
+		for target in GameManager.links.get(source, []):
 			var resolved := resolve(target)
 			if resolved == "" or resolved == source: continue
 			var key := "direct|" + source + "|" + resolved

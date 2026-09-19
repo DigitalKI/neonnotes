@@ -5,7 +5,7 @@
 > updated at the **end**, so context, decisions, and direction survive across
 > conversations. Keep it current — a stale memory file is worse than none.
 
-_Last updated: 2026-09-18 (godot-mcp tooling plus note sorting and initial thread lifecycle hardening) · Godot 4.7 · renderer: gl_compatibility_
+_Last updated: 2026-09-18 (godot-mcp tooling, note/thread fixes, parser optimization, vault-tree drag UX, drop-path performance + shared link index) · Godot 4.7 · renderer: gl_compatibility_
 
 > ⚠️ **Path note:** the saved global memory says `/home/toshiwo/www/neonnotes`
 > but the project actually lives at **`/home/toshiwo/Projects/Godot/neonnotes`**.
@@ -29,6 +29,54 @@ _Last updated: 2026-09-18 (godot-mcp tooling plus note sorting and initial threa
   folder via 📂 Vault). No proprietary DB — vault is grep/rsync/editor friendly.
 
 ## 2. What has been done (work log)
+
+- **2026-09-18 — shared wiki-link index (backlinks, graph, post-move rewrite)**:
+  Added `GameManager.links` (note -> outbound `[[targets]]`) plus `links_ready`.
+  `scan_notes()` now does ONE full read per note yielding title + tags + links
+  (it previously opened every note twice, via `_read_title`/`_read_tags`), and
+  `write_note()` refreshes the entry from the text it already holds — so
+  autosave, sync writes and post-move rewrites keep the index current with no
+  rescan. `WikiLinks.backlinks()` and `WikiLinks.graph()` now answer from the
+  index instead of reading every note body (backlinks ran on every note open).
+  Post-move rewriting picks candidates via `notes_linking_to()`, matching a
+  full target, a bare file name or a "dir/…" prefix through the unit-tested
+  `PathRemap.link_target_matches`, and falls back to a full path walk until the
+  index exists — so a drop no longer reads the whole vault. The index is
+  remapped inside `move_path()` BEFORE the link rewrites, so a folder move can
+  never write a note back to its old path. `extract_wiki_links()` skips its
+  regex when a note has no `[[`, and the front-matter scan is line-capped, so
+  the per-keystroke autosave stays cheap.
+
+- **2026-09-18 — drag/drop release performance (drop path, not the tree)**
+  The release hitch was *not* the tree rebuild — `refresh()` is in-memory —
+  but the work before it: a note move ran `_rewrite_links` (opens every note);
+  a folder move ran `_rewrite_folder_links`, which called `scan_notes()` (dir
+  walk + `_read_title`/`_read_tags` = 2 file opens per note) and then
+  `_perform_drop` called `scan_notes()` again; `prune_empty_dirs()` walked
+  every folder in the vault. Changed: a move only alters paths (titles/tags
+  travel with their files), so the index is now remapped exactly via
+  `GameManager.remap_moved()` backed by the new dependency-free
+  `PathRemap` static helper (unit-tested, including look-alike prefixes); the
+  two link rewrites take a names-only path list from
+  `GameManager.list_note_paths()` instead of a full rescan; and
+  `prune_empty_ancestors()` checks only the moved path's ancestor chain.
+  `refresh()` is deliberately kept: it rebuilds from the in-memory index and
+  preserves folder-as-note merging and custom ordering.
+
+- **2026-09-18 — vault-tree drag UX + accidental-expansion root cause**:
+  The "tree expands by itself while hovering" bug was Godot's built-in
+  `Tree.enable_drag_unfolding` (default `true`: unfolds a collapsed row after
+  `dragging_unfold_wait_msec` = 500 ms while a drag hovers it), not custom
+  code. Fixed by setting `enable_drag_unfolding = false` in
+  `VaultTreeComponent.build()` — folder expansion is arrow-only, so the
+  per-callback collapse-restore workarounds were removed in favor of the
+  documented property. Also in this pass: mobile drag now requires a
+  3-second hold (`MOBILE_DRAG_HOLD_SECONDS`, Android only) before drag mode
+  activates, and releasing early stays a normal tap; the drop highlight uses
+  the live palette accent (inside = lightened/brighter, before/after =
+  darkened) on the target row only; and clicking a search result now selects
+  via `side_tree.set_selected()` so the clicked row opens instead of the
+  previously selected one.
 
 - **2026-09-18 — note ordering and worker lifecycle hardening (partial task implementation)**:
   Moved `notes.sort()` in `GameManager.write_note()` before its success return so the in-memory list is sorted after writes. Vault-tree search cancellation now retains the `Thread` reference until the worker exits, joins it before reuse/teardown, uses deferred cleanup polling between searches, and suppresses deferred results during `_exit_tree()`. `SyncService` now stops processing/timers/discovery and joins its active sync worker in `_exit_tree()`, while shutdown guards prevent new auto-sync work. Static GDScript diagnostics report no errors in the changed files. The receive-side `_poll_server()` parse/validation move, larger `main.gd`/parser refactors, and focused lifecycle/sync tests remain follow-up work; they were intentionally not forced into this first correctness pass. Full tests reached unit and drag success, then the documented native Godot exit abort (`double free or corruption (!prev)`) occurred during smoke.
@@ -589,6 +637,20 @@ _These OVERRIDE the skill's defaults for this project._
 
 - **The ⚠ path note in section 1** — global memory entry is stale (`www/`);
   actual project is under `Projects/Godot/neonnotes`.
+- **`Tree.enable_drag_unfolding`** — Godot unfolds a collapsed item when a
+  drag hovers over it (after `dragging_unfold_wait_msec`, 500 ms). NeonNotes
+  wants arrow-only expansion, so it is disabled in `VaultTreeComponent.build()`.
+  Re-enabling it makes folders pop open mid-drag again.
+- **Drop path must stay rescan-free** — `_perform_drop` uses
+  `GameManager.remap_moved()` + `prune_empty_ancestors()`, never
+  `scan_notes()`/`prune_empty_dirs()`; those read every note (2 opens each) /
+  walk every folder and were the real cause of the release hitch. A move
+  changes paths only, so a remap is both cheaper and more correct.
+- **Link index invalidation** — backlinks, the graph and post-move rewriting
+  read `GameManager.links`, not the vault. It is rebuilt by `scan_notes()` and
+  updated by `write_note()`. Any code that changes note files WITHOUT
+  `write_note()` must call `scan_notes()` afterwards, or a move could miss a
+  link to fix (breaking links is exactly what this index exists to prevent).
 - **godot-mcp exposes the `eval` tool as `eval_expr`** — intentional. goose's
   code-mode SDK cannot bind an `eval` function (strict-mode ES module), so the
   stdio proxy `~/.local/bin/godot-mcp-safe` renames it. Don't "fix" the

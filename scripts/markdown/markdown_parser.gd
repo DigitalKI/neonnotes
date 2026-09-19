@@ -172,27 +172,23 @@ static func _scan_emphasis(text: String, p: int, spans: Array[Dictionary]) -> in
 ## bracket/paren nesting for "[[..]]". Returns the index of the closing-start,
 ## or -1. `open`/`close` are the marker strings (may be multi-char).
 static func _find_closing(text: String, from: int, open: String, close: String) -> int:
-	var pos := from
-	while true:
-		var idx := text.find(close, pos)
-		if idx == -1:
-			return -1
-		# allow nesting of the same pair inside (e.g. [[a [[b]] c]])
-		var depth := 0
-		var scan := from
-		var ok := true
-		while scan < idx:
-			if text.find(open, scan) == scan:
-				depth += 1
-				scan += open.length()
-			elif text.find(close, scan) == scan:
-				depth -= 1
-				scan += close.length()
-			else:
-				scan += 1
-		if depth <= 0:
-			return idx
-		pos = idx + close.length()
+	# Single forward scan: the previous implementation rescanned the whole
+	# prefix for every candidate close, which became quadratic for long lines.
+	# `from` starts inside the outer pair, so depth tracks nested same-pair opens.
+	var depth := 0
+	var scan := from
+	while scan < text.length():
+		if text.find(open, scan) == scan:
+			depth += 1
+			scan += open.length()
+			continue
+		if text.find(close, scan) == scan:
+			if depth == 0:
+				return scan
+			depth -= 1
+			scan += close.length()
+			continue
+		scan += 1
 	return -1
 
 ## Detect an Obsidian-style callout in the *first line* of a quote container:

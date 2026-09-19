@@ -32,6 +32,10 @@ var _search_query := ""
 var _search_results: Array = []
 var _search_snippets: Dictionary = {}
 var _search_shutting_down := false
+const MOBILE_DRAG_HOLD_SECONDS := 3.0
+var _mobile_touch_candidate := false
+var _mobile_hold_ready := false
+var _mobile_hold_timer := Timer.new()
 var _search_cleanup_scheduled := false
 
 ## Wire behavior once the scene nodes are ready. The host connects
@@ -72,6 +76,10 @@ func build() -> void:
 	_search_timer.wait_time = 2.0
 	_search_timer.timeout.connect(_start_search)
 	add_child(_search_timer)
+	_mobile_hold_timer.one_shot = true
+	_mobile_hold_timer.wait_time = MOBILE_DRAG_HOLD_SECONDS
+	_mobile_hold_timer.timeout.connect(_activate_mobile_drag)
+	add_child(_mobile_hold_timer)
 	search.text_changed.connect(_on_search_changed)
 	side_tree.item_activated.connect(_on_tree_selected)
 	# Match the editor's touch-friendly scrollbar width. Tree exposes its
@@ -80,6 +88,9 @@ func build() -> void:
 		if child is VScrollBar:
 			child.custom_minimum_size = Vector2(14, 0)
 	side_tree.item_collapsed.connect(_on_item_collapsed)
+	# Documented Tree property: a drag hovering over a collapsed folder must
+	# NOT unfold it. Folder expansion is arrow-only in NeonNotes.
+	side_tree.enable_drag_unfolding = false
 	# Ensure the vault root always has a non-deletable homepage note.
 	_root_homepage = "_homepage.md"
 	if not FileAccess.file_exists(GameManager.vault_abs().path_join(_root_homepage)):
@@ -93,6 +104,9 @@ func build() -> void:
 				_is_touch_dragging = false
 				_drag_just_happened = false
 				_touch_src_path = ""
+				_mobile_touch_candidate = false
+				_mobile_hold_ready = false
+				_mobile_hold_timer.stop()
 				var start_item := side_tree.get_item_at_position(ev.position)
 				if start_item != null and start_item != side_tree.get_root() and start_item.get_metadata(0) != null:
 					var meta := str(start_item.get_metadata(0))
@@ -100,7 +114,11 @@ func build() -> void:
 						if meta.ends_with(".md") and DirAccess.dir_exists_absolute(GameManager.vault_abs().path_join(meta.trim_suffix(".md"))):
 							meta = meta.trim_suffix(".md")
 						_touch_src_path = meta
+						if OS.get_name() == "Android":
+							_mobile_touch_candidate = true
+							_mobile_hold_timer.start()
 			else:
+				_mobile_hold_timer.stop()
 				if _is_touch_dragging or _drag_just_happened:
 					if _touch_src_path != "":
 						var target_item := side_tree.get_item_at_position(ev.position)
@@ -125,14 +143,14 @@ func build() -> void:
 							_on_tree_selected()
 					_touch_src_path = ""
 		elif ev is InputEventMouseMotion:
-			if ev.button_mask & MOUSE_BUTTON_MASK_LEFT and _touch_src_path != "":
+			if ev.button_mask & MOUSE_BUTTON_MASK_LEFT and _touch_src_path != "" and _mobile_hold_ready:
 				if ev.position.distance_to(_press_pos) > 10.0:
 					_is_touch_dragging = true
 					var target_item := side_tree.get_item_at_position(ev.position)
 					var section := _custom_drop_section(target_item, ev.position)
 					_mark_drop_hint(target_item, section)
 		elif ev is InputEventScreenDrag:
-			if _touch_src_path != "":
+			if _touch_src_path != "" and _mobile_hold_ready:
 				if ev.position.distance_to(_press_pos) > 10.0:
 					_is_touch_dragging = true
 					var target_item := side_tree.get_item_at_position(ev.position)
@@ -231,6 +249,11 @@ func _start_search() -> void:
 	_search_thread = Thread.new()
 	_search_thread.start(_search_worker.bind(snapshot, query, generation))
 
+func _activate_mobile_drag() -> void:
+	if _mobile_touch_candidate and _touch_src_path != "":
+		_mobile_hold_ready = true
+		flash_cb.call("DRAG READY — move to place")
+
 func _retire_search_thread() -> void:
 	if _search_thread != null and _search_thread.is_started():
 		_search_cancel = true
@@ -298,7 +321,8 @@ func refresh() -> void:
 	side_tree.clear()
 	side_tree.hide_root = false
 	_build_tag_bar()
-	# drag notes/folders between folders + reorder rows (persisted in .neonnotes.json)
+	# Drag notes/folders between folders + reorder rows. Tree rows are never
+	# expanded by hover; folder expansion is handled only by the arrow click.
 	side_tree.set_drop_mode_flags(Tree.DROP_MODE_ON_ITEM | Tree.DROP_MODE_INBETWEEN)
 	# set_drag_forwarding() is persistent; re-registering it after every refresh
 	# can invalidate the active drag on Android.
@@ -474,13 +498,12 @@ func _custom_drop_section(it: TreeItem, at_position: Vector2) -> int:
 
 func _tree_can_drop(at_position: Vector2, data: Variant) -> bool:
 	var ok: bool = typeof(data) == TYPE_DICTIONARY and data.get("type", "") == "neonnotes_move"
-	if ok:
-		var target := side_tree.get_item_at_position(at_position)
-		var section := _custom_drop_section(target, at_position)
-		_mark_drop_hint(target, section)
-	else:
+	if not ok:
 		_clear_drop_hint()
-	return ok
+		return false
+	var target := side_tree.get_item_at_position(at_position)
+	_mark_drop_hint(target, _custom_drop_section(target, at_position))
+	return true
 
 ## Android has no native drop highlight — tint the hovered row and show the
 ## exact target operation in the status bar.
@@ -499,8 +522,10 @@ func _mark_drop_hint(it: TreeItem, section: int = 0) -> void:
 		return
 	var c := GameManager.color("accent")
 	# inside = solid bright row; above/below = thinner directional tint
-	var alpha := 0.48 if section == 0 else 0.20
-	it.set_custom_bg_color(0, Color(c.r, c.g, c.b, alpha))
+	# Inside is a brighter palette accent; before/after use a darker tint.
+	var tint := c.lightened(0.22) if section == 0 else c.darkened(0.28)
+	var alpha := 0.62 if section == 0 else 0.42
+	it.set_custom_bg_color(0, Color(tint.r, tint.g, tint.b, alpha))
 	var target := str(it.get_metadata(0)).trim_suffix(".md")
 	if target == "":
 		target = "Vault"
@@ -553,8 +578,9 @@ func _perform_drop(src: String, it: TreeItem, section: int) -> void:
 		var dst_dir := dst_meta.get_base_dir() if dst_meta.contains("/") else ""
 		if dst_dir == (new_rel.get_base_dir() if new_rel.contains("/") else ""):
 			_apply_order(new_rel, dst_dir, dst_meta, section < 0)
-	prune_empty_dirs()
-	GameManager.scan_notes()
+	# (The index was already remapped inside move_path, before the rewrites.)
+	# Only the moved path's own ancestor chain can have become empty.
+	prune_empty_ancestors(src)
 	refresh()
 	# reopen if the open note was the one moved/renamed
 	if GameManager.current_rel == "" and new_rel.ends_with(".md"):
@@ -566,6 +592,21 @@ func _tree_drop(at_position: Vector2, data: Variant) -> void:
 	var it := side_tree.get_item_at_position(at_position)
 	var section := _custom_drop_section(it, at_position)
 	_perform_drop(src, it, section)
+
+## Remove directories emptied by moving `rel` away, walking up only its own
+## ancestor chain (the full-vault prune below is far more expensive).
+func prune_empty_ancestors(rel: String) -> void:
+	var dir := rel.get_base_dir()
+	while dir != "":
+		var abs := GameManager.vault_abs().path_join(dir)
+		if not DirAccess.dir_exists_absolute(abs):
+			dir = dir.get_base_dir()
+			continue
+		if not DirAccess.get_directories_at(abs).is_empty() \
+				or not DirAccess.get_files_at(abs).is_empty():
+			return
+		DirAccess.remove_absolute(abs)
+		dir = dir.get_base_dir()
 
 ## Remove now-empty folders (bottom-up) so restructuring leaves no leftovers.
 func prune_empty_dirs() -> void:
@@ -639,6 +680,10 @@ func move_path(src_rel: String, dst_dir: String) -> String:
 	if DirAccess.rename_absolute(src, target) != OK:
 		return ""
 	var new_rel := target.trim_prefix(vault + "/")
+	# Remap the in-memory index (paths only; titles/tags/links travel with the
+	# files) before the link rewrites, so those rewrites pick their candidates
+	# and write back at the paths the files now have — never the old ones.
+	GameManager.remap_moved(src_rel, new_rel)
 	if src_rel.ends_with(".md"):
 		_rewrite_links(src_rel, new_rel)
 	else:
@@ -685,7 +730,8 @@ func _rewrite_links(old_rel: String, new_rel: String) -> void:
 	var new_base := new_noext.get_file()
 	if old_base != new_base:
 		targets.append([old_base, new_base])
-	for n in GameManager.notes:
+	# Only notes whose indexed links can match this move are rewritten.
+	for n in _move_rewrite_candidates(old_rel):
 		var path := GameManager.vault_abs().path_join(n)
 		var f := FileAccess.open(path, FileAccess.READ)
 		if f == null:
@@ -701,8 +747,8 @@ func _rewrite_links(old_rel: String, new_rel: String) -> void:
 
 ## Update [[wiki-links]] across the vault after a move/rename.
 func _rewrite_folder_links(old_dir: String, new_dir: String) -> void:
-	GameManager.scan_notes()  # refresh paths — children just moved on disk
-	for n in GameManager.notes:
+	# Only notes whose indexed links can match the old folder prefix.
+	for n in _move_rewrite_candidates(old_dir):
 		var path := GameManager.vault_abs().path_join(n)
 		var f := FileAccess.open(path, FileAccess.READ)
 		if f == null:
@@ -714,6 +760,14 @@ func _rewrite_folder_links(old_dir: String, new_dir: String) -> void:
 		t = re.sub(t, "[[" + new_dir + "/", true)
 		if t != orig:
 			GameManager.write_note(n, t)
+
+## Notes that could contain a link to the moved path. Backed by the link
+## index so a drop touches only affected notes; falls back to a full path
+## walk when the index is not built (e.g. a vault that has not been scanned).
+func _move_rewrite_candidates(old_prefix: String) -> Array[String]:
+	if not GameManager.links_ready:
+		return GameManager.list_note_paths()
+	return GameManager.notes_linking_to(old_prefix)
 
 ## Escape regex metacharacters (Godot has no String.regex_escape).
 func _re_escape(s: String) -> String:

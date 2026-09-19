@@ -5,6 +5,7 @@ signal palette_changed
 
 const VAULT_DIR := "user://vault"
 const SETTINGS := "user://settings.cfg"
+const FRONT_MATTER_SCAN_MAX_LINES := 200  # bound the per-keystroke front-matter scan
 const EXPORTS_SUBDIR := "exports"  # vault/exports/ — rendered PNG/GIF/HTML, hidden from the tree
 
 const PALETTES := {
@@ -95,6 +96,8 @@ func set_vault_dir(path: String) -> bool:
 
 var titles := {}  # relative path -> front-matter title ("" = use filename)
 var tags := {}    # relative path -> Array[String] from front-matter "tags:"
+var links := {}   # relative path -> Array[String] outbound [[wiki-link]] targets
+var links_ready := false  # true once scan_notes() has indexed the whole vault
 # custom sort order per folder: {"folder/sub": ["note.md", …]} persisted in
 # vault/.neonnotes.json (synced like a note, tiny and human-readable)
 const ORDER_FILE := ".neonnotes.json"
@@ -125,13 +128,43 @@ func scan_notes() -> void:
 	notes.clear()
 	titles.clear()
 	tags.clear()
+	links.clear()
 	_scan_dir("")
 	_ensure_folder_notes()
 	notes.sort()
 	for n in notes:
-		titles[n] = _read_title(n)
-		tags[n] = _read_tags(n)
+		# One read per note yields title + tags + outbound links; the previous
+		# code opened every note twice (once for the title, once for the tags).
+		var meta := _read_note_meta(n)
+		titles[n] = meta["title"]
+		tags[n] = meta["tags"]
+		links[n] = meta["links"]
+	links_ready = true
 	load_order()
+
+## Remap the in-memory index after files moved on disk, without re-reading the
+## vault. Only paths change on a move — titles/tags travel with their files —
+## so this is exact and avoids a full rescan on every drag/drop.
+## Matches the path itself, its children ("prefix/…") and its companion note.
+func remap_moved(old_prefix: String, new_prefix: String) -> void:
+	if old_prefix == "" or old_prefix == new_prefix:
+		return
+	var moved_notes: Array[String] = []
+	for n in notes:
+		moved_notes.append(PathRemap.moved(n, old_prefix, new_prefix))
+	notes = moved_notes
+	notes.sort()
+	titles = PathRemap.moved_keys(titles, old_prefix, new_prefix)
+	tags = PathRemap.moved_keys(tags, old_prefix, new_prefix)
+	links = PathRemap.moved_keys(links, old_prefix, new_prefix)
+	collapsed_folders = PathRemap.moved_keys(collapsed_folders, old_prefix, new_prefix)
+	var moved_order := {}
+	for dir in order.keys():
+		var lst: Array = []
+		for r in order[dir]:
+			lst.append(PathRemap.moved(String(r), old_prefix, new_prefix))
+		moved_order[PathRemap.moved(String(dir), old_prefix, new_prefix)] = lst
+	order = moved_order
 
 ## Every folder that shows in the tree is also a note: if `folder.md` doesn't
 ## exist, create it (fixes vaults made before folder+note merging).
@@ -160,48 +193,78 @@ func all_tags() -> Array[String]:
 	out.sort()
 	return out
 
-## Front-matter "tags: a, b" or "tags: [a, b]" → Array[String]
-func _read_tags(fname: String) -> Array[String]:
+## One pass over a note producing its front-matter title and tags plus every
+## outbound [[wiki-link]] target. Feeds the in-memory link index so backlinks,
+## the graph view and post-move link rewriting never re-read the whole vault.
+func _read_note_meta(fname: String) -> Dictionary:
 	var f := FileAccess.open(vault_abs() + "/" + fname, FileAccess.READ)
 	if f == null:
-		return []
-	var first := f.get_line()
-	if first.strip_edges() != "---":
-		return []
-	while not f.eof_reached():
-		var line := f.get_line()
-		if line.strip_edges() == "---":
-			break
-		var idx := line.find(":")
-		if idx > 0 and line.substr(0, idx).strip_edges() == "tags":
-			var v := line.substr(idx + 1).strip_edges().trim_prefix("[").trim_suffix("]")
-			var out: Array[String] = []
-			for x in v.split(","):
-				var tag := x.strip_edges().trim_prefix("\"").trim_suffix("\"").trim_prefix("#")
-				if tag != "" and not out.has(tag):
-					out.append(tag)
-			return out
-	return []
-
-## Peek at the front-matter title without parsing the whole file.
-func _read_title(fname: String) -> String:
-	var f := FileAccess.open(vault_abs() + "/" + fname, FileAccess.READ)
-	if f == null:
-		return ""
-	var first := f.get_line()
-	if first.strip_edges() != "---":
-		f.close()
-		return ""
-	while not f.eof_reached():
-		var line := f.get_line()
-		if line.strip_edges() == "---":
-			break
-		var idx := line.find(":")
-		if idx > 0 and line.substr(0, idx).strip_edges() == "title":
-			f.close()
-			return line.substr(idx + 1).strip_edges().trim_prefix("\"").trim_suffix("\"")
+		return {"title": "", "tags": [] as Array[String], "links": [] as Array[String]}
+	var text := f.get_as_text()
 	f.close()
-	return ""
+	return _parse_note_meta(text)
+
+## The same extraction from text already in memory — write_note() uses it so
+## saving a note refreshes its index entry for free.
+func _parse_note_meta(text: String) -> Dictionary:
+	var title := ""
+	var tag_list: Array[String] = []
+	# Front matter sits at the head of the file, so walk lines by index instead
+	# of splitting the whole note — write_note() runs on every autosave.
+	var total := text.length()
+	var first_end := text.find("\n")
+	if first_end < 0:
+		first_end = total
+	if text.substr(0, first_end).strip_edges() == "---":
+		var line_start := first_end + 1
+		var guard := 0
+		while line_start <= total and guard < FRONT_MATTER_SCAN_MAX_LINES:
+			guard += 1
+			var nl := text.find("\n", line_start)
+			if nl < 0:
+				nl = total
+			var line := text.substr(line_start, nl - line_start)
+			if line.strip_edges() == "---":
+				break
+			var idx := line.find(":")
+			if idx > 0:
+				var key := line.substr(0, idx).strip_edges()
+				if key == "title" and title == "":
+					title = line.substr(idx + 1).strip_edges().trim_prefix("\"").trim_suffix("\"")
+				elif key == "tags":
+					var v := line.substr(idx + 1).strip_edges().trim_prefix("[").trim_suffix("]")
+					for x in v.split(","):
+						var tag := x.strip_edges().trim_prefix("\"").trim_suffix("\"").trim_prefix("#")
+						if tag != "" and not tag_list.has(tag):
+							tag_list.append(tag)
+			line_start = nl + 1
+	return {"title": title, "tags": tag_list, "links": extract_wiki_links(text)}
+
+## Raw [[wiki-link]] targets in `text` (deduplicated, alias stripped). Lives here
+## rather than in WikiLinks so GameManager can index links without a cyclic
+## dependency; WikiLinks.extract_links() delegates to it.
+static func extract_wiki_links(text: String) -> Array[String]:
+	var result: Array[String] = []
+	if not text.contains("[["):
+		return result  # nothing to find — skip the regex on this hot path
+	var re := RegEx.create_from_string("\\[\\[([^\\]|]+)(?:\\|[^\\]]+)?\\]\\]")
+	for m in re.search_all(text):
+		var target := m.get_string(1).strip_edges()
+		if target != "" and not result.has(target):
+			result.append(target)
+	return result
+
+## Notes whose indexed outbound links could reference `old_prefix` (the full
+## target, its bare file name, or a "dir/…" prefix). Post-move rewriting visits
+## only these instead of reading every note in the vault.
+func notes_linking_to(old_prefix: String) -> Array[String]:
+	var out: Array[String] = []
+	for n in notes:
+		for t in links.get(n, []):
+			if PathRemap.link_target_matches(String(t), old_prefix):
+				out.append(n)
+				break
+	return out
 ## Recursive walk; notes store vault-relative paths ("folder/sub/note.md")
 func _scan_dir(rel: String) -> void:
 	var d := DirAccess.open(vault_dir + ("/" + rel if rel != "" else ""))
@@ -219,6 +282,29 @@ func _scan_dir(rel: String) -> void:
 		f = d.get_next()
 	d.list_dir_end()
 
+## Vault-relative note paths straight from the directory tree, with no
+## title/tag file reads — a cheap path list for link rewriting after a move.
+func list_note_paths() -> Array[String]:
+	var out: Array[String] = []
+	_collect_note_paths("", out)
+	return out
+
+func _collect_note_paths(rel: String, out: Array[String]) -> void:
+	var d := DirAccess.open(vault_dir + ("/" + rel if rel != "" else ""))
+	if d == null:
+		return
+	d.list_dir_begin()
+	var f := d.get_next()
+	while f != "":
+		var child := rel + ("/" if rel != "" else "") + f
+		if d.current_is_dir():
+			if not f.begins_with(".") and not (rel == "" and f == EXPORTS_SUBDIR):
+				_collect_note_paths(child, out)
+		elif f.ends_with(".md"):
+			out.append(child)
+		f = d.get_next()
+	d.list_dir_end()
+
 ## Create note in a folder (creating parent dirs as needed)
 func write_note(fname: String, text: String) -> bool:
 	var abs := vault_abs() + "/" + fname
@@ -233,6 +319,12 @@ func write_note(fname: String, text: String) -> bool:
 	# Keep the in-memory note list deterministic for callers that write a note
 	# before the next full scan.
 	notes.sort()
+	# Refresh this note's cached metadata from the text we already hold, so the
+	# link index stays valid without a rescan (autosave, sync, link rewriting).
+	var meta := _parse_note_meta(text)
+	titles[fname] = meta["title"]
+	tags[fname] = meta["tags"]
+	links[fname] = meta["links"]
 	return true
 
 func read_note(fname: String) -> String:
