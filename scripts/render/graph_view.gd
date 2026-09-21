@@ -57,6 +57,9 @@ var _keys: Array[String] = []
 var _routes: Array = []          # {"samples": PackedVector2Array, "bidir": bool}
 
 func _ready() -> void:
+	# Pan/zoom is a draw transform: clip so the map never spills past the
+	# graph view's bounding box into the toolbar / status bar / sidebar.
+	clip_contents = true
 	_font = load("res://assets/fonts/Orbitron.ttf")
 	mouse_default_cursor_shape = Control.CURSOR_ARROW
 	set_process(false)

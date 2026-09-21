@@ -11,6 +11,11 @@ signal mobile_changed(is_mobile: bool)
 const MOBILE_MARGIN_SIDE := 10
 const MOBILE_MARGIN_BOTTOM := 10
 
+## Font points subtracted from all UI/content fonts when a phone is in
+## landscape (set by update_layout, read by ThemeComponent/PreviewBuilder).
+## Vertical/portrait layout keeps the baseline sizes untouched.
+static var ui_font_delta := 0
+
 var root_ctl: Control
 var workspace_margin: MarginContainer
 var sidebar: PanelContainer
@@ -78,14 +83,21 @@ func update_layout() -> void:
 	graph_btn.visible = not cramped
 	export_btn.visible = not cramped
 	if mobile:
+		# Landscape phones have far less vertical room: tighter margins and a
+		# smaller header font. Portrait keeps the comfortable mobile values.
+		var landscape := vp.x > vp.y
+		var side := 2 if landscape else MOBILE_MARGIN_SIDE
+		var bottom := 2 if landscape else MOBILE_MARGIN_BOTTOM
+		set_meta("mobile_side", side)
+		set_meta("mobile_bottom", bottom)
 		sidebar.visible = drawer_open
 		sidebar.custom_minimum_size = Vector2(mini(280, int(vp.x * 0.75)), 0)
 		# mobile: tree and editor never share space — hide content while the drawer is open
 		content.visible = not drawer_open
-		note_title.add_theme_font_size_override("font_size", 14)
+		note_title.add_theme_font_size_override("font_size", 10 if landscape else 14)
 		for btn in toolbar.get_children():
 			if btn is Button:
-				btn.custom_minimum_size = Vector2(52, 44)
+				btn.custom_minimum_size = Vector2(46, 38) if landscape else Vector2(52, 44)
 		# wide, tappable scrollbar for touch scrolling
 		var vsb := content_host.get_v_scroll_bar()
 		vsb.custom_minimum_size = Vector2(18, 0)
@@ -107,6 +119,7 @@ func update_layout() -> void:
 		for btn in toolbar.get_children():
 			if btn is Button:
 				btn.custom_minimum_size = Vector2(56, 36)
+	ui_font_delta = 2 if (mobile and vp.x > vp.y) else 0
 	mobile_changed.emit(is_mobile_layout)
 
 
@@ -122,8 +135,12 @@ func toggle_sidebar() -> void:
 ## Comfortable breathing room around the workspace on phones; the keyboard/
 ## nav-bar inset is added on top of this, never replaces it.
 func _apply_safe_area() -> void:
-	var side_margin := MOBILE_MARGIN_SIDE if is_mobile_layout else 0
-	var base_bottom := MOBILE_MARGIN_BOTTOM if is_mobile_layout else 0
+	var side_margin := 0
+	var base_bottom := 0
+	if is_mobile_layout:
+		# update_layout() narrows these on landscape phones (see meta below).
+		side_margin = int(get_meta("mobile_side", MOBILE_MARGIN_SIDE))
+		base_bottom = int(get_meta("mobile_bottom", MOBILE_MARGIN_BOTTOM))
 	if OS.get_name() != "Android":
 		root_ctl.offset_left = 0
 		root_ctl.offset_top = 0

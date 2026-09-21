@@ -44,18 +44,6 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="Header" type="PanelContainer" parent="Root" unique_id=1604539716]
-unique_name_in_owner = true
-layout_mode = 2
-
-[node name="Title" type="Label" parent="Root/Header" unique_id=1157650099]
-unique_name_in_owner = true
-layout_mode = 2
-theme_override_fonts/font = ExtResource("2_orbitron")
-theme_override_font_sizes/font_size = 20
-text = "◈ NEON NOTES v2"
-horizontal_alignment = 1
-
 [node name="Toolbar" parent="Root" unique_id=505865680 instance=ExtResource("5_toolbar")]
 unique_name_in_owner = true
 layout_mode = 2

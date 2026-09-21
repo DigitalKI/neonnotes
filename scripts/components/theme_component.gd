@@ -8,7 +8,6 @@ extends Node
 ## the palette_changed connection (it also re-renders the preview).
 
 var bg: ColorRect
-var title_label: Label
 var note_title: Label
 var side_panel: PanelContainer
 var content_panel: PanelContainer
@@ -16,11 +15,10 @@ var toolbar: Control
 var code_edit: CodeEdit
 
 
-func setup(p_bg: ColorRect, p_title: Label, p_note_title: Label,
+func setup(p_bg: ColorRect, p_note_title: Label,
 		p_side_panel: PanelContainer, p_content_panel: PanelContainer,
 		p_toolbar: Control, p_code_edit: CodeEdit) -> void:
 	bg = p_bg
-	title_label = p_title
 	note_title = p_note_title
 	side_panel = p_side_panel
 	content_panel = p_content_panel
@@ -40,12 +38,12 @@ func apply() -> void:
 	# Padding is authored on the preview/edit MarginContainers in Main.tscn so
 	# the ScrollContainer scrollbar remains flush with the content panel edge.
 	content_panel.add_theme_stylebox_override("panel", panel.duplicate())
-	title_label.add_theme_font_override("font", orb)
 	note_title.add_theme_font_override("font", orb)
 	for btn in toolbar.get_children():
 		if btn is Button:
 			btn.add_theme_font_override("font", orb)
-			btn.add_theme_font_size_override("font_size", 13)
+			# Landscape phones shrink all fonts by LayoutComponent.ui_font_delta.
+			btn.add_theme_font_size_override("font_size", 13 - LayoutComponent.ui_font_delta)
 	code_edit.add_theme_color_override("font_color", c["text"])
 	code_edit.add_theme_color_override("background_color", Color(c["bg"].r, c["bg"].g, c["bg"].b, 0.7))
 	code_edit.add_theme_color_override("current_line_color", Color(c["panel"].r, c["panel"].g, c["panel"].b, 0.9))

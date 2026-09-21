@@ -23,14 +23,18 @@ static func build(doc: Dictionary, into: VBoxContainer) -> void:
 	var text_c := _col("text")
 
 	var title: String = doc.get("meta", {}).get("title", "")
-	var tsize := 32 if ChartView.compact else 40
+	var tsize := (32 - LayoutComponent.ui_font_delta) if ChartView.compact else 40
 	if title != "":
 		into.add_child(_rich("[font_size=%d][b][color=#%s]%s[/color][/b][/font_size]"
 			% [tsize, _hex(accent), _inline(escape(title))], text_c))
 		into.add_child(_rule(accent))
 
 	var compact: bool = ChartView.compact
-	var sizes := [38, 30, 24, 20] if not compact else [32, 27, 22, 19]
+	var d := LayoutComponent.ui_font_delta
+	var sizes := ([38, 30, 24, 20] if not compact else [32, 27, 22, 19])
+	if d > 0:
+		for i in sizes.size():
+			sizes[i] -= d
 	for block in doc.get("blocks", []):
 		match block["type"]:
 			"heading":
@@ -139,6 +143,11 @@ static func _font_with_emoji() -> Font:
 	return _emoji_font
 
 static func _rich(bb: String, default_col: Color) -> RichTextLabel:
+	# Landscape phones shrink every body font by LayoutComponent.ui_font_delta.
+	# Wrapping the whole bbcode scales everything without explicit sizes; tags
+	# that set their own font_size (headings) still win over the wrapper.
+	if LayoutComponent.ui_font_delta > 0:
+		bb = "[font_size=%d]%s[/font_size]" % [16 - LayoutComponent.ui_font_delta, bb]
 	var rt := RichTextLabel.new()
 	rt.name = "PreviewRichText"
 	rt.bbcode_enabled = true

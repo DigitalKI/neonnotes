@@ -26,7 +26,6 @@ func _load_help_doc() -> String:
 
 
 @onready var bg: ColorRect = %Bg
-@onready var title_label: Label = %Title
 @onready var toolbar: ToolbarComponent = %Toolbar
 @onready var vault_tree: VaultTreeComponent = %SidePanel
 @onready var status_bar: StatusBarComponent = %StatusBar
@@ -72,7 +71,7 @@ func _ready() -> void:
 	_build_dynamic_ui()
 	edit_search.text_changed.connect(_find_in_editor)
 	theme_component.name = "ThemeComponent"
-	theme_component.setup(%Bg, %Title, toolbar.note_title, %SidePanel as PanelContainer,
+	theme_component.setup(%Bg, toolbar.note_title, %SidePanel as PanelContainer,
 			%Content as PanelContainer, toolbar, code_edit)
 	add_child(theme_component)
 	theme_component.apply()
@@ -116,6 +115,9 @@ func _ready() -> void:
 	PreviewBuilder.open_cb = _open_wikilink
 	PreviewBuilder.image_cb = _on_image_click
 	layout_component.ready()
+	# Landscape/portrait rotation changes LayoutComponent.ui_font_delta; chrome
+	# and content fonts must be re-applied for the new delta to take effect.
+	layout_component.mobile_changed.connect(_on_mobile_changed)
 	# High-DPI phones: scale the whole UI from the 96dpi desktop baseline
 	var ui_scale := clampf(DisplayServer.screen_get_dpi() / 160.0, 1.0, 3.0)
 	get_tree().root.content_scale_factor = ui_scale
@@ -537,6 +539,15 @@ func _rm_dir(rel: String) -> void:
 		DirAccess.remove_absolute(abs.path_join(d))
 	DirAccess.remove_absolute(abs)
 
+func _on_mobile_changed(_is_mobile: bool) -> void:
+	theme_component.apply()
+	if graph_view.visible or settings_mode:
+		return  # graph/settings own the screen; fonts re-apply when they close
+	if help_mode:
+		_show_help()
+	elif not source_mode:
+		_render_preview()
+
 func _on_note_selected(fname: String) -> void:
 	autosave_timer.stop()
 	if settings_mode:
@@ -547,6 +558,7 @@ func _on_note_selected(fname: String) -> void:
 	GameManager.current_rel = fname
 	GameManager.last_opened_rel = fname
 	GameManager._save_settings()
+	print("[MAIN-DBG] _on_note_selected fname=", fname)
 	code_edit.text = GameManager.read_note(fname)
 	help_mode = false
 	note_title.text = fname.trim_suffix(".md")
@@ -838,6 +850,10 @@ func _toggle_mode() -> void:
 	_set_mode()
 
 func _show_help() -> void:
+	# Help behaves like opening a note: it replaces the settings page and, on
+	# mobile, collapses the tree drawer so the help content is full-screen.
+	if settings_mode:
+		_close_settings()
 	help_mode = true
 	GameManager.current_file = ""
 	autosave_timer.stop()
@@ -850,6 +866,8 @@ func _show_help() -> void:
 	PreviewBuilder.pal_override = {}
 	PreviewBuilder.build(MarkdownParser.parse(_load_help_doc()), content_body)
 	content_host.scroll_vertical = 0
+	if layout_component.is_mobile_layout and layout_component.drawer_open:
+		layout_component.toggle_sidebar()
 
 func _render_preview(preserve_scroll := false) -> void:
 	if settings_mode:
@@ -1229,6 +1247,12 @@ func _toggle_graph() -> void:
 		content_host.visible = not source_mode
 		return
 	_flush_save()
+	# The graph behaves like opening a note: leave settings and, on mobile,
+	# collapse the tree drawer so the graph fills the screen.
+	if settings_mode:
+		_close_settings()
+	if layout_component.is_mobile_layout and layout_component.drawer_open:
+		layout_component.toggle_sidebar()
 	code_edit.visible = false
 	edit_padding.visible = false
 	content_host.visible = false

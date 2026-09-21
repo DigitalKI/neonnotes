@@ -29,6 +29,7 @@ text = "🗑 Delete Node"
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_vertical = 3
+scroll_horizontal_enabled = false
 
 [node name="BacklinksPanel" type="PanelContainer" parent="SideVBox" unique_id=1678489487]
 unique_name_in_owner = true

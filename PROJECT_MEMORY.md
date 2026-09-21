@@ -5,7 +5,7 @@
 > updated at the **end**, so context, decisions, and direction survive across
 > conversations. Keep it current — a stale memory file is worse than none.
 
-_Last updated: 2026-09-20 (graph: radial vault map with flowing directional links) · Godot 4.7 · renderer: gl_compatibility_
+_Last updated: 2026-09-21 (help/graph close settings + mobile drawer, graph clipped, landscape mobile: margins 2, all fonts −2 via ui_font_delta) · Godot 4.7 · renderer: gl_compatibility_
 
 > ⚠️ **Path note:** the saved global memory says `/home/toshiwo/www/neonnotes`
 > but the project actually lives at **`/home/toshiwo/Projects/Godot/neonnotes`**.
@@ -29,6 +29,89 @@ _Last updated: 2026-09-20 (graph: radial vault map with flowing directional link
   folder via 📂 Vault). No proprietary DB — vault is grep/rsync/editor friendly.
 
 ## 2. What has been done (work log)
+
+- **2026-09-21 — settings/graph/help/mobile-layout UX fixes**:
+  1. Help („?") and the graph button now behave like opening a note while the
+     settings page is up: `_show_help()` / `_toggle_graph()` (open branch) call
+     `_close_settings()` first (main.gd).
+  2. On mobile both also collapse the tree drawer via
+     `layout_component.toggle_sidebar()` so the help/graph fills the screen,
+     matching `_on_note_selected`'s full-screen drawer invariant.
+  3. GraphView sets `clip_contents = true` in `_ready()` — pan/zoom is a draw
+     transform, so without clipping the map spilled past its bounding box into
+     toolbar/status bar.
+  4. Landscape mobile (vp.x > vp.y): LayoutComponent halves the workspace side/
+     bottom margins (10 → 2 after a second user pass — start 10 → 4 → 2), sets
+     note-title font 14 → 10, toolbar buttons 52×44 → 46×38, and — the second
+     pass — introduces the static `LayoutComponent.ui_font_delta = 2` that is
+     subtracted from ALL other fonts: ThemeComponent toolbar buttons
+     (13 → 11), PreviewBuilder title/headings (compact arrays −2) and every
+     `_rich()` body (whole bbcode wrapped in [font_size=14] when delta > 0).
+     Portrait/vertical layout keeps the baseline sizes untouched. main.gd
+     connects `mobile_changed` → `_on_mobile_changed` which re-applies the
+     theme and re-renders help/preview (skipped while graph or settings own
+     the screen) so the delta lands without a restart.
+  Note: `tests/run_tests.sh` exits 134 (double-free at smoke shutdown) — that is
+  5. App-name header removed entirely (both orientations): the `Header`
+     PanelContainer + `Title` Label ("◈ NEON NOTES v2") were deleted from
+     Main.tscn (nothing else referenced them); `%Title` refs removed from
+     main.gd and ThemeComponent (setup() signature lost its p_title param).
+  pre-existing on a clean tree; all tests report PASS before the crash.
+- **2026-09-21 — vault-tree "white line" removed (hover/focus decorations)**:
+  The stray white rectangle that appeared on a tree node came from the DEFAULT
+  theme, not app code: `cursor`/`cursor_unfocused` is a `StyleBoxFlat` with
+  `border_width=2`, `draw_center=false` and `bg=(1,1,1,0.75)` — a 2 px white
+  outline drawn on the focused row (the default theme also ships grey-white
+  `hovered`*` styleboxes: 7 %/40 % white fills). Confirmed by dumping
+  `ThemeDB.get_default_theme().get_stylebox_list("Tree")`. `build()` now
+  overrides `hovered`, `hovered_dimmed`, `hovered_selected`,
+  `hovered_selected_focus`, `cursor`, `cursor_unfocused` and `focus` with
+  `StyleBoxEmpty`; `selected`/`selected_focus` are deliberately kept as the only
+  selection feedback. `SideTree` is the app's only `Tree` node, so this is the
+  single place to style it. If hover feedback is ever wanted back, use a subtle
+  palette-accent tint instead of the default white fill.
+  **ROOT CAUSE (2nd pass, measured — my 1st diagnosis was WRONG)**: the line is
+  Godot's native **drop marker**, not the guide/highlight lines.
+  `drop_position_color` defaults to PURE WHITE `(1,1,1,1)` and
+  `drop_on_item_color` is white too; the Tree draws them for any row it treats
+  as a drop target, i.e. on *plain hover*, because
+  `DROP_MODE_ON_ITEM|DROP_MODE_INBETWEEN` is enabled for reordering. The shape
+  is an L: a ~145 px horizontal line under the hovered row plus a ~22 px
+  vertical run in its gutter up to the parent — matching the user's report
+  exactly. `drop_position_color`/`drop_on_item_color` are now zeroed (the app's
+  own `_mark_drop_hint` accent tint provides drag feedback).
+  Proof method (worth reusing): run the REAL `Main.tscn` in a harness, hover a
+  nested row, and diff the rendered frames pixel-by-pixel in code — then paint
+  ONE Tree theme colour pure red per run (`add_theme_color_override(name,
+  Color(1,0,0,1))`) and see which one recolours the artefact. Only
+  `drop_position_color` did. Guides were a red herring: painting `guide_color`
+  red showed it owns the *static* row separators, and `draw_guides=0` did NOT
+  affect the hover line. `parent_hl_line_color`/`children_hl_line_color`/
+  `font_hovered_*` are also zeroed/normalised (real but separate hover effects).
+  Scratch harnesses used for this were removed after verification.
+
+- **2026-09-21 — vault-tree tap offset: investigated on the real device (no bug
+  found in the current code)**: the report "on mobile it opens tree rows ~4-5
+  indexes above the one tapped" was chased end-to-end on the attached
+  SM-A165M (1080x2340, density 450). Measured facts: viewport is **455x986** vs
+  window 1080x2340 (2.373x, `screen_scale=1.35`), and `ev.global` maps
+  exactly (physical y 1148 -> `ev.global.y 483.7` = 1148/2.373), so the
+  touch -> viewport -> tree-local chain is correct. adb-injected taps resolved
+  the CORRECT row in every scenario: unscrolled, scrolled (`scroll=832/1219/1329`),
+  mid-flick (during momentum), soft keyboard open (`_apply_safe_area` insets),
+  immediately after opening the drawer, with keyboard-open + drawer reopen; a
+  3 s long-press drag produced exactly ONE `_perform_drop`. On Android every
+  release arrived as an EMULATED `InputEventMouseButton` (emulate_mouse_from_touch),
+  so the `InputEventScreenTouch` branch is effectively dormant there.
+  Temporary diagnostics live in `build()`'s gui_input lambda and
+  `debug_dump_rows()` (`[TREE-DBG]`/`[TREE-GEO]`) — strip before committing.
+  Agreed follow-up (not implemented): resolve the row ONCE at press and open
+  that stashed item on release, instead of re-hit-testing at release and
+  re-reading `side_tree.get_selected()` — the only remaining path where the
+  tapped row and the opened note could diverge (a `refresh()`, keyboard inset
+  or scroll settle between press and release). Time must NOT be the tap/scroll
+  discriminator (a flick is shorter than a tap); keep displacement < 16 px plus
+  the 3 s hold gate.
 
 - **2026-09-20 — graph level semantics + renderer-agnostic `GraphModel`**:
   The graph's "levels" were link hops over a mixed edge set. Confirmed

@@ -87,6 +87,33 @@ func build() -> void:
 	for child in side_tree.get_children():
 		if child is VScrollBar:
 			child.custom_minimum_size = Vector2(14, 0)
+	# NeonNotes marks state with the palette (selection fill, accent drop tint),
+	# so the default theme's grey-white decorations are noise. In particular
+	# `cursor`/`cursor_unfocused` is a 2 px WHITE RECTANGLE drawn on the focused
+	# row — it read as a stray line on whatever node the pointer touched.
+	# `selected`/`selected_focus` are deliberately kept: that is the only
+	# selection feedback left.
+	for sb_name in ["hovered", "hovered_dimmed", "hovered_selected",
+			"hovered_selected_focus", "cursor", "cursor_unfocused", "focus"]:
+		side_tree.add_theme_stylebox_override(sb_name, StyleBoxEmpty.new())
+	# The artefact users report as a "white line under the hovered node with a
+	# vertical line up to its parent" is Godot's native DROP MARKER, not the
+	# guide/highlight lines: `drop_position_color` defaults to PURE WHITE
+	# (1,1,1,1) and `drop_on_item_color` is white too, and the Tree draws them
+	# for any row it considers a drop target — i.e. on plain hover, because
+	# DROP_MODE_ON_ITEM|DROP_MODE_INBETWEEN is enabled for reordering.
+	# Verified by painting each Tree colour red in a fresh run: only
+	# drop_position_color recolours that line. The app draws its own
+	# palette-accent drop hint (_mark_drop_hint), so the native marker is noise.
+	for c_name in ["drop_position_color", "drop_on_item_color"]:
+		side_tree.add_theme_color_override(c_name, Color(0, 0, 0, 0))
+	# Ancestry-chain highlight (underline + vertical guide run) and the hovered
+	# row's text brightening: same family of artefacts, also removed.
+	for c_name in ["parent_hl_line_color", "children_hl_line_color"]:
+		side_tree.add_theme_color_override(c_name, Color(0, 0, 0, 0))
+	var font_c: Color = side_tree.get_theme_color("font_color")
+	for c_name in ["font_hovered_color", "font_hovered_dimmed_color", "font_hovered_selected_color"]:
+		side_tree.add_theme_color_override(c_name, font_c)
 	side_tree.item_collapsed.connect(_on_item_collapsed)
 	# Documented Tree property: a drag hovering over a collapsed folder must
 	# NOT unfold it. Folder expansion is arrow-only in NeonNotes.
@@ -119,6 +146,7 @@ func build() -> void:
 							_mobile_hold_timer.start()
 			else:
 				_mobile_hold_timer.stop()
+				print("[TREE-DBG] release-branch is_dragging=", _is_touch_dragging, " drag_just=", _drag_just_happened, " src=", _touch_src_path)
 				if _is_touch_dragging or _drag_just_happened:
 					if _touch_src_path != "":
 						var target_item := side_tree.get_item_at_position(ev.position)
@@ -130,8 +158,20 @@ func build() -> void:
 				else:
 					if ev.position.distance_to(_press_pos) < 16.0:
 						var it := side_tree.get_item_at_position(ev.position)
+						var _dbg_fallback := false
 						if it == null:
+							_dbg_fallback = true
 							it = side_tree.get_item_at_position(side_tree.get_local_mouse_position())
+						print("[TREE-DBG] release cls=", ev.get_class(),
+								" ev.pos=", ev.position, " ev.global=", ev.get('global_position'),
+								" tree.global=", side_tree.global_position,
+								" win=", DisplayServer.window_get_size(),
+								" vp=", get_viewport().get_visible_rect().size,
+								" screen_scale=", DisplayServer.screen_get_scale(),
+								" fallback=", _dbg_fallback,
+								" item=", "<null>" if it == null else it.get_metadata(0),
+								" local_mouse=", side_tree.get_local_mouse_position(),
+								" scroll=", side_tree.get_scroll())
 						if it != null and it.get_metadata(0) != null:
 							# The left folding arrow is a tree control, not a note
 							# activation. On mobile, never close the drawer for it.
@@ -329,6 +369,8 @@ func refresh() -> void:
 	if not _tree_drag_forwarding_set:
 		side_tree.set_drag_forwarding(_tree_get_drag, _tree_can_drop, _tree_drop)
 		_tree_drag_forwarding_set = true
+	if OS.get_name() == "Android":
+		debug_dump_rows.call_deferred()
 	var root := side_tree.create_item()
 	root.set_text(0, "Vault")
 	root.set_metadata(0, "")
@@ -432,6 +474,7 @@ func ordered_notes(dir: String) -> Array[String]:
 # ---------------------------------------------- tree drag & drop (v3)
 
 func _tree_get_drag(at_position: Vector2) -> Variant:
+	print("[TREE-DBG] _tree_get_drag at=", at_position)
 	var it := side_tree.get_item_at_position(at_position)
 	if it == null or it == side_tree.get_root() or it.get_metadata(0) == null:
 		return null
@@ -545,6 +588,7 @@ func _notification(what: int) -> void:
 		_clear_drop_hint()
 
 func _perform_drop(src: String, it: TreeItem, section: int) -> void:
+	print("[TREE-DBG] _perform_drop src=", src, " it=", "<null>" if it == null else it.get_metadata(0), " section=", section)
 	if src == "":
 		_clear_drop_hint()
 		return
@@ -588,6 +632,7 @@ func _perform_drop(src: String, it: TreeItem, section: int) -> void:
 	flash_cb.call("Moved → " + new_rel)
 
 func _tree_drop(at_position: Vector2, data: Variant) -> void:
+	print("[TREE-DBG] _tree_drop at=", at_position, " data=", data)
 	var src := str(data.get("path", ""))
 	var it := side_tree.get_item_at_position(at_position)
 	var section := _custom_drop_section(it, at_position)
@@ -803,6 +848,55 @@ func _on_item_collapsed(item: TreeItem) -> void:
 		GameManager.collapsed_folders[rel] = item.collapsed
 		GameManager.save_order()
 
+func debug_expand_all() -> void:
+	_debug_expand(side_tree.get_root())
+
+func debug_dump_rows(limit: int = 12) -> void:
+	print("[TREE-GEO] vp=", get_viewport().get_visible_rect().size,
+			" win=", DisplayServer.window_get_size(),
+			" screen_scale=", DisplayServer.screen_get_scale(),
+			" tree.global=", side_tree.global_position, " tree.size=", side_tree.size,
+			" scroll=", side_tree.get_scroll())
+	var it := side_tree.get_root()
+	var n := 0
+	while it != null and n < limit:
+		var r := side_tree.get_item_area_rect(it)
+		print("[TREE-GEO] row=", n, " meta=", it.get_metadata(0),
+				" local_top=", r.position.y, " h=", r.size.y,
+				" vp_top=", side_tree.global_position.y + r.position.y)
+		it = it.get_next_visible()
+		n += 1
+
+func debug_drag(from_vp: Vector2, to_vp: Vector2) -> void:
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	press.position = from_vp
+	press.global_position = from_vp
+	Input.parse_input_event(press)
+	await get_tree().process_frame
+	for i in 8:
+		var mm := InputEventMouseMotion.new()
+		mm.position = from_vp.lerp(to_vp, float(i + 1) / 8.0)
+		mm.global_position = mm.position
+		mm.button_mask = MOUSE_BUTTON_MASK_LEFT
+		Input.parse_input_event(mm)
+		await get_tree().process_frame
+	var rel := InputEventMouseButton.new()
+	rel.button_index = MOUSE_BUTTON_LEFT
+	rel.pressed = false
+	rel.position = to_vp
+	rel.global_position = to_vp
+	Input.parse_input_event(rel)
+	print("[TREE-DBG] debug_drag queued from=", from_vp, " to=", to_vp)
+
+func _debug_expand(it: TreeItem) -> void:
+	if it == null:
+		return
+	it.collapsed = false
+	for c in it.get_children():
+		_debug_expand(c)
+
 func _on_tree_selected() -> void:
 	var it := side_tree.get_selected()
 	if it == null:
@@ -814,6 +908,7 @@ func _on_tree_selected() -> void:
 	if meta == null:
 		return
 	var fname := str(meta)
+	print("[TREE-DBG] _on_tree_selected meta=", fname)
 	# A merged folder+note row opens its note; plain folders only fold.
 	if str(meta).ends_with(".md") and GameManager.notes.has(fname):
 		note_requested.emit(fname)
