@@ -725,11 +725,20 @@ func _paths_under(rel: String) -> Array[String]:
 func _rewrite_links(old_rel: String, new_rel: String) -> void:
 	var old_noext := old_rel.trim_suffix(".md")
 	var new_noext := new_rel.trim_suffix(".md")
-	var targets := [[old_noext, new_noext]]
+	# Compile each pattern ONCE per move: the previous code re-created the
+	# identical RegEx for every candidate note, which is pure CPU on the UI
+	# thread and grows with vault size.
+	var rules: Array = [[
+		RegEx.create_from_string("(?i)\\[\\[" + _re_escape(old_noext) + "(\\]\\]|\\|)"),
+		"[[" + new_noext + "$1",
+	]]
 	var old_base := old_noext.get_file()
 	var new_base := new_noext.get_file()
 	if old_base != new_base:
-		targets.append([old_base, new_base])
+		rules.append([
+			RegEx.create_from_string("(?i)\\[\\[" + _re_escape(old_base) + "(\\]\\]|\\|)"),
+			"[[" + new_base + "$1",
+		])
 	# Only notes whose indexed links can match this move are rewritten.
 	for n in _move_rewrite_candidates(old_rel):
 		var path := GameManager.vault_abs().path_join(n)
@@ -739,14 +748,16 @@ func _rewrite_links(old_rel: String, new_rel: String) -> void:
 		var t := f.get_as_text()
 		f.close()
 		var orig := t
-		for pair in targets:
-			var re := RegEx.create_from_string("(?i)\\[\\[" + _re_escape(str(pair[0])) + "(\\]\\]|\\|)")
-			t = re.sub(t, "[[" + str(pair[1]) + "$1", true)
+		if t.contains("[["):
+			for rule in rules:
+				t = (rule[0] as RegEx).sub(t, rule[1], true)
 		if t != orig:
 			GameManager.write_note(n, t)
 
 ## Update [[wiki-links]] across the vault after a move/rename.
 func _rewrite_folder_links(old_dir: String, new_dir: String) -> void:
+	# Compiled once per move (was: once per candidate note).
+	var folder_re := RegEx.create_from_string("(?i)\\[\\[" + _re_escape(old_dir) + "/")
 	# Only notes whose indexed links can match the old folder prefix.
 	for n in _move_rewrite_candidates(old_dir):
 		var path := GameManager.vault_abs().path_join(n)
@@ -756,8 +767,8 @@ func _rewrite_folder_links(old_dir: String, new_dir: String) -> void:
 		var t := f.get_as_text()
 		f.close()
 		var orig := t
-		var re := RegEx.create_from_string("(?i)\\[\\[" + _re_escape(old_dir) + "/")
-		t = re.sub(t, "[[" + new_dir + "/", true)
+		if t.contains("[["):
+			t = folder_re.sub(t, "[[" + new_dir + "/", true)
 		if t != orig:
 			GameManager.write_note(n, t)
 
