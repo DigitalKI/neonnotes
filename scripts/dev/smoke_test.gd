@@ -36,6 +36,8 @@ func _run_smoke() -> void:
 	fails += _check(doc["meta"].get("title", "") == "T" and doc["meta"].get("theme", "") == "Toxic Terminal", "front-matter title/theme")
 	var links := WikiLinks.extract_links("see [[Alpha]] and [[Beta|alias]] and [[Alpha]]")
 	fails += _check(links == ["Alpha", "Beta"], "extract_links, got %s" % [links])
+	var escaped := WikiLinks.extract_links("literal \\[[Alpha]] and real [[Beta]]")
+	fails += _check(escaped.size() == 1 and escaped[0] == "Beta", "escaped [[ is not a link")
 	m.code_edit.text = "---\ntitle: \"Smoke\"\n---\n\n[[Demo]]\n\n%%g%% ++f++"
 	m._render_preview()
 	fails += _check(m.content_host.get_child_count() > 0, "preview children=%d" % m.content_host.get_child_count())

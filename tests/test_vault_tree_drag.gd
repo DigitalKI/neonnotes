@@ -4,6 +4,10 @@ func _ready() -> void:
 	# Reuse one disposable vault so repeated test runs cannot accumulate
 	# timestamped user:// directories or accidentally resemble real vault data.
 	var original_vault := GameManager.vault_dir
+	# set_vault_dir() persists, and the teardown save rewrote the user's
+	# settings (it clobbered last_opened_rel). Suppress settings writes for the
+	# whole test: nothing is ever persisted, so their file stays untouched.
+	GameManager.suppress_settings_save = true
 	var vault := "user://test-vault"
 	_rm_dir(vault)
 	DirAccess.make_dir_recursive_absolute(vault)
@@ -68,7 +72,8 @@ func _ready() -> void:
 
 	print("\nALL DRAG TESTS PASSED SUCCESSFULLY!")
 	GameManager.vault_dir = original_vault
-	GameManager._save_settings()
+	# Settings writes were suppressed throughout, so there is nothing to put
+	# back — the user's settings.cfg was never modified.
 	get_tree().quit(0)
 
 func _simulate_drop(vt: VaultTreeComponent, src_path: String, dst_meta: String, section: int) -> void:

@@ -1,46 +1,46 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://dr4466qx0hbpp"]
 
-[ext_resource type="Script" path="res://scripts/components/vault_tree_component.gd" id="1_comp"]
+[ext_resource type="Script" uid="uid://d6oe5hxdc13u" path="res://scripts/components/vault_tree_component.gd" id="1_comp"]
 
-[node name="SidePanel" type="PanelContainer"]
+[node name="SidePanel" type="PanelContainer" unique_id=1251865710]
 script = ExtResource("1_comp")
 
-[node name="SideVBox" type="VBoxContainer" parent="."]
+[node name="SideVBox" type="VBoxContainer" parent="." unique_id=2116334046]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Search" type="LineEdit" parent="SideVBox"]
+[node name="Search" type="LineEdit" parent="SideVBox" unique_id=1750153400]
 unique_name_in_owner = true
 layout_mode = 2
 placeholder_text = "Search notes (3+ characters)…"
 clear_button_enabled = true
 
-[node name="TreeDeleteBar" type="HBoxContainer" parent="SideVBox"]
+[node name="TreeDeleteBar" type="HBoxContainer" parent="SideVBox" unique_id=836007085]
 layout_mode = 2
 alignment = 2
 
-[node name="TreeDeleteBtn" type="Button" parent="SideVBox/TreeDeleteBar"]
+[node name="TreeDeleteBtn" type="Button" parent="SideVBox/TreeDeleteBar" unique_id=2073256517]
 unique_name_in_owner = true
 layout_mode = 2
 tooltip_text = "Delete the selected note or folder in the tree"
 text = "🗑 Delete Node"
 
-[node name="SideTree" type="Tree" parent="SideVBox"]
+[node name="SideTree" type="Tree" parent="SideVBox" unique_id=872085857]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="BacklinksPanel" type="PanelContainer" parent="SideVBox"]
+[node name="BacklinksPanel" type="PanelContainer" parent="SideVBox" unique_id=1678489487]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
 
-[node name="BacklinksBox" type="VBoxContainer" parent="SideVBox/BacklinksPanel"]
+[node name="BacklinksBox" type="VBoxContainer" parent="SideVBox/BacklinksPanel" unique_id=402018270]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="ConfigBtn" type="Button" parent="SideVBox"]
+[node name="ConfigBtn" type="Button" parent="SideVBox" unique_id=1365854841]
 unique_name_in_owner = true
 layout_mode = 2
 text = "⚙ Settings"

@@ -87,6 +87,60 @@ _Last updated: 2026-09-20 (graph: radial vault map with flowing directional link
   `MAX_LEAVES` (30) leaf notes collapse into a single ringed node labelled
   "Name ·N", and `MAX_ROUTES` (400) caps animated links.
   Verified by screenshotting the running app at two flow phases.
+  Zoom is a *spreading* zoom: it separates the layout so crowded labels can
+  be read, but nodes and type keep a fixed size (geometry goes through the
+  transform with stroke widths divided by the scale; nodes/labels are drawn in
+  screen space). Clamped so you cannot zoom out past "everything fits"
+  (`_min_zoom` = the fit scale) or in past `_max_zoom` (= fit × 8). Input:
+  wheel, trackpad magnify/pan gestures, and on touch one-finger pan /
+  two-finger pinch — pan reads the tracked touch position rather than
+  `event.relative`, which is not reliably populated on every platform.
+  Bidirectional flow: route building used to mark the reverse pair as "seen"
+  while adding the first route, so the second direction was skipped and
+  `bidir` was always false — a mutually-linked pair animated one way only.
+  It now collects the directed pairs first and adds one route per pair, with
+  `bidir` true only when both directions exist. Verified with a probe: `A<->B`
+  yields one route with `bidir=true`; `C->D` yields `bidir=false`.
+  Flow rendering then needed two corrections to *read* correctly: the two
+  comets were phase-offset by half a cycle, which left them permanently
+  adjacent (0.20/0.30, 0.80/0.70) and merged into one confusing double-headed
+  streak — they are now mirrored (`t = _flow` forward, `1 - _flow` reverse) so
+  they sit on opposite sides and meet only at the midpoint. And the tail was
+  always built on the low-index side of the head, which is "behind" only for
+  the forward comet, so the reverse one flew tail-first; the tail is now drawn
+  on the side opposite the direction of travel, fading from the head with
+  `draw_polyline_colors`.
+- **2026-09-20 — escaped `\[[note]]` no longer counts as a link**: the shared
+  regex in `GameManager.extract_wiki_links()` matched `[[` anywhere, so an
+  escaped opener was indexed as a real link — and because that one parser
+  feeds the link index, the graph routes, `WikiLinks.backlinks()`,
+  `WikiLinks.graph()` and the post-move rewrite candidates all inherited the
+  bug. `MarkdownParser` already treats it as literal (its ESCAPE span), so the
+  index now agrees: matches preceded by an odd run of backslashes are skipped
+  (`_is_escaped()`), and the two move-rewrite regexes gained `(?<!\\)` so an
+  escaped literal is not rewritten either. Covered by a smoke check
+  (`escaped [[ is not a link`).
+- **2026-09-20 — per-link flow speed (deterministic, no RNG state)**: each
+  link now travels at its own rate instead of every link sharing one global
+  phase. Only the **travel speed** varies — every link leaves its source at the
+  same phase, so what differs is how fast the light moves along the link, not
+  when it departs (an earlier version randomised a per-link starting offset
+  too, which is *not* what was wanted). The speed comes from a hash of the
+  link's two endpoints, so a given link always behaves identically and nothing
+  needs persisting. Two traps worth remembering: `String.hash()` barely changes in
+  its low bits when only the trailing character differs, so links out of the
+  same note got near-identical speeds — fixed with a 32-bit avalanche mix
+  (`_mix()`); and reading `h % 1000` only samples low bits, which
+  multiplication mixes weakly — the mixed value is now used whole as a
+  fraction. Speeds span `SPEED_MIN`..`SPEED_MAX` (0.34..0.66), centred on the
+  0.50 the flow previously ran at uniformly. `_flow` became `_time`, and the
+  per-route phase is computed in `_draw_flow`.
+  One cycle is now the head crossing the route **plus** the time its tail
+  needs to clear (`cycle = 1 + TRAIL/(samples-1)`), with the head clamped at
+  the destination while the tail drains. Previously the cycle was exactly one
+  traversal, so a new trail launched while the previous one was still landing
+  and a node appeared to fire twice. Both directions still derive from the same
+  `s`, so a mutual pair stays mirrored.
 
 - **2026-09-18 — shared wiki-link index (backlinks, graph, post-move rewrite)**:
   Added `GameManager.links` (note -> outbound `[[targets]]`) plus `links_ready`.
@@ -724,6 +778,18 @@ _These OVERRIDE the skill's defaults for this project._
   `./tests/run_tests.sh` is safe. Any ad-hoc harness must do the same, or
   snapshot and restore `settings.cfg`. The configured vault is `user://vault`
   (real notes live in `app_userdata/NeonNotes/vault`).
+- **Settings must never be written by test/smoke runs** — `GameManager
+  .suppress_settings_save` (set by `_prepare_smoke_vault()`) makes
+  `_save_settings()` a no-op. Without it the smoke run leaked its vault: the
+  harness assigns `vault_dir` safely, but merely opening a note calls
+  `_save_settings()` (main.gd `_on_note_selected`), which persisted the smoke
+  vault as the user's. The drag test avoids this by saving the original vault
+  back (and now the guard covers it too). Verified: a full
+  `run_tests.sh` + smoke leaves `settings.cfg` byte-identical.
+  The drag test needed the same guard: it called `set_vault_dir()` and then
+  saved the original vault back on teardown, which rewrote `last_opened_rel`
+  from the test's in-memory state. It now suppresses settings writes for its
+  whole duration, so nothing is persisted and no restore-save is needed.
 - **`Tree.enable_drag_unfolding`** — Godot unfolds a collapsed item when a
   drag hovers over it (after `dragging_unfold_wait_msec`, 500 ms). NeonNotes
   wants arrow-only expansion, so it is disabled in `VaultTreeComponent.build()`.

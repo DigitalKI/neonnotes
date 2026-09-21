@@ -194,6 +194,7 @@ func _prepare_smoke_vault() -> void:
 	if smoke_vault == "":
 		smoke_vault = "user://neonnotes-smoke"
 	GameManager.vault_dir = smoke_vault
+	GameManager.suppress_settings_save = true  # never persist smoke state
 	# Smoke mode is isolated from normal settings and is never intended to
 	# become the user's persisted vault selection.
 	GameManager.current_file = ""

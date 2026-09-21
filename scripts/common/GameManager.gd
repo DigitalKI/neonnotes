@@ -103,6 +103,9 @@ var links_ready := false  # true once scan_notes() has indexed the whole vault
 const ORDER_FILE := ".neonnotes.json"
 var order := {}
 var collapsed_folders: Dictionary = {}
+## While true, _save_settings() is a no-op. Used by the smoke harness so test
+## state can never clobber the user's real settings.
+var suppress_settings_save := false
 
 func load_order() -> void:
 	order = {}
@@ -249,10 +252,24 @@ static func extract_wiki_links(text: String) -> Array[String]:
 		return result  # nothing to find — skip the regex on this hot path
 	var re := RegEx.create_from_string("\\[\\[([^\\]|]+)(?:\\|[^\\]]+)?\\]\\]")
 	for m in re.search_all(text):
+		# `\[[note]]` is escaped literal text, not a link. MarkdownParser already
+		# skips it via its ESCAPE span, so the index must agree — otherwise the
+		# graph and backlinks would show links the preview does not.
+		if _is_escaped(text, m.get_start()):
+			continue
 		var target := m.get_string(1).strip_edges()
 		if target != "" and not result.has(target):
 			result.append(target)
 	return result
+
+## True when the character at `at` is escaped by an odd run of backslashes.
+static func _is_escaped(text: String, at: int) -> bool:
+	var n := 0
+	var i := at - 1
+	while i >= 0 and text[i] == "\\":
+		n += 1
+		i -= 1
+	return n % 2 == 1
 
 ## Notes whose indexed outbound links could reference `old_prefix` (the full
 ## target, its bare file name, or a "dir/…" prefix). Post-move rewriting visits
@@ -361,6 +378,11 @@ func _load_settings() -> void:
 		trusted.append(String(t))
 
 func _save_settings() -> void:
+	# Smoke and ad-hoc harnesses must never overwrite the user's real settings
+	# (vault selection, sync pairing, palette). _prepare_smoke_vault() sets this;
+	# without it, merely opening a note inside the smoke vault persists it.
+	if suppress_settings_save:
+		return
 	var cf := ConfigFile.new()
 	cf.set_value("ui", "palette", palette_name)
 	cf.set_value("export", "crt", export_crt)
