@@ -12,7 +12,12 @@ class_name GraphView extends Control
 
 var open_cb := Callable()
 
-const FLOW_SPEED := 0.22        # route fractions per second
+# Each link flows at its own speed, derived deterministically from its two
+# endpoints — so a given link always fires at the same rate, and neighbouring
+# links do not stay in lockstep. No RNG state, nothing to persist. Range is
+# centred on the 0.50 the flow used to run at uniformly.
+const SPEED_MIN := 0.34         # route fractions per second
+const SPEED_MAX := 0.66
 const TRAIL := 7                # samples in the travelling light's tail
 const ROUTE_SAMPLES := 48       # evenly spaced samples per route
 const NODE_R := 4.5
@@ -28,11 +33,17 @@ var _text: Color
 
 var _map_scale := 1.0
 var _map_offset := Vector2.ZERO
+# Zoom limits: you can zoom out at most until the whole map fits, and in
+# only to a sane maximum so the view cannot be lost in empty space.
+var _min_zoom := 0.05
+var _max_zoom := 4.0
+var _touches := {}          # touch index -> position, for pinch
+var _pinch_last := 0.0
 var _dragging := false
 var _drag_last := Vector2.ZERO
 var _hover := ""
 var _center_note := ""
-var _flow := 0.0
+var _time := 0.0
 var _map_ready := false
 
 var _pos := {}
@@ -191,7 +202,11 @@ func _resolved_links() -> Dictionary:
 func _build_routes() -> void:
 	_routes.clear()
 	var links := _resolved_links()
-	var seen := {}
+	# Collect the directed pairs first. Marking the reverse as "seen" while adding
+	# the first route hid the second direction entirely, so a mutually-linked pair
+	# never animated both ways: bidir was always false.
+	var directed := {}
+	var pairs: Array = []
 	for src in links.keys():
 		for dst in links[src]:
 			var a := _norm(String(src))
@@ -200,18 +215,46 @@ func _build_routes() -> void:
 				continue
 			if not _pos.has(a) or not _pos.has(b):
 				continue
-			var pair := a + "|" + b
-			var rev := b + "|" + a
-			if seen.has(pair):
+			if not directed.has(a):
+				directed[a] = {}
+			if directed[a].has(b):
 				continue
-			var bidir: bool = seen.has(rev)
-			seen[pair] = true
-			seen[rev] = true
-			if _routes.size() >= MAX_ROUTES:
-				return
-			var samples := _route_samples(a, b)
-			if samples.size() >= 2:
-				_routes.append({"samples": samples, "bidir": bidir})
+			directed[a][b] = true
+			pairs.append([a, b])
+	var done := {}
+	for pair in pairs:
+		var a: String = pair[0]
+		var b: String = pair[1]
+		if done.has(a) and done[a].has(b):
+			continue
+		if not done.has(a):
+			done[a] = {}
+		done[a][b] = true
+		if not done.has(b):
+			done[b] = {}
+		done[b][a] = true
+		if _routes.size() >= MAX_ROUTES:
+			return
+		var samples := _route_samples(a, b)
+		if samples.size() >= 2:
+			var back: bool = directed.has(b) and directed[b].has(a)
+			# Only the *travel speed* varies per link — every link starts from its
+			# source at the same phase, so what differs is how fast the light moves
+			# along the link, not when it leaves. The mixed value is used whole as a
+			# 32-bit fraction; `% 1000` would sample low bits, which multiplication
+			# mixes weakly.
+			var h := _mix((a + "|" + b).hash())
+			var speed := SPEED_MIN + (float(h) / 4294967296.0) * (SPEED_MAX - SPEED_MIN)
+			_routes.append({"samples": samples, "bidir": back, "speed": speed})
+
+## Deterministic integer mix (32-bit avalanche). String.hash() barely changes
+## in its low bits when only the last character differs, which gave links out
+## of the same note near-identical speeds; this spreads them out.
+static func _mix(v: int) -> int:
+	var h: int = v & 0xFFFFFFFF
+	h = ((h ^ (h >> 16)) * 0x45D9F3B) & 0xFFFFFFFF
+	h = ((h ^ (h >> 16)) * 0x45D9F3B) & 0xFFFFFFFF
+	return (h ^ (h >> 16)) & 0xFFFFFFFF
 
 func _route_samples(a: String, b: String) -> PackedVector2Array:
 	var raw := PackedVector2Array()
@@ -331,13 +374,16 @@ func _fit_to_view() -> void:
 	_map_scale = clampf(minf(avail.x / extent.x, avail.y / extent.y), 0.05, 4.0)
 	var mid := (lo + hi) / 2.0
 	_map_offset = size / 2.0 - mid * _map_scale
+	# Everything fits at this scale, so it is the furthest you can zoom out.
+	_min_zoom = _map_scale
+	_max_zoom = maxf(_map_scale * 8.0, 3.0)
 
 # ---------------------------------------------------------------- frame
 
 func _process(delta: float) -> void:
 	if not visible or not _map_ready:
 		return
-	_flow = fmod(_flow + delta * FLOW_SPEED, 1.0)
+	_time += delta
 	queue_redraw()
 
 # ---------------------------------------------------------------- drawing
@@ -347,39 +393,66 @@ func _draw() -> void:
 		draw_string(_font, size / 2.0 - Vector2(60, 0), "Empty vault.",
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 15, _text)
 		return
+	# Zoom spreads the layout apart so crowded labels separate — it must NOT
+	# magnify the nodes or the type. Geometry goes through the transform with
+	# widths divided by the scale so strokes stay constant on screen; nodes and
+	# labels are then drawn in screen space at a fixed size.
+	var inv := 1.0 / maxf(_map_scale, 0.001)
 	draw_set_transform(_map_offset, 0.0, Vector2(_map_scale, _map_scale))
 	for k in _keys:
 		var p := String(_parent.get(k, ""))
 		if p != "" and _pos.has(p):
-			draw_line(_pos[p], _pos[k], Color(_accent, 0.14), 1.0, true)
+			draw_line(_pos[p], _pos[k], Color(_accent, 0.14), 1.0 * inv, true)
 	for route in _routes:
-		draw_polyline(route["samples"], Color(_accent2, 0.09), 1.0, true)
+		draw_polyline(route["samples"], Color(_accent2, 0.09), 1.0 * inv, true)
 	for route in _routes:
-		_draw_flow(route)
+		_draw_flow(route, inv)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	for k in _keys:
 		_draw_node(k)
 	_draw_labels()
 
 ## Light travelling from the linking note to the linked one.
-func _draw_flow(route: Dictionary) -> void:
+func _draw_flow(route: Dictionary, inv: float) -> void:
 	var samples: PackedVector2Array = route["samples"]
 	var n := samples.size()
 	if n < 2:
 		return
+	# One cycle is the head crossing the route *plus* the time for its tail to
+	# clear. Without that extra span the next trail launched while the previous
+	# one was still landing, so a node appeared to fire twice.
+	var span_frac := float(TRAIL) / float(n - 1)
+	var cycle := 1.0 + span_frac
+	var s := fmod(_time * float(route["speed"]), cycle)
 	var passes := 2 if route["bidir"] else 1
 	for pass_i in passes:
-		var t := fmod(_flow + float(pass_i) * 0.5, 1.0)
-		if pass_i == 1:
-			t = 1.0 - t  # the reverse direction, so both are visible at once
-		var head := int(t * float(n - 1))
-		var tail := PackedVector2Array()
-		for i in range(maxi(0, head - TRAIL), head + 1):
-			tail.append(samples[i])
-		if tail.size() < 2:
+		# pass 0 runs source -> target, pass 1 runs target -> source. Both derive
+		# from the same s, so a mutual pair stays mirrored (two-way traffic).
+		var fwd := pass_i == 0
+		var head_f: float = clampf(s, 0.0, 1.0) if fwd else clampf(1.0 - s, 0.0, 1.0)
+		var tail_f: float = (s - span_frac) if fwd else (1.0 - s + span_frac)
+		var lo_f := maxf(minf(head_f, tail_f), 0.0)
+		var hi_f := minf(maxf(head_f, tail_f), 1.0)
+		if hi_f - lo_f <= 0.0:
+			continue  # this direction has nothing on the route right now
+		var lo := clampi(int(floor(lo_f * float(n - 1))), 0, n - 1)
+		var hi := clampi(int(ceil(hi_f * float(n - 1))), 0, n - 1)
+		var head_idx := hi if fwd else lo
+		var pts := PackedVector2Array()
+		var core := PackedColorArray()
+		var halo := PackedColorArray()
+		for i in range(lo, hi + 1):
+			pts.append(samples[i])
+			# Bright at the head, fading out along the tail.
+			var back: float = absf(float(i - head_idx)) / float(TRAIL)
+			var a: float = 0.05 + 0.80 * pow(maxf(0.0, 1.0 - back), 2.0)
+			core.append(Color(_accent2.r, _accent2.g, _accent2.b, a))
+			halo.append(Color(_accent2.r, _accent2.g, _accent2.b, a * 0.22))
+		if pts.size() < 2:
 			continue
-		draw_polyline(tail, Color(_accent2, 0.16), 7.0, true)   # soft halo
-		draw_polyline(tail, Color(_accent2, 0.70), 2.4, true)   # bright core
-		draw_circle(samples[head], 2.6, Color(1, 1, 1, 0.85))   # hot tip
+		draw_polyline_colors(pts, halo, 7.0 * inv, true)
+		draw_polyline_colors(pts, core, 2.4 * inv, true)
+		draw_circle(samples[head_idx], 2.8 * inv, Color(1, 1, 1, 0.95))
 
 func _node_color(k: String) -> Color:
 	var hot := k == _center_note or String(_companion.get(k, "")) == _center_note
@@ -392,7 +465,7 @@ func _node_color(k: String) -> Color:
 func _draw_node(k: String) -> void:
 	if not _pos.has(k):
 		return
-	var p: Vector2 = _pos[k]
+	var p := _to_screen(_pos[k])
 	var col := _node_color(k)
 	var leaf: bool = _is_leaf(k) and not _collapsed.get(k, false)
 	var r := NODE_R if leaf else FOLDER_R
@@ -413,7 +486,7 @@ func _draw_labels() -> void:
 		# in, hovered or collapsed (where one label stands for many notes).
 		if not (hot or zoomed or in_focus or k == _hover or not leaf):
 			continue
-		var p: Vector2 = _pos[k]
+		var p := _to_screen(_pos[k])
 		var txt := _label(k)
 		if _collapsed.get(k, false):
 			txt += " ·%d" % _children.get(k, []).size()
@@ -425,6 +498,10 @@ func _draw_labels() -> void:
 
 func _to_map(at: Vector2) -> Vector2:
 	return (at - _map_offset) / _map_scale
+
+## Map space -> screen space, for content that must not scale with zoom.
+func _to_screen(at: Vector2) -> Vector2:
+	return at * _map_scale + _map_offset
 
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
@@ -442,6 +519,39 @@ func _gui_input(event: InputEvent) -> void:
 	elif event is InputEventMouseButton and event.pressed \
 			and (event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN):
 		_zoom_at(event.position, 1.15 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0 / 1.15)
+	elif event is InputEventMagnifyGesture:
+		# Trackpad pinch.
+		_zoom_at(event.position, event.factor)
+	elif event is InputEventPanGesture:
+		# Trackpad two-finger pan.
+		_map_offset -= event.delta * 12.0
+		queue_redraw()
+	elif event is InputEventScreenTouch:
+		if event.pressed:
+			_touches[event.index] = event.position
+		else:
+			_touches.erase(event.index)
+			_pinch_last = 0.0
+		accept_event()
+	elif event is InputEventScreenDrag:
+		var prev: Vector2 = _touches.get(event.index, event.position)
+		_touches[event.index] = event.position
+		if _touches.size() >= 2:
+			# Pinch: the distance between two fingers sets the zoom, anchored
+			# on their midpoint so the area you are pinching stays put.
+			var pts: Array = _touches.values()
+			var a: Vector2 = pts[0]
+			var b: Vector2 = pts[1]
+			var d := a.distance_to(b)
+			if _pinch_last > 0.0 and d > 0.0:
+				_zoom_at((a + b) * 0.5, d / _pinch_last)
+			_pinch_last = d
+		else:
+			# One finger drags the map. Use the tracked position rather than
+			# event.relative, which is not reliably populated on every platform.
+			_map_offset += event.position - prev
+			queue_redraw()
+		accept_event()
 	elif event is InputEventMouseMotion:
 		if _dragging:
 			_map_offset += event.position - _drag_last
@@ -454,7 +564,7 @@ func _gui_input(event: InputEvent) -> void:
 
 func _zoom_at(anchor: Vector2, factor: float) -> void:
 	var before := _to_map(anchor)
-	_map_scale = clampf(_map_scale * factor, 0.05, 8.0)
+	_map_scale = clampf(_map_scale * factor, _min_zoom, _max_zoom)
 	_map_offset = anchor - before * _map_scale
 	queue_redraw()
 
