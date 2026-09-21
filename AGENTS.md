@@ -25,6 +25,12 @@ state bugs. The main scene is `res://scenes/main/Main.tscn`.
 ## Important project rules
 
 - Use `GameManager` for global vault state; do not add another autoload.
+- **Never leave the app pointing at a throwaway vault.** `GameManager.set_vault_dir()`
+  persists `vault.dir` to `user://settings.cfg`, so a test that calls it silently
+  repoints the user's next launch. For harnesses, assign `GameManager.vault_dir`
+  directly (the way `_prepare_smoke_vault()` does), or snapshot `user://settings.cfg`
+  and restore it when finished. `./tests/run_tests.sh` is already safe: it sets the
+  field without saving and uses a disposable vault.
 - Flush edits before switching notes, modes, sync, or closing.
 - Preserve folder-as-note merging, drag/drop link rewriting, and mobile drawer behavior.
 - Keep exports under `vault/exports/` and embedded media under `vault/media/`.

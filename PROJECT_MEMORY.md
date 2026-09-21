@@ -5,7 +5,7 @@
 > updated at the **end**, so context, decisions, and direction survive across
 > conversations. Keep it current — a stale memory file is worse than none.
 
-_Last updated: 2026-09-18 (godot-mcp tooling, note/thread fixes, parser optimization, vault-tree drag UX, drop-path performance + shared link index) · Godot 4.7 · renderer: gl_compatibility_
+_Last updated: 2026-09-20 (graph: radial vault map with flowing directional links) · Godot 4.7 · renderer: gl_compatibility_
 
 > ⚠️ **Path note:** the saved global memory says `/home/toshiwo/www/neonnotes`
 > but the project actually lives at **`/home/toshiwo/Projects/Godot/neonnotes`**.
@@ -29,6 +29,64 @@ _Last updated: 2026-09-18 (godot-mcp tooling, note/thread fixes, parser optimiza
   folder via 📂 Vault). No proprietary DB — vault is grep/rsync/editor friendly.
 
 ## 2. What has been done (work log)
+
+- **2026-09-20 — graph level semantics + renderer-agnostic `GraphModel`**:
+  The graph's "levels" were link hops over a mixed edge set. Confirmed
+  semantics: **one level per change**, budget shared by folder structure and
+  direct links, expanding both up and down. From a placed note one level
+  reaches its parent, its siblings, its children, or a link neighbour — so
+  "up one folder then sideways to the siblings" is a single level, and
+  climbing N levels shows the siblings of every one of them. A sibling with
+  no wiki-link is still attached to its parent by a dashed edge (it is only
+  unconnected to the centre); dashed = folder parent/child only, never
+  sibling-to-sibling; solid = wiki-links.
+  Implemented as a new dependency-free `scripts/render/graph_model.gd`
+  (`GraphModel.build(...)`) that takes plain data (notes, resolved links,
+  titles) and returns nodes, levels and edges — so a future visual redesign
+  (the user wants a "neon city" eventually) swaps the renderer, not the
+  semantics. `graph_view.gd` now feeds it and draws labels LAST with a
+  translucent backing so they read over the links, showing the front-matter
+  title (fallback: file name) instead of the file path.
+  Also in this pass: `_rewrite_links`/`_rewrite_folder_links` compile their
+  RegEx once per move instead of once per candidate note, skip notes with no
+  `[[` at all, and `WikiLinks.resolve()` is backed by lookup maps so
+  `graph()` is O(N+L) instead of O(N*L).
+  Note: `GraphModel.MAX_NODES` (400) is a stop-gap guard; aggregation and a
+  MultiMesh renderer are deferred until the visual redesign is decided.
+
+- **2026-09-20 — readable graph layout (rings -> seeded relaxation)**:
+  The old layout put every node on one fixed-radius circle, so a note with
+  hundreds of siblings drew an unreadable ring. `graph_view.gd` now seeds each
+  level on its own ring (radius grows with the ring's population so siblings
+  cannot crowd, families kept adjacent by folder), then runs a **bounded force
+  pass** — nodes repel each other (spatial-grid neighbour lookup, so it is not
+  O(N^2)), links attract to a rest length, and a mild pull to the centre keeps
+  the result together. This is the *idea* of AnyType/Obsidian physics with no
+  runtime simulation: it runs once on open, never per frame. The result is
+  scaled to fit the view, and the wheel zooms toward the cursor.
+  Labels are level-of-detail: over ~40 nodes (or when zoomed out) only the
+  centre and the hovered node are labelled, so titles never pile up; zooming
+  in reveals the rest. Verified by rendering a 150-sibling vault to a
+  screenshot before/after.
+
+- **2026-09-20 — graph became a radial vault map with flowing links**: the
+  force layout above was replaced (user chose a radial map over force-directed).
+  `graph_view.gd` now draws the whole vault as a radial hierarchy: folders are
+  the spine, notes are leaves, each depth gets its own ring, and folders sit at
+  their children's mean angle. Wiki-links are routed from source up to the
+  lowest common ancestor and back down (hierarchical edge bundling), then
+  resampled by arc length. Rather than static curves — which the user felt were
+  "not very neon" — each link is drawn as **light that flows from the linking
+  note to the linked one**, so direction is visible at a glance; a mutually
+  linked pair flows in both directions (phase-offset). Pan/zoom is a draw
+  transform (`draw_set_transform`), so map data is never mutated per frame;
+  `_process` only advances the flow phase and redraws.
+  Focus + context: `GraphModel`'s level rule brightens the current note's
+  neighbourhood and dims the rest; folders are always labelled, notes only when
+  in focus, hovered, or zoomed past `LABEL_ZOOM`. Folders with more than
+  `MAX_LEAVES` (30) leaf notes collapse into a single ringed node labelled
+  "Name ·N", and `MAX_ROUTES` (400) caps animated links.
+  Verified by screenshotting the running app at two flow phases.
 
 - **2026-09-18 — shared wiki-link index (backlinks, graph, post-move rewrite)**:
   Added `GameManager.links` (note -> outbound `[[targets]]`) plus `links_ready`.
@@ -192,6 +250,26 @@ _Chronological, newest last._
   content range. Added external-link span coverage to unit tests. Full suite
   passes. Next: remove the legacy regex path after migrating bare URLs and
   improve delimiter-stack nesting semantics.
+
+- **2026-09-20 — unified parser Phase 4C: delimiter-stack emphasis**:
+  `_scan_emphasis` (per-opener nearest-close) replaced by two-pass resolution
+  in `markdown_parser.gd`: the scan now collects delimiter runs with
+  CommonMark-style flanking flags (left/right flank, punctuation check,
+  intraword `_` cannot open/close), then `_process_emphasis()` resolves
+  closers in SOURCE order (innermost pairs first: `*a **b** c*` -> strong
+  inside em) against the nearest eligible earlier opener of the same char.
+  >=2+>=2 pairs consume two markers (STRONG), otherwise one (EMPHASIS);
+  a closer with leftover single markers keeps matching earlier openers, so
+  `**bold *nested***` now emits a span for the inner emphasis (was plain
+  strong). The `***triple***` fast path still emits one flat BOLD_ITALIC
+  span. Rule of 3 implemented (skip when sum % 3 == 0 unless both runs are
+  multiples of 3 and one run can both open+close). Stream sorted by start
+  before return. Legacy regex path confirmed already removed; new unit tests:
+  nested-em-inside-strong span, source-order guarantee, intraword underscore
+  stays literal. Full suite passes (Godot teardown "double free" abort after
+  the drag tests is pre-existing on baseline, unrelated). Next parser items:
+  block-level spans for headings/fences; per-block preview cache keyed by
+  content hash.
 
 - **2026-09-14 — quote visual refinement**: multiline quotes now render as one
   subtle tinted PanelContainer with a thin accent border; the ❝ glyph appears
@@ -637,6 +715,15 @@ _These OVERRIDE the skill's defaults for this project._
 
 - **The ⚠ path note in section 1** — global memory entry is stale (`www/`);
   actual project is under `Projects/Godot/neonnotes`.
+- **Never leave the app pointing at a throwaway vault** — `GameManager`
+  `.set_vault_dir()` persists `vault.dir` into `user://settings.cfg` (i.e.
+  `app_userdata/NeonNotes/settings.cfg`). A throwaway vault assigned that way
+  becomes the user's next launch, and if the temp folder is then deleted the
+  vault looks empty. `_prepare_smoke_vault()` avoids this by assigning
+  `GameManager.vault_dir` directly without saving, which is why
+  `./tests/run_tests.sh` is safe. Any ad-hoc harness must do the same, or
+  snapshot and restore `settings.cfg`. The configured vault is `user://vault`
+  (real notes live in `app_userdata/NeonNotes/vault`).
 - **`Tree.enable_drag_unfolding`** — Godot unfolds a collapsed item when a
   drag hovers over it (after `dragging_unfold_wait_msec`, 500 ms). NeonNotes
   wants arrow-only expansion, so it is disabled in `VaultTreeComponent.build()`.

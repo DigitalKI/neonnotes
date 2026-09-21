@@ -8,6 +8,7 @@ func _init() -> void:
 	_check_markdown_blocks()
 	_check_html_exporter()
 	_check_move_path_remap()
+	_check_graph_model()
 	print("UNIT RESULT: %s (%d failures)" % ["FAIL" if failures > 0 else "OK", failures])
 	quit(failures)
 
@@ -66,6 +67,33 @@ func _check_markdown_spans() -> void:
 	var code_nested := MarkdownParser.compute_inline("*a `**literal**` b*")
 	_check(code_nested.size() == 2 and code_nested[0]["type"] == S.EMPHASIS
 		and code_nested[1]["type"] == S.CODE_SPAN, "code remains literal inside emphasis")
+
+	# Delimiter-stack nesting: the inner emphasis of `**bold *nested***` now
+	# gets its own span (previously rendered as plain strong).
+	var deep := MarkdownParser.compute_inline("**bold *nested***")
+	var has_strong := false
+	var has_inner_em := false
+	for sp in deep:
+		if sp["type"] == S.STRONG:
+			has_strong = true
+		elif sp["type"] == S.EMPHASIS:
+			has_inner_em = true
+	_check(has_strong and has_inner_em, "nested emphasis inside strong gets a span")
+	# spans stay source-ordered and non-overlapping starts
+	var ordered := true
+	var last_start := -1
+	for sp in deep:
+		if int(sp["start"]) < last_start:
+			ordered = false
+		last_start = int(sp["start"])
+	_check(ordered, "span stream remains source-ordered")
+	# intraword underscores stay literal (CommonMark flanking rule)
+	var intra := MarkdownParser.compute_inline("foo_bar_baz")
+	var only_text := true
+	for sp in intra:
+		if int(sp["type"]) != int(S.TEXT) and sp["type"] != S.ESCAPE:
+			only_text = false
+	_check(only_text, "intraword underscore does not emphasize")
 
 func _check_markdown_blocks() -> void:
 	# multiline block quote collapses consecutive ">" lines into one container
@@ -135,6 +163,50 @@ func _check_move_path_remap() -> void:
 		"folder look-alike does not match a moved folder")
 	_check(not PathRemap.link_target_matches("other", "medic"),
 		"unrelated link does not match a moved folder")
+
+## Graph neighbourhood levels: one level covers parent+siblings, children or
+## a link hop, and the budget is shared by folder structure and links.
+func _check_graph_model() -> void:
+	var notes: Array[String] = [
+		"Root.md", "Root/Gamedev.md", "Root/Gamedev/Design.md",
+		"Root/Gamedev/Design/Drafts.md", "Root/Gamedev/Design/Levels.md",
+		"Root/Gamedev/Design/Levels/Boss.md", "Root/Gamedev/Design/Levels/Puzzles.md",
+		"Root/Gamedev/Art.md", "Root/Gamedev/Code.md", "Root/JW.md", "Root/Notes.md",
+		"Island/Deep.md",
+	]
+	var links := {
+		"Root/Gamedev/Design/Levels.md": ["Root/JW.md"],
+		"Root/Gamedev/Design/Drafts.md": ["Root/Gamedev/Art.md"],
+		"Root/Notes.md": ["Island/Deep.md"],
+	}
+	var titles := {"Root/Gamedev/Design/Levels.md": "Level Design"}
+	var m := GraphModel.build("Root/Gamedev/Design/Levels.md", 2, notes, links, titles)
+	_check(m.level_of.get("Root/Gamedev/Design/Levels.md") == 0, "graph centre is level 0")
+	_check(m.level_of.get("Root/Gamedev/Design.md") == 1, "graph parent is level 1")
+	_check(m.level_of.get("Root/Gamedev/Design/Drafts.md") == 1,
+		"siblings ride along with the parent for one level")
+	_check(m.level_of.get("Root/Gamedev/Design/Levels/Boss.md") == 1, "children are level 1")
+	_check(m.level_of.get("Root/JW.md") == 1, "a direct link is one level away")
+	_check(m.level_of.get("Root/Gamedev/Art.md") == 2, "the parent's siblings are level 2")
+	_check(m.level_of.get("Root/Gamedev/Code.md") == 2,
+		"every sibling at a level is included, however many")
+	_check(m.level_of.get("Root/Notes.md") == 2,
+		"a linked note's own siblings ride along at the next level")
+	_check(not m.level_of.has("Island/Deep.md"),
+		"three steps from the centre is beyond a budget of 2")
+	var has_tree := false
+	var sibling_edge := false
+	for e in m.edges:
+		if e["kind"] != "tree":
+			continue
+		has_tree = true
+		if String(e["from"]).get_base_dir() == String(e["to"]).get_base_dir():
+			sibling_edge = true
+	_check(has_tree, "folder parent/child edges are drawn")
+	_check(not sibling_edge, "siblings are never connected to each other")
+	_check(m.node_label("Root/Gamedev/Design/Levels.md") == "Level Design",
+		"labels use the front-matter title")
+	_check(m.node_label("Root/JW.md") == "JW", "labels fall back to the file name")
 
 func _check(ok: bool, label: String) -> void:
 	if ok:
