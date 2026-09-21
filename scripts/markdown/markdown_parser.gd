@@ -16,6 +16,7 @@ const QUOTE_CONTINUATION_MAX := 200
 ## WIKILINK additionally carries target (the bare link destination).
 static func compute_inline(text: String) -> Array[Dictionary]:
 	var spans: Array[Dictionary] = []
+	var delim_runs: Array[Dictionary] = []
 	var i := 0
 	while i < text.length():
 		var c := text[i]
@@ -81,13 +82,38 @@ static func compute_inline(text: String) -> Array[Dictionary]:
 					continue
 			i += 1
 			continue
-		# ---- emphasis / strong (nesting aware via delimiter stack) ----------
+		# ---- emphasis / strong delimiters ------------------------------------
+		# Delimiter runs are collected during the scan and resolved afterwards
+		# by _process_emphasis (close-to-open, like CommonMark), so partial
+		# consumption works: the inner emphasis in `**bold *nested***` now
+		# gets a span. The >=3 triple fast path below preserves the flat
+		# BOLD_ITALIC span for `***both***`.
 		if c == "*" or c == "_":
-			var before := spans.size()
-			i = _scan_emphasis(text, i, spans)
-			if spans.size() != before:
+			var run := 1
+			while i + run < text.length() and text[i + run] == c:
+				run += 1
+			var triple := text.find(c.repeat(3), i + 3)
+			if run >= 3 and triple >= 0:
+				spans.append({"type": SpanType.BOLD_ITALIC, "start": i,
+					"length": triple + 3 - i, "content_start": i + 3,
+					"content_length": triple - (i + 3)})
+				i = triple + 3
 				continue
-			i += 1
+			var before := "" if i == 0 else text[i - 1]
+			var after := "" if i + run >= text.length() else text[i + run]
+			var left_flank := after != "" and not _is_ws(after) \
+				and (not _is_punct(after) or before == "" or _is_ws(before) or _is_punct(before))
+			var right_flank := before != "" and not _is_ws(before) \
+				and (not _is_punct(before) or after == "" or _is_ws(after) or _is_punct(after))
+			var can_open := left_flank
+			var can_close := right_flank
+			# Underscore must not emphasize inside a word (foo_bar_baz).
+			if c == "_":
+				can_open = left_flank and (not right_flank or (before != "" and _is_punct(before)))
+				can_close = right_flank and (not left_flank or (after != "" and _is_punct(after)))
+			delim_runs.append({"pos": i, "len": run, "ch": c, "can_open": can_open,
+				"can_close": can_close, "rem": run})
+			i += run
 			continue
 		# ---- paired custom markers ------------------------------------------
 		var close := -1
@@ -106,67 +132,66 @@ static func compute_inline(text: String) -> Array[Dictionary]:
 			i = close + 2
 			continue
 		i += 1
+	_process_emphasis(text, delim_runs, spans)
+	spans.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return int(a["start"]) < int(b["start"]))
 	return spans
+
+static func _is_ws(c: String) -> bool:
+	return c == " " or c == "\t" or c == "\n" or c == "\r"
+
+static func _is_punct(c: String) -> bool:
+	return "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~".contains(c)
 
 static func _is_escapable(c: String) -> bool:
 	return c == "\\" or c == "`" or c == "*" or c == "_" or c == "~" or c == "[" \
 		or c == "]" or c == ">" or c == "#" or c == "|" or c == "!" or c == "%" \
 		or c == "+" or c == "="
 
-## Scan emphasis/strong from position p. Uses a delimiter stack so nested
-## emphasis works ("*a **b** c*"). Returns the new cursor position.
-## A run of >=2 marks drafting strong opener; single mark emphasis.
-static func _scan_emphasis(text: String, p: int, spans: Array[Dictionary]) -> int:
-	var run := 1
-	while p + run < text.length() and text[p + run] == text[p]:
-		run += 1
-	var ch := text[p]
-	if run >= 3:
-		var triple_close := text.find(ch.repeat(3), p + 3)
-		if triple_close >= 0:
-			spans.append({"type": SpanType.BOLD_ITALIC, "start": p,
-				"length": triple_close + 3 - p, "content_start": p + 3,
-				"content_length": triple_close - (p + 3)})
-			return triple_close + 3
-	var strong := run >= 2
-	var open_len := 2 if strong else 1
-	var close_marker := ch + ch if strong else ch
-	var close := -1
-	var search := p + open_len
-	while search < text.length():
-		var candidate := text.find(close_marker, search)
-		if candidate < 0:
-			break
-		# An escaped marker is literal. Single markers cannot consume one
-		# character from a stronger delimiter run (the common `*a **b** c*`
-		# case); strong markers require the full run as well.
-		var escaped := candidate > 0 and text[candidate - 1] == "\\"
-		var left_same := candidate > 0 and text[candidate - 1] == ch
-		var right_same := candidate + open_len < text.length() and text[candidate + open_len] == ch
-		if not escaped and not (not strong and (left_same or right_same)) and not (strong and right_same):
-			close = candidate
-			break
-		search = candidate + 1
-	if close < 0:
-		# An unmatched opener is literal markdown. Do not manufacture a span:
-		# in particular, a negative content length can make recursive parsing
-		# repeatedly rescan the same suffix and grow without bound.
-		return p
-	var content_start := p + open_len
-	var content_length := close - content_start
-	spans.append({"type": SpanType.STRONG if strong else SpanType.EMPHASIS,
-		"start": p, "length": close + open_len - p,
-		"content_start": content_start, "content_length": content_length})
-	# Also expose nested inline constructs to the highlighter. The preview
-	# recursively renders the content, while the highlighter needs the inner
-	# source ranges explicitly because it receives one line at a time.
-	for inner in compute_inline(text.substr(content_start, content_length)):
-		var nested := inner.duplicate()
-		nested["start"] = int(inner["start"]) + content_start
-		if nested.has("content_start"):
-			nested["content_start"] = int(nested["content_start"]) + content_start
-		spans.append(nested)
-	return close + open_len
+## Resolve emphasis/strong pairs close-to-open (CommonMark-style delimiter
+## stack). Each closer matches the nearest eligible earlier opener of the same
+## character; a >=2+>=2 match consumes two markers (STRONG), otherwise one
+## (EMPHASIS). Partial consumption lets `**bold *nested***` produce a span for
+## the inner emphasis (previously it rendered as plain strong). Leftover
+## markers on either side are discarded rather than re-matched, so spans never
+## overlap inconsistently. Rule of 3: a run that can both open and close is
+## skipped when the combined length is a multiple of 3.
+## Closers are resolved in SOURCE order so innermost pairs pair first
+## (`*a **b** c*` -> strong inside em); a closer with leftover single markers
+## keeps matching earlier openers (`**bold *nested***`).
+static func _process_emphasis(text: String, runs: Array[Dictionary], spans: Array[Dictionary]) -> void:
+	var n := runs.size()
+	for ci in range(n):
+		var closer: Dictionary = runs[ci]
+		if not bool(closer["can_close"]) or int(closer["rem"]) <= 0:
+			continue
+		var oi := ci - 1
+		while oi >= 0:
+			var opener: Dictionary = runs[oi]
+			if opener["ch"] == closer["ch"] and bool(opener["can_open"]) and int(opener["rem"]) > 0:
+				var orem := int(opener["rem"])
+				var crem := int(closer["rem"])
+				if (bool(opener["can_close"]) or bool(closer["can_open"])) \
+						and (orem + crem) % 3 == 0 and (orem % 3 != 0 or crem % 3 != 0):
+					oi -= 1
+					continue
+				var body_start := int(opener["pos"]) + int(opener["len"])
+				var body_len := int(closer["pos"]) - body_start
+				if body_len <= 0:
+					oi -= 1
+					continue
+				var use := 2 if (orem >= 2 and crem >= 2) else 1
+				spans.append({"type": SpanType.STRONG if use == 2 else SpanType.EMPHASIS,
+					"start": body_start - use, "length": body_len + use * 2,
+					"content_start": body_start, "content_length": body_len})
+				opener["rem"] = 0
+				# A single-marker match leaves closer markers available for a
+				# further (strong) match with an earlier opener; a strong
+				# match consumes the pair completely.
+				closer["rem"] = crem - use
+				if use == 2 or int(closer["rem"]) <= 0:
+					break
+			oi -= 1
 
 ## Find the first occurrence of `close` at or after `from`, honouring paired
 ## bracket/paren nesting for "[[..]]". Returns the index of the closing-start,
