@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://tests/test_sync_delete_move.gd" id="1_sync"]
+
+[node name="TestSyncDeleteMove" type="Node"]
+script = ExtResource("1_sync")

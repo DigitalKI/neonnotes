@@ -745,7 +745,13 @@ func move_path(src_rel: String, dst_dir: String) -> String:
 		GameManager.current_file = target
 		GameManager.current_rel = new_rel
 	if moved_cb.is_valid():
-		moved_cb.call(old_paths)
+		# Report both the old and the new paths: the old ones become tombstones,
+		# the new ones must clear any tombstone peers still hold for them (a
+		# folder moved back onto a previously deleted path).
+		var new_paths: Array[String] = []
+		for p in old_paths:
+			new_paths.append(PathRemap.moved(p, src_rel, new_rel))
+		moved_cb.call(old_paths, new_paths)
 	return new_rel
 
 func _paths_under(rel: String) -> Array[String]:

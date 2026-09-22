@@ -41,6 +41,9 @@ var _server: TCPServer
 var _bcast_timer: Timer
 var _cleanup_timer: Timer
 var _broadcasting := false
+## TCP port to listen on. Defaults to the LAN sync port; overridable so tests
+## and ad-hoc harnesses can run a receiver without clashing with a live app.
+var bind_port := TCP_PORT
 var _partial: Dictionary = {}  # peer_id -> {"buf": PackedByteArray}
 
 func _ready() -> void:
@@ -178,7 +181,7 @@ func _ensure_server() -> bool:
 	_server = TCPServer.new()
 	# "*" is Godot's portable all-interface bind address. Some mobile
 	# platforms reject the literal 0.0.0.0 here even though desktop accepts it.
-	var err := _server.listen(TCP_PORT, "*")
+	var err := _server.listen(bind_port, "*")
 	if err != OK:
 		_server = null
 		if not _tcp_error_reported:
@@ -201,7 +204,11 @@ func _poll_server() -> void:
 		var conn: StreamPeerTCP = st["conn"]
 		conn.poll()
 		var status := conn.get_status()
-		if status == StreamPeerTCP.STATUS_ERROR:
+		# A peer that closes cleanly leaves status NONE (not ERROR), so the old
+		# ERROR-only check never cleaned it up: get_available_bytes() then spams
+		# `Condition "!is_open()" is true` every frame and the entry leaks in
+		# _partial. Drop closed/errored connections here.
+		if status == StreamPeerTCP.STATUS_NONE or status == StreamPeerTCP.STATUS_ERROR:
 			conn.disconnect_from_host()
 			done_ids.append(id)
 			continue
@@ -277,8 +284,15 @@ func _handle_message(conn: StreamPeerTCP, msg: Dictionary, st: Dictionary, peer_
 		st["batch_peer_name"] = str(msg.get("name", stream_id))
 		st["pending"] = int(msg.get("pending", 0))
 		st["count"] = 0
+		st["deleted"] = 0
+		st["deleted_paths"] = []
+		st["changed_paths"] = []
+		# Fire-and-forget: the client streams items right away and only reads
+		# the terminal push_end ack. Replying here would sit unread in the
+		# client's buffer and be mistaken for the push_end reply (count 0).
+		st["no_reply"] = true
 		_sync_log("IN stream begin peer=%s pending=%d" % [st["batch_peer_name"], st["pending"]])
-		return {"ok": true, "expected": int(msg.get("pending", 0))}
+		return {"ok": true, "expected": int(st.get("pending", 0))}
 	if cmd == "push_item":
 		if not st.get("paired", false):
 			return {"ok": false, "error": "auth"}
@@ -301,6 +315,7 @@ func _handle_message(conn: StreamPeerTCP, msg: Dictionary, st: Dictionary, peer_
 			times = {}
 		var count := 0
 		var changed_paths: Array[String] = []
+		var deleted := 0
 		var skipped := 0
 		var invalid := 0
 		var vault := GameManager.vault_abs()
@@ -324,18 +339,24 @@ func _handle_message(conn: StreamPeerTCP, msg: Dictionary, st: Dictionary, peer_
 						var deleted_file := vault.path_join(str(deleted_path))
 						if FileAccess.file_exists(deleted_file):
 							DirAccess.remove_absolute(deleted_file)
+							deleted += 1
+							changed_paths.append(str(deleted_path))
 						_tombstones[str(deleted_path)] = remote_tombs[deleted_path]
 					_tombstones.merge(remote_tombs, true)
 				continue
+			var remote_t := int(times.get(fname, 0))
 			if _tombstones.has(name):
-				skipped += 1
-				_sync_log("IN tombstone-skip path=%s" % name)
-				continue
+				# A tombstone only blocks a copy that predates the deletion; a
+				# newer file is a legitimate recreation and must win.
+				if int(_tombstones[name]) >= remote_t:
+					skipped += 1
+					_sync_log("IN tombstone-skip path=%s" % name)
+					continue
+				_tombstones.erase(name)
 			var binary := not name.ends_with(".md") and not name.ends_with(".json")
 			# last-writer-wins: skip if our local copy is strictly newer
 			if FileAccess.file_exists(dest) and times.has(fname):
 				var local_t := FileAccess.get_modified_time(dest)
-				var remote_t := int(times[fname])
 				if local_t > remote_t:
 					skipped += 1
 					_sync_log("IN newer-local path=%s local=%d remote=%d" % [name, local_t, remote_t])
@@ -357,23 +378,25 @@ func _handle_message(conn: StreamPeerTCP, msg: Dictionary, st: Dictionary, peer_
 			else:
 				f.store_string(text)
 			f.close()
+			_mtimes[name] = remote_t
 			count += 1
 			changed_paths.append(name)
 			_sync_log("IN wrote path=%s bytes=%d" % [name, text.to_utf8_buffer().size()])
-		_sync_log("IN done peer=%s wrote=%d skipped=%d invalid=%d" % [str(msg.get("name", "peer")), count, skipped, invalid])
-		if count > 0:
+		_sync_log("IN done peer=%s wrote=%d deleted=%d skipped=%d invalid=%d" % [str(msg.get("name", "peer")), count, deleted, skipped, invalid])
+		if count > 0 or deleted > 0:
 			GameManager.scan_notes()
 		var peer_id := String(msg.get("id", ""))
 		if peer_id != "":
 			GameManager.add_trusted(peer_id)  # successfully paired+pushed → remember
-		var structural := false
+		var structural := deleted > 0
 		for p in changed_paths:
 			if String(p).ends_with(".md") or String(p).get_base_dir() != "":
 				structural = true
 				break
-		sync_done.emit(str(msg.get("name", "peer")), count)
-		sync_changed.emit(str(msg.get("name", "peer")), count, changed_paths, structural)
-		return {"ok": true, "count": count}
+		var total := count + deleted
+		sync_done.emit(str(msg.get("name", "peer")), total)
+		sync_changed.emit(str(msg.get("name", "peer")), total, changed_paths, structural)
+		return {"ok": true, "count": total}
 	return {"ok": false, "error": "unknown_cmd"}
 
 # ---------------- Stream receive (bounded memory) ----------------
@@ -391,24 +414,33 @@ func _receive_item(st: Dictionary, msg: Dictionary) -> void:
 		var remote_tombs = JSON.parse_string(text)
 		if typeof(remote_tombs) == TYPE_DICTIONARY:
 			var vault := GameManager.vault_abs()
+			var deleted_paths: Array = st.get("deleted_paths", [])
 			for deleted_path in remote_tombs.keys():
 				var deleted_file := vault.path_join(str(deleted_path))
 				if FileAccess.file_exists(deleted_file):
 					DirAccess.remove_absolute(deleted_file)
+					deleted_paths.append(str(deleted_path))
 				_tombstones[str(deleted_path)] = remote_tombs[deleted_path]
 			_tombstones.merge(remote_tombs, true)
+			st["deleted_paths"] = deleted_paths
+			st["deleted"] = int(st.get("deleted", 0)) + deleted_paths.size()
 		return
+	var remote_t := int(msg.get("modified", 0))
 	if _tombstones.has(name):
-		st["skipped"] = int(st.get("skipped", 0)) + 1
-		_sync_log("IN tombstone-skip path=%s" % name)
-		return
+		# A tombstone only blocks a copy that predates the deletion. A file
+		# modified AFTER the tombstone is a legitimate recreation (e.g. a
+		# folder moved back, or a deleted note re-created) and must win.
+		if int(_tombstones[name]) >= remote_t:
+			st["skipped"] = int(st.get("skipped", 0)) + 1
+			_sync_log("IN tombstone-skip path=%s" % name)
+			return
+		_tombstones.erase(name)
 	var vault := GameManager.vault_abs()
 	if vault == "":
 		return
 	var dest := vault.path_join(name)
-	if FileAccess.file_exists(dest) and msg.get("modified", 0) > 0:
+	if FileAccess.file_exists(dest) and remote_t > 0:
 		var local_t := FileAccess.get_modified_time(dest)
-		var remote_t := int(msg.get("modified", 0))
 		if local_t > remote_t:
 			st["skipped"] = int(st.get("skipped", 0)) + 1
 			_sync_log("IN newer-local path=%s local=%d remote=%d" % [name, local_t, remote_t])
@@ -432,6 +464,9 @@ func _receive_item(st: Dictionary, msg: Dictionary) -> void:
 	else:
 		f.store_string(text)
 	f.close()
+	# Remember the sender's timestamp: re-sending this file must not look newer
+	# than an older tombstone just because receipt stamped it with our clock.
+	_mtimes[name] = remote_t
 	st["count"] = int(st.get("count", 0)) + 1
 	var changed: Array = st.get("changed_paths", [])
 	changed.append(name)
@@ -440,21 +475,32 @@ func _receive_item(st: Dictionary, msg: Dictionary) -> void:
 
 func _finish_stream(st: Dictionary) -> Dictionary:
 	var wrote := int(st.get("count", 0))
+	var deleted_paths: Array = st.get("deleted_paths", [])
+	var deleted := deleted_paths.size()
 	var changed_paths: Array = st.get("changed_paths", [])
 	var vault := GameManager.vault_abs()
-	if wrote > 0 and vault != "":
+	# Deletions must rescan too, even when no file was written — otherwise a
+	# delete-only sync leaves the receiver's tree showing the removed folder.
+	if (wrote > 0 or deleted > 0) and vault != "":
 		GameManager.scan_notes()
 	var peer_id := String(st.get("batch_peer_id", ""))
 	if peer_id != "" and vault != "":
 		GameManager.add_trusted(peer_id)
-	var structural := false
+	# A tombstone deletion is a structural change even if its path is a folder
+	# companion (no ".md" and no parent folder in the path).
+	var structural := deleted > 0
 	for p in changed_paths:
 		if String(p).ends_with(".md") or String(p).get_base_dir() != "":
 			structural = true
 			break
-	sync_done.emit(str(st.get("batch_peer_name", "peer")), wrote)
-	sync_changed.emit(str(st.get("batch_peer_name", "peer")), wrote, changed_paths, structural)
-	return {"ok": true, "count": wrote, "skipped": int(st.get("skipped", 0)), "invalid": int(st.get("invalid", 0))}
+	var all_paths: Array = changed_paths.duplicate()
+	for p in deleted_paths:
+		if not all_paths.has(p):
+			all_paths.append(p)
+	var total := wrote + deleted
+	sync_done.emit(str(st.get("batch_peer_name", "peer")), total)
+	sync_changed.emit(str(st.get("batch_peer_name", "peer")), total, all_paths, structural)
+	return {"ok": true, "count": total, "written": wrote, "deleted": deleted, "skipped": int(st.get("skipped", 0)), "invalid": int(st.get("invalid", 0))}
 
 func _send_json(conn: StreamPeerTCP, data: Dictionary) -> void:
 	_send_frame_bytes(conn, JSON.stringify(data).to_utf8_buffer())
@@ -530,14 +576,17 @@ static func _client_roundtrip(conn: StreamPeerTCP, msg: Dictionary, wait_ms := 1
 	var buf := PackedByteArray()
 	while Time.get_ticks_msec() - start < wait_ms:
 		conn.poll()
-		if conn.get_status() == StreamPeerTCP.STATUS_ERROR:
-			return null
-		if conn.get_available_bytes() > 0:
+		var status := conn.get_status()
+		# Only read while the socket is open; get_available_bytes() on a closed
+		# StreamPeerTCP logs an engine error and returns -1.
+		if status == StreamPeerTCP.STATUS_CONNECTED and conn.get_available_bytes() > 0:
 			buf = buf + conn.get_data(conn.get_available_bytes())[1]
 		if buf.size() >= 4:
 			var length := buf.decode_u32(0)
 			if buf.size() >= 4 + length:
 				return JSON.parse_string(buf.slice(4, 4 + length).get_string_from_utf8())
+		if status != StreamPeerTCP.STATUS_CONNECTED:
+			return null
 	return null
 
 # ---------------- Notes ----------------
@@ -558,9 +607,14 @@ func _sync_log(message: String) -> void:
 
 ## Read the whole vault (notes + media base64) for transfer. Runs on the worker
 ## thread so all disk I/O never blocks the UI; all inputs are snapshots taken on
-## the main thread (ts, vault path, note list) so the worker never touches the
-## GameManager node from another thread.
-func collect_notes(ts: Dictionary, vault: String, note_list: Array) -> Dictionary:
+## the main thread (ts, mtimes, vault path, note list) so the worker never
+## touches the GameManager node from another thread.
+##
+## `mtimes` is the logical-mtime snapshot: for a file we merely received, the
+## original sender's timestamp is reused instead of the local disk mtime (which
+## receipt would have bumped to "now"). That keeps last-writer-wins and the
+## tombstone guard stable across round-trips.
+func collect_notes(ts: Dictionary, vault: String, note_list: Array, mtimes: Dictionary = {}) -> Dictionary:
 	var files := {}
 	var times := {}
 	# Transfer markdown and embedded media, but never generated exports.
@@ -576,7 +630,7 @@ func collect_notes(ts: Dictionary, vault: String, note_list: Array) -> Dictionar
 				f.close()
 				continue
 			files[name] = f.get_as_text() if name.ends_with(".md") or name.ends_with(".json") else Marshalls.raw_to_base64(f.get_buffer(f.get_length()))
-			times[name] = FileAccess.get_modified_time(path)
+			times[name] = int(mtimes.get(name, FileAccess.get_modified_time(path)))
 			f.close()
 	if not ts.is_empty():
 		files[".neonnotes-tombstones.json"] = JSON.stringify(ts)
@@ -609,6 +663,13 @@ var _syncing := false
 var _tcp_error_reported := false
 var _peer_sync_times: Dictionary = {}
 var _tombstones: Dictionary = {}
+## Logical modification times for files received this session (rel path -> unix
+## seconds). Writing a received file would otherwise stamp it with the *local*
+## clock, so every re-sent copy would look newer than any older tombstone and a
+## deleted file could be resurrected ("bounce"). We keep the sender's timestamp
+## and re-send that instead; a genuine local write drops the entry (see
+## note_saved/note_restored) so true local edits still win.
+var _mtimes: Dictionary = {}
 var _sync_thread: Thread
 var _sync_result: Array = []
 var _sync_mutex := Mutex.new()
@@ -647,9 +708,23 @@ func enable_auto_sync() -> void:
 
 func note_deleted(path: String) -> void:
 	_tombstones[path] = Time.get_unix_time_from_system()
+	_mtimes.erase(path)
 	note_saved()
 
-func note_saved() -> void:
+## A path was (re)created or written locally. Forget any tombstone for it and
+## assert the file is alive "now": moves preserve the source file's old mtime,
+## so without this a folder moved back onto a previously deleted path would
+## stay blocked on peers. Peers accept it because this timestamp beats their
+## tombstone.
+func note_restored(path: String) -> void:
+	if path == "":
+		return
+	_tombstones.erase(path)
+	_mtimes[path] = Time.get_unix_time_from_system()
+
+func note_saved(path := "") -> void:
+	if path != "":
+		note_restored(path)
 	_pending_unsynced = true
 	sync_pending.emit()
 	if _auto_timer == null:
@@ -684,23 +759,24 @@ func auto_sync() -> void:
 	if targets.is_empty():
 		_syncing = false
 		return
-	# Snapshot tombstones on the main thread (small) and let the worker read the
-	# actual file payloads off the UI thread.
+	# Snapshot tombstones and logical mtimes on the main thread (small) and let
+	# the worker read the actual file payloads off the UI thread.
 	_sync_mutex.lock()
 	var ts: Dictionary = _tombstones.duplicate()
+	var mtimes: Dictionary = _mtimes.duplicate()
 	_sync_mutex.unlock()
 	var vault: String = GameManager.vault_abs()
 	var note_list: Array = GameManager.notes.duplicate()
 	_sync_thread = Thread.new()
-	_sync_thread.start(_sync_worker.bind(targets, ts, vault, note_list))
+	_sync_thread.start(_sync_worker.bind(targets, ts, vault, note_list, mtimes))
 	return
 
-func _sync_worker(targets: Array, ts: Dictionary, vault: String, note_list: Array) -> void:
+func _sync_worker(targets: Array, ts: Dictionary, vault: String, note_list: Array, mtimes: Dictionary) -> void:
 	var successful := 0
 	var completed := false
 	var last_name := "peer"
 	var failure := ""
-	var data: Dictionary = collect_notes(ts, vault, note_list)
+	var data: Dictionary = collect_notes(ts, vault, note_list, mtimes)
 	var files: Dictionary = data["files"]
 	var times: Dictionary = data["times"]
 	if files.is_empty() and ts.is_empty():

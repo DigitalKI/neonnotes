@@ -118,19 +118,20 @@ func _on_send() -> void:
 	var p: Dictionary = _service.peers.get(ip, {})
 	var port := int(p.get("tcp", SyncService.TCP_PORT))
 	var peer_name := str(p.get("name", ip))
-	var files: Dictionary = _service.collect_notes({}, GameManager.vault_abs(), GameManager.notes)["files"]
+	var cart: Dictionary = _service.collect_notes({}, GameManager.vault_abs(), GameManager.notes, _service._mtimes.duplicate())
+	var files: Dictionary = cart["files"]
 	if files.is_empty():
 		_status_label.text = "No notes to send."
 		return
 	_status_label.text = "Sending %d notes to %s..." % [files.size(), peer_name]
 	_send_btn.disabled = true
 	await get_tree().process_frame
-	var res: Dictionary = await _send_task(ip, port, pin, files, peer_name)
+	var res: Dictionary = await _send_task(ip, port, pin, files, peer_name, cart["times"])
 	_send_btn.disabled = false
 	_status_label.text = str(res.get("msg", ""))
 
-func _send_task(ip: String, port: int, pin: String, files: Dictionary, peer_name: String) -> Dictionary:
-	var res := SyncService.push_to(ip, port, pin, files)
+func _send_task(ip: String, port: int, pin: String, files: Dictionary, peer_name: String, times: Dictionary = {}) -> Dictionary:
+	var res := SyncService.push_to(ip, port, pin, files, 4000, times)
 	if res.get("ok", false):
 		var count := int(res.get("count", 0))
 		_log.append_text("[color=green]Sent %d notes to %s[/color]\n" % [count, peer_name])
