@@ -13,11 +13,13 @@ config_version=5
 config/name="NeonNotes"
 run/main_scene="res://scenes/main/Main.tscn"
 config/features=PackedStringArray("4.7")
+run/max_fps=60
 config/icon="uid://dyqqv3ie0uucf"
 
 [autoload]
 
 GameManager="*res://scripts/common/GameManager.gd"
+McpRuntime="*res://addons/godot-mcp/mcp_runtime.gd"
 
 [display]
 
@@ -34,6 +36,12 @@ enabled=PackedStringArray("res://addons/godot-mcp/plugin.cfg")
 [gui]
 
 theme/custom_font="res://assets/fonts/ShareTechMono-Regular.ttf"
+
+[physics]
+
+common/physics_ticks_per_second=1
+2d/physics_engine="Dummy"
+3d/physics_engine="Dummy"
 
 [rendering]
 
