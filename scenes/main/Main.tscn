@@ -1,14 +1,13 @@
 [gd_scene format=3 uid="uid://r4hgiw3vsp4v"]
 
 [ext_resource type="Script" uid="uid://blcr73uhsp6w4" path="res://scripts/main.gd" id="1_main"]
-[ext_resource type="FontFile" uid="uid://dhrjvvn04r3c2" path="res://assets/fonts/Orbitron.ttf" id="2_orbitron"]
 [ext_resource type="Shader" uid="uid://d0udygsyay06s" path="res://shaders/crt.gdshader" id="3_crt"]
 [ext_resource type="Script" uid="uid://54xformjxgfq" path="res://scripts/render/graph_view.gd" id="4_graph"]
 [ext_resource type="PackedScene" path="res://scenes/components/toolbar.tscn" id="5_toolbar"]
-[ext_resource type="PackedScene" path="res://scenes/components/export_menu.tscn" id="9_export_menu"]
 [ext_resource type="PackedScene" uid="uid://cj1ama86pqcoo" path="res://scenes/components/status_bar.tscn" id="6_status"]
-[ext_resource type="PackedScene" path="res://scenes/components/side_panel.tscn" id="7_side"]
+[ext_resource type="PackedScene" uid="uid://dr4466qx0hbpp" path="res://scenes/components/side_panel.tscn" id="7_side"]
 [ext_resource type="PackedScene" uid="uid://dsdpg5sa7q611" path="res://scenes/components/settings_page.tscn" id="8_settings"]
+[ext_resource type="PackedScene" uid="uid://bge6o1gqm4xsx" path="res://scenes/components/export_menu.tscn" id="9_export_menu"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMat_crt"]
 shader = ExtResource("3_crt")
@@ -48,8 +47,6 @@ grow_vertical = 2
 unique_name_in_owner = true
 layout_mode = 2
 
-[node name="ExportMenu" parent="." instance=ExtResource("9_export_menu")]
-
 [node name="WorkspaceMargin" type="MarginContainer" parent="Root" unique_id=1015672353]
 layout_mode = 2
 size_flags_vertical = 3
@@ -69,11 +66,11 @@ unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="EditSearch" type="LineEdit" parent="Root/WorkspaceMargin/Workspace/Content"]
+[node name="EditSearch" type="LineEdit" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=1676676697]
 unique_name_in_owner = true
+visible = false
 layout_mode = 2
 placeholder_text = "Find in document…"
-visible = false
 
 [node name="ContentHost" type="ScrollContainer" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=1622826570]
 unique_name_in_owner = true
@@ -105,6 +102,17 @@ layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
+[node name="SourceEditor" type="CodeEdit" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding" unique_id=1315287311]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "# Write markdown here…"
+size_flags_horizontal = 3
+size_flags_vertical = 3
+visible = false
+drag_and_drop_selection_enabled = false
+context_menu_enabled = true
+wrap_mode = 1
+
 [node name="SettingsPage" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=740001001 instance=ExtResource("8_settings")]
 unique_name_in_owner = true
 visible = false
@@ -123,6 +131,8 @@ script = ExtResource("4_graph")
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 33)
 layout_mode = 2
+
+[node name="ExportMenu" parent="." unique_id=202875446 instance=ExtResource("9_export_menu")]
 
 [node name="CrtOverlay" type="ColorRect" parent="." unique_id=1821292982]
 material = SubResource("ShaderMat_crt")

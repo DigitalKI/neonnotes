@@ -38,9 +38,9 @@ func _load_help_doc() -> String:
 @onready var settings_component: SettingsComponent = %SettingsPage.get_node("VerticalContainer")
 @onready var content_panel: PanelContainer = %Content
 @onready var graph_view: GraphView = %GraphView
+@onready var code_edit : CodeEdit = %SourceEditor
 var settings_mode := false
 
-var code_edit := CodeEdit.new()
 var sidebar: PanelContainer
 var new_dialog: AcceptDialog
 var new_line: LineEdit
@@ -97,9 +97,11 @@ func _ready() -> void:
 			_render_preview())
 	vault_tree.save_cb = _flush_save
 	vault_tree.flash_cb = _flash
-	vault_tree.moved_cb = func(old_paths: Array[String]):
+	vault_tree.moved_cb = func(old_paths: Array[String], new_paths: Array[String]):
 		for old_path in old_paths:
 			sync_service.note_deleted(old_path)
+		for new_path in new_paths:
+			sync_service.note_restored(new_path)
 		sync_service.note_saved()
 	vault_tree.note_requested.connect(_on_note_selected)
 	vault_tree.delete_requested.connect(_delete_selected_node)
@@ -174,6 +176,13 @@ func _on_sync_changed(_peer: String, _count: int, changed_paths: Array, structur
 	if structure_changed:
 		GameManager.scan_notes()
 		_refresh_list()
+	# The note we had open was removed by the peer: don't keep showing stale text.
+	if GameManager.current_rel != "" and not GameManager.notes.has(GameManager.current_rel):
+		GameManager.current_file = ""
+		GameManager.current_rel = ""
+		code_edit.text = ""
+		_open_start_page.call_deferred()
+		return
 	if GameManager.current_rel != "" and changed_paths.has(GameManager.current_rel):
 		_refresh_open_note_after_sync.call_deferred()
 
@@ -208,27 +217,15 @@ func _prepare_smoke_vault() -> void:
 # ------------------------------------------------------------ dynamic UI
 
 func _build_dynamic_ui() -> void:
-	code_edit.name = "SourceEditor"
-	code_edit.placeholder_text = "# Write markdown here…"
-	code_edit.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	code_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	code_edit.visible = false
-	# word wrap always — no horizontal scrolling in edit mode
-	code_edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+	# Static properties (placeholder, size flags, visibility, wrap, drag/drop
+	# selection, context menu) are configured directly on the CodeEdit node
+	# in Main.tscn.
 	# NOT scroll_fit_content_height: that grows CodeEdit's min size with the
 	# note's content, which blows out Root's VBoxContainer on long notes and
 	# pushes the header/toolbar off-screen. It must stay confined to its
 	# container and scroll internally instead.
 	# slightly wider vertical scrollbar for comfortable dragging
 	code_edit.get_v_scroll_bar().custom_minimum_size = Vector2(14, 0)
-	# native context menu, trimmed to just Cut/Copy/Paste (drop Select
-	# All/Undo/Redo/direction submenus); still used as-is for desktop
-	# right-click. Touch uses _on_code_edit_gui_input's own popup instead.
-	code_edit.context_menu_enabled = true
-	# Mobile: CodeEdit's drag-and-drop-selected-text must never engage — the
-	# state machine owns selection and "moving text by dragging" was reported
-	# as a bug symptom.
-	code_edit.drag_and_drop_selection_enabled = false
 	var edit_menu := code_edit.get_menu()
 	for i in range(edit_menu.item_count - 1, -1, -1):
 		if edit_menu.get_item_id(i) > TextEdit.MENU_PASTE:
@@ -519,7 +516,7 @@ func _flush_save() -> void:
 		return
 	if GameManager.write_note(fname, code_edit.text):
 		status_bar.flash("✓ Saved " + fname)
-		sync_service.note_saved()  # debounce auto-sync after edits
+		sync_service.note_saved(fname)  # debounce auto-sync + clear any tombstone
 		# rebuild the tree if the front-matter title changed
 		var old_title: String = GameManager.titles.get(fname, "")
 		var new_title: String = MarkdownParser.parse(code_edit.text).get("meta", {}).get("title", "")
@@ -897,6 +894,10 @@ func _toggle_settings() -> void:
 		return
 	_flush_save()
 	settings_mode = true
+	# Settings owns the whole screen on mobile, same as opening a note:
+	# collapse the tree drawer first.
+	if layout_component.is_mobile_layout and layout_component.drawer_open:
+		layout_component.toggle_sidebar()
 	graph_view.visible = false
 	code_edit.visible = false
 	edit_padding.visible = false
@@ -1230,7 +1231,7 @@ func _on_image_selected(path: String) -> void:
 	if GameManager.current_rel != "":
 		GameManager.write_note(GameManager.current_rel, code_edit.text)
 		status_bar.flash("✓ Saved " + GameManager.current_rel)
-		sync_service.note_saved()
+		sync_service.note_saved(GameManager.current_rel)
 	if not source_mode:
 		_render_preview()
 	_flash("🖼 " + rel)
