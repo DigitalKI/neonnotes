@@ -6,6 +6,7 @@ extends Control
 const SmokeDriver := preload("res://scripts/dev/smoke_test.gd")
 const MONO_FONT := preload("res://assets/fonts/ShareTechMono-Regular.ttf")
 const SYNC_DIALOG_SCENE := preload("res://scenes/components/sync_dialog.tscn")
+const SELECTION_OVERLAY_SCENE := preload("res://scenes/components/selection_overlay.tscn")
 
 const NOTE_TEMPLATE := """---
 title: "%s"
@@ -55,17 +56,14 @@ var layout_component := LayoutComponent.new()
 var slash_menu := SlashMenuComponent.new()
 @onready var export_component: ExportComponent = %ExportMenu
 
-# ---- editor drag gesture: plain drag scrolls, long-press-then-drag selects
-var _long_press_timer := Timer.new()
-var _drag_start_pos := Vector2.ZERO
-var _drag_is_scroll := false
-var _drag_is_select := false
-var _select_start := Vector2i.ZERO
-var _select_anchor_set := false
-const DRAG_SCROLL_THRESHOLD := 12.0
-const LONG_PRESS_SECONDS := 1.0
-# Touch gesture state machine for the mobile editor.
-var _gesture_state := "IDLE"  # IDLE | PENDING | SCROLLING | SELECTING
+# ---- mobile text selection (Android).
+# Plain drag always scrolls (native). A double-tap on a word activates a
+# selection with SelectionOverlay handles + Cut/Copy/Paste bar; native
+# clicked-drag selection is disabled on Android so scrolling never
+# accidentally selects text. Desktop is unchanged (native selection).
+var selection_overlay: SelectionOverlay
+var _last_tap_time := -INF
+const DOUBLE_TAP_WINDOW_MS := 400
 
 func _ready() -> void:
 	_build_dynamic_ui()
@@ -232,14 +230,24 @@ func _build_dynamic_ui() -> void:
 			edit_menu.remove_item(i)
 	code_edit.text_changed.connect(_on_text_changed)
 	code_edit.gui_input.connect(_on_code_edit_gui_input)
-	_long_press_timer.name = "LongPressTimer"
-	_long_press_timer.one_shot = true
-	_long_press_timer.wait_time = LONG_PRESS_SECONDS
-	_long_press_timer.timeout.connect(_on_code_edit_long_press)
-	add_child(_long_press_timer)
+	# Native clicked-drag selection is disabled on Android; SelectionOverlay
+	# handles are the only way to stretch a selection (see _on_code_edit_gui_input).
+	var sc := OS.get_name()
+	if sc == "Linux" or sc == "Windows":
+		code_edit.selecting_enabled = true
+	else:
+		code_edit.selecting_enabled = false
+	if sc == "Android":
+		selection_overlay = SELECTION_OVERLAY_SCENE.instantiate()
+		selection_overlay.name = "SelectionOverlay"
+		# Child of CodeEdit (not EditPadding): MarginContainer stays single-child,
+		# and mouse_filter=IGNORE lets taps/keys reach the editor underneath.
+		code_edit.add_child(selection_overlay)
+		selection_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		selection_overlay.bind(code_edit)
+		selection_overlay.action.connect(_on_selection_overlay_action)
 	code_edit.get_menu().id_pressed.connect(_on_edit_menu_action)
 	code_edit.get_menu().popup_hide.connect(_on_edit_menu_closed)
-	edit_padding.add_child(code_edit)
 
 	# autosave: immediate — every keystroke/paste persists (no debounce);
 	# the Timer remains as a safety net for programmatic edits
@@ -350,110 +358,91 @@ func _build_dynamic_ui() -> void:
 	vault_dialog.dir_selected.connect(_on_vault_selected)
 	add_child(vault_dialog)
 
-# ------------------------------------------------------------ editor drag gesture
+# ------------------------------------------------------------ mobile selection handles
 
-## A single touch/mouse drag on the editor is ambiguous between "scroll the
-## text" and "select text", so we disambiguate by hold time: a plain drag
-## scrolls (mirrors normal touch-scrolling apps); pressing and holding first,
-## then dragging, selects instead. Motion is swallowed (via
-## set_input_as_handled) while we're deciding and while scrolling, so
-## CodeEdit's own default click-and-drag-to-select never engages for a plain
-## drag. Once a long-press is confirmed we stop swallowing so CodeEdit's
-## normal selection-drag takes back over from the still-held pointer.
+## Desktop uses Godot's native click-drag selection. On touch platforms we are
+## gesture-only: plain drags scroll, a double-tap on text selects a word and
+## shows two handles (start / end) that stretch the selection. We never engage
+## the native clicked-drag selection, so scrolling never selects and the
+## selection is never accidentally moved.
 func _on_code_edit_gui_input(event: InputEvent) -> void:
-	# Desktop uses native CodeEdit selection/scrolling — untouched.
 	if OS.get_name() == "Linux" or OS.get_name() == "Windows":
-		return
-	# Explicit touch state machine (see constants above). Touch events are the
-	# source of truth on Android; mouse events are ignored so CodeEdit's own
-	# mouse emulation can't fight our gesture handling.
-	if event is InputEventScreenTouch:
-		# Touch events only DRIVE the state machine. Caret/selection coordinates
-		# always come from the emulated mouse pipeline instead: Android reports
-		# touch positions in window space (not adjusted for this project's
-		# content_scale_factor), which made manual get_line_column_at_pos
-		# hit-testing land on the wrong line. The emulated mouse events are
-		# transformed exactly like desktop mouse events, which the user
-		# confirmed hit correctly.
-		if event.pressed:
-			_gesture_state = "PENDING"
-			_drag_start_pos = event.position
-			_select_anchor_set = false
-			_long_press_timer.start()
-			# Do NOT consume: the following emulated mouse press places the
-			# caret natively at the right spot and opens the keyboard.
+		return  # desktop: native selection/scrolling, untouched
+	# CRITICAL: gui_input fires BEFORE CodeEdit._gui_input — never set_input_as_handled.
+	# On Android, emulate_mouse_from_touch means Controls almost always see MouseButton,
+	# not ScreenTouch. Use MouseButton.double_click; defer so the caret is already placed.
+	if event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+		if mb.button_index != MOUSE_BUTTON_LEFT or not mb.pressed:
+			return
+		if mb.double_click:
+			call_deferred("_activate_word_select_from_double_tap")
 		else:
-			match _gesture_state:
-				"PENDING":
-					_gesture_state = "IDLE"
-					_long_press_timer.stop()
-					# Native caret placement happened via the emulated click;
-					# keep following the caret across the IME layout frames.
-					_schedule_tapped_caret_scroll.call_deferred(10)
-				"SCROLLING":
-					_gesture_state = "IDLE"
-				"SELECTING":
-					_gesture_state = "IDLE"
-					if code_edit.has_selection():
-						_show_selection_menu()
-				_:
-					_gesture_state = "IDLE"
-	elif event is InputEventScreenDrag and _gesture_state != "IDLE":
-		if _gesture_state == "PENDING" and event.position.distance_to(_drag_start_pos) > DRAG_SCROLL_THRESHOLD:
-			_long_press_timer.stop()
-			_gesture_state = "SCROLLING"
-		if _gesture_state == "SCROLLING":
-			code_edit.scroll_vertical -= event.relative.y / float(code_edit.get_line_height())
-			get_viewport().set_input_as_handled()
-	elif event is InputEventMouseButton:
-		# Emulated mouse press mirrors the touch and places the caret natively;
-		# record that (correctly-transformed) point as the selection anchor.
-		# NOTE: Android pushes the emulated mouse event BEFORE the matching
-		# touch event, so on press the state is still IDLE here. The anchor is
-		# therefore taken on the first motion while SELECTING instead.
-		if _gesture_state == "SCROLLING" or _gesture_state == "SELECTING":
-			# Mid-gesture clicks must not collapse the selection or move the
-			# caret.
-			get_viewport().set_input_as_handled()
-	elif event is InputEventMouseMotion:
-		if _gesture_state == "PENDING" or _gesture_state == "SCROLLING":
-			# We own the gesture: no native drag-select/scroll.
-			get_viewport().set_input_as_handled()
-		elif _gesture_state == "SELECTING":
-			# Extend the selection manually from the anchored point using the
-			# emulated mouse coordinates (correctly content-scale-transformed),
-			# plus edge auto-scroll so long selections past the screen work.
-			get_viewport().set_input_as_handled()
-			if not _select_anchor_set:
-				_select_anchor_set = true
-				_select_start = Vector2i(code_edit.get_caret_line(), code_edit.get_caret_column())
-			var cur: Vector2i = code_edit.get_line_column_at_pos(event.position)
-			code_edit.select(_select_start.x, _select_start.y, cur.x, cur.y)
-			var edge := 56.0
-			if event.position.y < edge:
-				code_edit.scroll_vertical -= 1
-			elif event.position.y > code_edit.size.y - edge:
-				code_edit.scroll_vertical += 1
+			# Single tap: drop custom selection; caret/scroll stay native.
+			if selection_overlay and selection_overlay.visible:
+				code_edit.deselect()
+				selection_overlay.hide_overlay()
+		return
+	# Rare path: devices that deliver raw ScreenTouch to Controls.
+	if event is InputEventScreenTouch and not event.pressed:
+		_on_code_edit_tap(event)
 
-func _on_code_edit_long_press() -> void:
-	if _gesture_state == "PENDING":
-		_gesture_state = "SELECTING"
-		# The caret was already placed natively by the emulated mouse press at
-		# the correct tap point; anchor the selection there.
-		_select_anchor_set = true
-		_select_start = Vector2i(code_edit.get_caret_line(), code_edit.get_caret_column())
-		# The caret was already placed natively by the emulated mouse press at
-		# the correct tap point; anchor the selection there.
-		_select_start = Vector2i(code_edit.get_caret_line(), code_edit.get_caret_column())
+func _activate_word_select_from_double_tap() -> void:
+	if selection_overlay:
+		selection_overlay.select_word_at_caret()
+	else:
+		select_word_at(code_edit.get_caret_line(), code_edit.get_caret_column())
+
+func _on_code_edit_tap(_ev: InputEventScreenTouch) -> void:
+	var now := Time.get_ticks_msec()
+	var is_double := now - _last_tap_time <= DOUBLE_TAP_WINDOW_MS
+	_last_tap_time = now
+	if not is_double:
+		code_edit.deselect()
+		if selection_overlay:
+			selection_overlay.hide_overlay()
+		return
+	_activate_word_select_from_double_tap()
+
+## Fallback word select when SelectionOverlay is unavailable (non-Android touch).
+func select_word_at(line: int, col: int) -> void:
+	var text_line := code_edit.get_line(line)
+	if line >= code_edit.get_line_count() or col < 0 or col >= text_line.length():
+		return
+	if not _is_word_char(text_line[col]):
+		return
+	var s := col
+	var e := col + 1
+	while s > 0 and _is_word_char(text_line[s - 1]):
+		s -= 1
+	while e < text_line.length() and _is_word_char(text_line[e]):
+		e += 1
+	# Same rule as SelectionOverlay: select() is a no-op while selecting_enabled is false.
+	code_edit.selecting_enabled = true
+	code_edit.select(line, s, line, e)
+	_show_selection_menu()
+
+func _is_word_char(ch: String) -> bool:
+	if ch.length() != 1:
+		return false
+	var code := ch.unicode_at(0)
+	if ch == "_":
+		return true
+	if code >= 48 and code <= 57:
+		return true
+	if (code >= 65 and code <= 90) or (code >= 97 and code <= 122):
+		return true
+	return false
 
 func _scroll_tapped_caret(local_pos: Vector2) -> void:
 	if not code_edit.visible:
 		return
 	# Convert the touch point to the exact line/column CodeEdit hit, rather
 	# than assuming the current caret is already the tapped location.
-	var caret_pos: Vector2i = code_edit.get_line_column_at_pos(local_pos)
-	code_edit.set_caret_line(caret_pos.x)
-	code_edit.set_caret_column(caret_pos.y)
+	# Godot 4: get_line_column_at_pos → Vector2i(column, line).
+	var caret_pos: Vector2i = code_edit.get_line_column_at_pos(Vector2i(local_pos))
+	code_edit.set_caret_line(caret_pos.y)
+	code_edit.set_caret_column(caret_pos.x)
 	code_edit.adjust_viewport_to_caret(0)
 	_schedule_tapped_caret_scroll(12)
 
@@ -468,22 +457,26 @@ func _schedule_tapped_caret_scroll(frames: int) -> void:
 			return
 		code_edit.adjust_viewport_to_caret(0)
 
-## Cut/Copy/Paste popup shown right after a long-press-drag selection ends.
+## Cut/Copy/Paste popup actions. After the menu closes we keep the selection
+## (IME backspace deletes it); we only drop the handles so the next scroll
+## resumes as a plain scroll.
 func _on_edit_menu_action(id: int) -> void:
 	if id == TextEdit.MENU_CUT or id == TextEdit.MENU_COPY or id == TextEdit.MENU_PASTE:
-		_reset_mobile_selection_mode(false)
+		if selection_overlay:
+			selection_overlay.hide_overlay()
 
 func _on_edit_menu_closed() -> void:
-	if _gesture_state == "IDLE":
-		# Keep any existing selection so the IME backspace can delete it right
-		# after the menu closes; only the gesture state resets to scroll mode.
-		_reset_mobile_selection_mode(false)
+	# Overlay owns its own visibility; native menu close only hides when overlay absent.
+	pass
 
-func _reset_mobile_selection_mode(clear_selection: bool) -> void:
-	_gesture_state = "IDLE"
-	_long_press_timer.stop()
-	if clear_selection:
-		code_edit.deselect()
+func _on_selection_overlay_action(id: String) -> void:
+	match id:
+		"cut":
+			_flash("Cut")
+		"copy":
+			_flash("Copied")
+		"paste":
+			_flash("Pasted")
 
 func _show_selection_menu() -> void:
 	var menu := code_edit.get_menu()
@@ -823,6 +816,8 @@ func _set_mode() -> void:
 		# caret once the editor is actually visible.
 		code_edit.call_deferred("adjust_viewport_to_caret", 0)
 	else:
+		if selection_overlay:
+			selection_overlay.hide_overlay()
 		_render_preview()
 
 func _find_in_editor(query: String) -> void:

@@ -55,6 +55,7 @@ _Last updated: 2026-09-22 · Godot 4.7 · renderer: gl_compatibility_
 
 - **Current goal:** stable v3; sync verified on device (phone↔PC over air).
 - **Next up:**
+  - SelectionOverlay (Android handles + Cut/Copy/Paste bar) in progress — wire/test on device.
   - Tree tap-open follow-up: resolve the row ONCE at press and open the
     stashed item on release (no re-hit-testing); time must NOT be the
     tap/scroll discriminator — use displacement < 16 px + 3 s hold gate.
