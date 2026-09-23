@@ -104,13 +104,12 @@ size_flags_vertical = 3
 
 [node name="SourceEditor" type="CodeEdit" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding" unique_id=1315287311]
 unique_name_in_owner = true
+visible = false
 layout_mode = 2
-placeholder_text = "# Write markdown here…"
 size_flags_horizontal = 3
 size_flags_vertical = 3
-visible = false
+placeholder_text = "# Write markdown here…"
 drag_and_drop_selection_enabled = false
-context_menu_enabled = true
 wrap_mode = 1
 
 [node name="SettingsPage" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=740001001 instance=ExtResource("8_settings")]
