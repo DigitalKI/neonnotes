@@ -35,6 +35,8 @@ var _search_results: Array = []
 var _search_snippets: Dictionary = {}
 var _search_shutting_down := false
 const MOBILE_DRAG_HOLD_SECONDS := 3.0
+const TREE_TAP_MAX_DISTANCE := 16.0
+const TREE_DRAG_START_DISTANCE := 10.0
 var _mobile_touch_candidate := false
 var _mobile_hold_ready := false
 var _mobile_hold_timer := Timer.new()
@@ -126,79 +128,98 @@ func build() -> void:
 		GameManager.write_note(_root_homepage, "# Home\n\nWelcome to NeonNotes.\n")
 	# Trigger note opening on mouse/touch RELEASE so dragging a row never
 	# accidentally opens a note or closes the mobile sidebar drawer.
-	side_tree.gui_input.connect(func(ev: InputEvent):
-		if (ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_LEFT) or ev is InputEventScreenTouch:
-			if ev.pressed:
-				_press_pos = ev.position
-				_press_item = side_tree.get_item_at_position(ev.position)
-				_press_item_toggle = _press_item != null and _is_tree_toggle_click(_press_item, ev.position)
-				_is_touch_dragging = false
-				_drag_just_happened = false
-				_touch_src_path = ""
-				_mobile_touch_candidate = false
-				_mobile_hold_ready = false
-				_mobile_hold_timer.stop()
-				var start_item := _press_item
-				if start_item != null and start_item != side_tree.get_root() and start_item.get_metadata(0) != null:
-					var meta := str(start_item.get_metadata(0))
-					if meta != "":
-						if meta.ends_with(".md") and DirAccess.dir_exists_absolute(GameManager.vault_abs().path_join(meta.trim_suffix(".md"))):
-							meta = meta.trim_suffix(".md")
-						_touch_src_path = meta
-						if OS.get_name() == "Android":
-							_mobile_touch_candidate = true
-							_mobile_hold_timer.start()
-			else:
-				_mobile_hold_timer.stop()
-				if _is_touch_dragging or _drag_just_happened:
-					if _touch_src_path != "":
-						var target_item := side_tree.get_item_at_position(ev.position)
-						var section := _custom_drop_section(target_item, ev.position)
-						_perform_drop(_touch_src_path, target_item, section)
-				elif not _mobile_hold_ready and ev.position.distance_to(_press_pos) < 16.0:
-					var it := _press_item
-					if it != null and is_instance_valid(it) and it.get_metadata(0) != null:
-						# The left folding arrow is a tree control, not a note
-						# activation. On mobile, never close the drawer for it.
-						if _press_item_toggle:
-							side_tree.accept_event()
-						else:
-							side_tree.set_selected(it, 0)
-							_on_tree_selected()
-				_is_touch_dragging = false
-				_drag_just_happened = false
-				_touch_src_path = ""
-				_mobile_touch_candidate = false
-				_mobile_hold_ready = false
-				_press_item = null
-				_press_item_toggle = false
-		elif ev is InputEventMouseMotion:
-			if ev.button_mask & MOUSE_BUTTON_MASK_LEFT and _touch_src_path != "" and _mobile_hold_ready:
-				side_tree.accept_event()
-				if ev.position.distance_to(_press_pos) > 10.0:
-					_is_touch_dragging = true
-					var target_item := side_tree.get_item_at_position(ev.position)
-					var section := _custom_drop_section(target_item, ev.position)
-					_mark_drop_hint(target_item, section)
-		elif ev is InputEventScreenDrag:
-			if _touch_src_path != "" and _mobile_hold_ready:
-				side_tree.accept_event()
-				if ev.position.distance_to(_press_pos) > 10.0:
-					_is_touch_dragging = true
-					var target_item := side_tree.get_item_at_position(ev.position)
-					var section := _custom_drop_section(target_item, ev.position)
-					_mark_drop_hint(target_item, section)
-		elif ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_RIGHT and ev.pressed:
-			var rit := side_tree.get_item_at_position(side_tree.get_local_mouse_position())
-			if rit != null and rit.get_metadata(0) != null:
-				rit.select(0)
-				_tree_menu.popup(Rect2i(get_global_mouse_position(), Vector2i.ZERO)))
+	side_tree.gui_input.connect(_on_tree_gui_input)
 	# drag notes/folders between folders + reorder rows (registered once; see
 	# refresh() and the Android repeat-drag gotcha in PROJECT_MEMORY.md)
 	_tree_menu.add_item("🗑 Delete…", 1)
 	_tree_menu.id_pressed.connect(func(id: int):
 		if id == 1:
 			delete_requested.emit())
+
+func _on_tree_gui_input(ev: InputEvent) -> void:
+	if _is_primary_tree_press_release(ev):
+		if ev.pressed:
+			_handle_tree_press(ev.position)
+		else:
+			_handle_tree_release(ev.position)
+		return
+	if ev is InputEventMouseMotion:
+		if ev.button_mask & MOUSE_BUTTON_MASK_LEFT:
+			_handle_tree_drag_motion(ev.position, true)
+		return
+	if ev is InputEventScreenDrag:
+		_handle_tree_drag_motion(ev.position, true)
+		return
+	if ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_RIGHT and ev.pressed:
+		var it := side_tree.get_item_at_position(side_tree.get_local_mouse_position())
+		if _tree_item_has_metadata(it):
+			it.select(0)
+			_tree_menu.popup(Rect2i(get_global_mouse_position(), Vector2i.ZERO))
+
+func _is_primary_tree_press_release(ev: InputEvent) -> bool:
+	return (ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_LEFT) \
+			or ev is InputEventScreenTouch
+
+func _handle_tree_press(pos: Vector2) -> void:
+	_press_pos = pos
+	_press_item = side_tree.get_item_at_position(pos)
+	_press_item_toggle = _press_item != null and _is_tree_toggle_click(_press_item, pos)
+	_is_touch_dragging = false
+	_drag_just_happened = false
+	_mobile_touch_candidate = false
+	_mobile_hold_ready = false
+	_mobile_hold_timer.stop()
+	_touch_src_path = _tree_item_drag_path(_press_item)
+	if _touch_src_path != "" and OS.get_name() == "Android":
+		_mobile_touch_candidate = true
+		_mobile_hold_timer.start()
+
+func _handle_tree_release(pos: Vector2) -> void:
+	_mobile_hold_timer.stop()
+	if _is_touch_dragging or _drag_just_happened:
+		_finish_tree_drag(pos)
+	elif not _mobile_hold_ready and pos.distance_to(_press_pos) < TREE_TAP_MAX_DISTANCE:
+		_activate_pressed_tree_item()
+	_reset_tree_touch_state()
+
+func _handle_tree_drag_motion(pos: Vector2, consume_event: bool) -> void:
+	if _touch_src_path == "" or not _mobile_hold_ready:
+		return
+	if consume_event:
+		side_tree.accept_event()
+	if pos.distance_to(_press_pos) <= TREE_DRAG_START_DISTANCE:
+		return
+	_is_touch_dragging = true
+	var target_item := side_tree.get_item_at_position(pos)
+	var section := _custom_drop_section(target_item, pos)
+	_mark_drop_hint(target_item, section)
+
+func _finish_tree_drag(pos: Vector2) -> void:
+	if _touch_src_path == "":
+		return
+	var target_item := side_tree.get_item_at_position(pos)
+	var section := _custom_drop_section(target_item, pos)
+	_perform_drop(_touch_src_path, target_item, section)
+
+func _activate_pressed_tree_item() -> void:
+	var item := _press_item
+	if not _tree_item_has_metadata(item):
+		return
+	# The left folding arrow is a tree control, not a note activation.
+	if _press_item_toggle:
+		side_tree.accept_event()
+		return
+	side_tree.set_selected(item, 0)
+	_open_tree_item(item)
+
+func _reset_tree_touch_state() -> void:
+	_is_touch_dragging = false
+	_drag_just_happened = false
+	_touch_src_path = ""
+	_mobile_touch_candidate = false
+	_mobile_hold_ready = false
+	_press_item = null
+	_press_item_toggle = false
 
 ## Populate the palette selector (source of truth: GameManager.PALETTES).
 func build_palette() -> void:
@@ -465,18 +486,9 @@ func ordered_notes(dir: String) -> Array[String]:
 
 func _tree_get_drag(at_position: Vector2) -> Variant:
 	var it := side_tree.get_item_at_position(at_position)
-	if it == null or it == side_tree.get_root() or it.get_metadata(0) == null:
-		return null
-	if it.get_metadata(0) == _root_homepage:
-		return null
-	if it == null or it == side_tree.get_root() or it.get_metadata(0) == null:
-		return null
-	var meta := str(it.get_metadata(0))
+	var meta := _tree_item_drag_path(it)
 	if meta == "":
 		return null
-	# merged folder+note row: drag the FOLDER (companion note travels with it)
-	if meta.ends_with(".md") and DirAccess.dir_exists_absolute(GameManager.vault_abs().path_join(meta.trim_suffix(".md"))):
-		meta = meta.trim_suffix(".md")
 	_drag_just_happened = true
 	_is_touch_dragging = true
 
@@ -828,6 +840,31 @@ func _re_escape(s: String) -> String:
 			out += ch
 	return out
 
+func _tree_item_has_metadata(item: TreeItem) -> bool:
+	return item != null and is_instance_valid(item) and item.get_metadata(0) != null
+
+func _tree_item_note_path(item: TreeItem) -> String:
+	if item == null:
+		return ""
+	if item == side_tree.get_root():
+		return _root_homepage
+	if not _tree_item_has_metadata(item):
+		return ""
+	var meta := str(item.get_metadata(0))
+	if meta.ends_with(".md") and GameManager.notes.has(meta):
+		return meta
+	return ""
+
+func _tree_item_drag_path(item: TreeItem) -> String:
+	if item == null or item == side_tree.get_root() or not _tree_item_has_metadata(item):
+		return ""
+	var meta := str(item.get_metadata(0))
+	if meta == "":
+		return ""
+	if meta.ends_with(".md") and DirAccess.dir_exists_absolute(GameManager.vault_abs().path_join(meta.trim_suffix(".md"))):
+		return meta.trim_suffix(".md")
+	return meta
+
 func _is_tree_toggle_click(item: TreeItem, pos: Vector2) -> bool:
 	if item == side_tree.get_root() or not item.collapsed and item.get_child_count() == 0:
 		return false
@@ -842,18 +879,11 @@ func _on_item_collapsed(item: TreeItem) -> void:
 		GameManager.save_order()
 
 func _on_tree_selected() -> void:
-	var it := side_tree.get_selected()
-	if it == null:
-		return
-	var meta: Variant = it.get_metadata(0)
-	if it == side_tree.get_root():
-		note_requested.emit(_root_homepage)
-		return
-	if meta == null:
-		return
-	var fname := str(meta)
-	# A merged folder+note row opens its note; plain folders only fold.
-	if str(meta).ends_with(".md") and GameManager.notes.has(fname):
+	_open_tree_item(side_tree.get_selected())
+
+func _open_tree_item(item: TreeItem) -> void:
+	var fname := _tree_item_note_path(item)
+	if fname != "":
 		note_requested.emit(fname)
 
 func select_note(fname: String, open_note := true) -> void:
@@ -865,7 +895,7 @@ func select_note(fname: String, open_note := true) -> void:
 			side_tree.scroll_to_item(it, false)
 			side_tree.set_selected(it, 0)
 			if open_note:
-				note_requested.emit(fname)
+				_open_tree_item(it)
 			return
 		for c in it.get_children():
 			stack.append(c)
@@ -878,13 +908,8 @@ func selected_item() -> TreeItem:
 ## Resolve a tree row's path: a merged folder+note row (`x.md` metadata while
 ## folder `x` exists) counts as the FOLDER `x`.
 func node_rel(it: TreeItem) -> String:
-	var meta_v = it.get_metadata(0)
-	if meta_v == null:
-		return ""
-	var meta := str(meta_v)
-	if meta.ends_with(".md") and DirAccess.dir_exists_absolute(GameManager.vault_abs().path_join(meta.trim_suffix(".md"))):
-		return meta.trim_suffix(".md")
-	return meta
+	var rel := _tree_item_drag_path(it)
+	return "" if rel == _root_homepage else rel
 
 ## Determine if a path (folder or companion note) has child items in the vault.
 func has_children(rel: String) -> bool:
