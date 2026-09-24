@@ -6,6 +6,8 @@ extends Node
 
 var _requested: Array[String] = []
 var _rows: Array = []
+var _hold_opened := false
+const MOBILE_HOLD_SECONDS := 3.0
 
 func _ready() -> void:
 	var original_vault := GameManager.vault_dir
@@ -63,6 +65,12 @@ func _ready() -> void:
 		await get_tree().process_frame
 	print("tree scroll=", tree.get_scroll(), " vscroll max=", null if vsb == null else vsb.max_value)
 
+	var hold_before := _requested.size()
+	var hold_target := _first_visible_note(tree)
+	if hold_target != null:
+		await _press_and_release(tree, _row_point(tree, hold_target), MOBILE_HOLD_SECONDS + 0.2)
+		_hold_opened = _requested.size() > hold_before
+
 	# Tap the middle of several visible rows, deepest index first, so a
 	# resulting note list can't be confused by reordering.
 	var rows: Array[TreeItem] = []
@@ -92,13 +100,15 @@ func _ready() -> void:
 		if tapped >= 12:
 			break
 
-	var ok := true
+	var ok := not _hold_opened
+	if _hold_opened:
+		print("MISMATCH long hold opened a note")
 	for rec in _rows:
 		if rec[1] != rec[2]:
 			ok = false
 		print("%s tapped='%s' opened='%s' expected='%s' local=%s vp=%s" % [
 				"OK      " if rec[1] == rec[2] else "MISMATCH", rec[0], rec[1], rec[2], rec[3], rec[4]])
-	print("RESULT: ", "ALL TAPS OK" if ok else "TAP MISMATCH")
+	print("MOBILE TREE TOUCH RESULT: ", "OK" if ok else "FAIL")
 	var vp_img := get_viewport().get_texture().get_image()
 	vp_img.save_png("user://repro_tap_shot.png")
 	print("shot=", ProjectSettings.globalize_path("user://repro_tap_shot.png"), " size=", vp_img.get_size())
@@ -116,6 +126,9 @@ func _row_point(tree: Tree, it: TreeItem) -> Vector2:
 	return p
 
 func _tap(tree: Tree, local: Vector2) -> void:
+	await _press_and_release(tree, local, 0.0)
+
+func _press_and_release(tree: Tree, local: Vector2, hold_seconds: float) -> void:
 	var win := get_window().size
 	var vp := get_viewport().get_visible_rect().size
 	var scale := Vector2(win) / vp
@@ -127,6 +140,8 @@ func _tap(tree: Tree, local: Vector2) -> void:
 	press.position = window_pos
 	get_viewport().push_input(press)
 	await get_tree().process_frame
+	if hold_seconds > 0.0:
+		await get_tree().create_timer(hold_seconds).timeout
 	var rel := InputEventScreenTouch.new()
 	rel.index = 0
 	rel.pressed = false
@@ -134,6 +149,17 @@ func _tap(tree: Tree, local: Vector2) -> void:
 	get_viewport().push_input(rel)
 	await get_tree().process_frame
 	await get_tree().process_frame
+
+func _first_visible_note(tree: Tree) -> TreeItem:
+	var rows: Array[TreeItem] = []
+	_collect(tree.get_root(), rows)
+	for it in rows:
+		var meta := str(it.get_metadata(0))
+		if meta == "" or not meta.ends_with(".md"):
+			continue
+		if _row_point(tree, it) != Vector2.INF:
+			return it
+	return null
 
 func _expand_all(it: TreeItem) -> void:
 	if it == null:
