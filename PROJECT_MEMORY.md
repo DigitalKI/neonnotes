@@ -163,9 +163,10 @@ _These OVERRIDE the skill's defaults for this project._
   DROP_MODE_INBETWEEN` (-1/0/1 = above/on/below); preserve folder+note merged
   rows in `_refresh_list` (never render a companion note twice); after a
   folder move, `GameManager.scan_notes()` BEFORE `_rewrite_folder_links`.
-  Mobile tap-open resolves the pressed `TreeItem` once and reuses it on
-  release; long-press drag is gated by 3 s hold + movement and must consume
-  drag motion so touch scrolling cannot retarget the drop/open row.
+  Mobile tap-open resolves the pressed `TreeItem` once and opens directly from
+  that stashed row on release; long-press drag is gated by 3 s hold +
+  movement and must consume drag motion so touch scrolling cannot retarget the
+  drop/open row.
 - **Link index consistency**: anything changing note files without
   `write_note()` must call `scan_notes()` after, or moves can miss links.
 - **`.neonnotes.json` (dot-prefixed) and `exports/` must survive scan
