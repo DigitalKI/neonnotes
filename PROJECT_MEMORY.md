@@ -5,7 +5,7 @@
 > decisions, gotchas) — history lives in git, `git log` is the changelog.
 > Size budget ~250 lines: compact in-session if exceeded.
 
-_Last updated: 2026-09-22 · Godot 4.7 · renderer: gl_compatibility_
+_Last updated: 2026-09-24 · Godot 4.7 · renderer: gl_compatibility_
 
 ---
 
@@ -45,22 +45,20 @@ _Last updated: 2026-09-22 · Godot 4.7 · renderer: gl_compatibility_
   optional CRT FX on export; saves to OS gallery + `vault/exports/`.
 - Mobile: drawer sidebar, safe-area insets, landscape font delta
   (`LayoutComponent.ui_font_delta`), Android content-URI image import, media
-  source dialog over `vault/media/`.
+  source dialog over `vault/media/`. Tree taps resolve the pressed row once and
+  only open it on release when finger displacement stays under 16 px; mobile
+  long-press drag arms after 3 s and consumes drag motion so the tree does not
+  scroll away under the held item.
 - Componentized UI: `scripts/components/` (Theme, Layout, SlashMenu, Export,
   VaultTree, Theme/StatusBar/Toolbar subscenes, Settings, SyncDialog).
-- Tests: `./tests/run_tests.sh` (unit/drag/sync/delete-move/smoke), graded by
-  per-test `RESULT: OK` markers; `NEONNOTES_SMOKE=1` smoke path.
+- Tests: `./tests/run_tests.sh` (unit/tree-drag/mobile-tree-touch/sync/smoke),
+  graded by per-test `RESULT: OK` markers; `NEONNOTES_SMOKE=1` smoke path.
 
 ## 3. Direction & next steps
 
 - **Current goal:** stable v3; sync verified on device (phone↔PC over air).
 - **Next up:**
   - SelectionOverlay (Android handles + Cut/Copy/Paste bar) in progress — wire/test on device.
-  - Tree tap-open follow-up: resolve the row ONCE at press and open the
-    stashed item on release (no re-hit-testing); time must NOT be the
-    tap/scroll discriminator — use displacement < 16 px + 3 s hold gate.
-  - `[TREE-DBG]`/`[TREE-GEO]` diagnostics in `SideTree.build()` +
-    `debug_dump_rows()` — strip before committing.
   - Parser: block-level spans for headings/fences; per-block preview cache
     keyed by content hash.
   - `_flush_save()` does a full `MarkdownParser.parse()` per keystroke just
@@ -165,6 +163,12 @@ _These OVERRIDE the skill's defaults for this project._
   DROP_MODE_INBETWEEN` (-1/0/1 = above/on/below); preserve folder+note merged
   rows in `_refresh_list` (never render a companion note twice); after a
   folder move, `GameManager.scan_notes()` BEFORE `_rewrite_folder_links`.
+  Mobile tap-open resolves the pressed `TreeItem` once and opens directly from
+  that stashed row on release; long-press drag is gated by 3 s hold +
+  movement and must consume drag motion so touch scrolling cannot retarget the
+  drop/open row. On Android, tree touch handling uses the emulated mouse
+  events, ignores raw `ScreenTouch`/`ScreenDrag` duplicates, and applies the
+  tree scroll offset before hit-testing rows or drop targets.
 - **Link index consistency**: anything changing note files without
   `write_note()` must call `scan_notes()` after, or moves can miss links.
 - **`.neonnotes.json` (dot-prefixed) and `exports/` must survive scan
