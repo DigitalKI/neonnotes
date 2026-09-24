@@ -167,8 +167,11 @@ _These OVERRIDE the skill's defaults for this project._
   that stashed row on release; long-press drag is gated by 3 s hold +
   movement and must consume drag motion so touch scrolling cannot retarget the
   drop/open row. On Android, tree touch handling uses the emulated mouse
-  events, ignores raw `ScreenTouch`/`ScreenDrag` duplicates, and applies the
-  tree scroll offset before hit-testing rows or drop targets.
+  events and ignores raw `ScreenTouch`/`ScreenDrag` duplicates. Never add the
+  Tree's scroll offset before calling `get_item_at_position()` /
+  `get_drop_section_at_position()` — Godot's `Tree` already adds
+  `v_scroll`/`h_scroll` internally, so doing it again breaks hit-testing as
+  soon as the list is scrolled (regression fixed 2026-09-24).
 - **Link index consistency**: anything changing note files without
   `write_note()` must call `scan_notes()` after, or moves can miss links.
 - **`.neonnotes.json` (dot-prefixed) and `exports/` must survive scan

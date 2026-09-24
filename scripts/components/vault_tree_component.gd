@@ -853,11 +853,11 @@ func _re_escape(s: String) -> String:
 func _tree_item_has_metadata(item: TreeItem) -> bool:
 	return item != null and is_instance_valid(item) and item.get_metadata(0) != null
 
+## Tree.get_item_at_position() already adds the current scroll internally;
+## re-adding it here (as a previous fix attempted) double-counts the scroll
+## and breaks hit-testing as soon as the list is scrolled at all.
 func _tree_hit_position(pos: Vector2) -> Vector2:
-	var hit := pos
-	if OS.get_name() == "Android":
-		hit += side_tree.get_scroll()
-	return hit
+	return pos
 
 func _tree_item_at(pos: Vector2) -> TreeItem:
 	return side_tree.get_item_at_position(_tree_hit_position(pos))
