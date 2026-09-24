@@ -137,6 +137,8 @@ func build() -> void:
 			delete_requested.emit())
 
 func _on_tree_gui_input(ev: InputEvent) -> void:
+	if _tree_ignores_raw_touch() and (ev is InputEventScreenTouch or ev is InputEventScreenDrag):
+		return
 	if _is_primary_tree_press_release(ev):
 		if ev.pressed:
 			_handle_tree_press(ev.position)
@@ -159,6 +161,9 @@ func _on_tree_gui_input(ev: InputEvent) -> void:
 func _is_primary_tree_press_release(ev: InputEvent) -> bool:
 	return (ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_LEFT) \
 			or ev is InputEventScreenTouch
+
+func _tree_ignores_raw_touch() -> bool:
+	return OS.get_name() == "Android"
 
 func _handle_tree_press(pos: Vector2) -> void:
 	_press_pos = pos

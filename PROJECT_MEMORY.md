@@ -166,7 +166,8 @@ _These OVERRIDE the skill's defaults for this project._
   Mobile tap-open resolves the pressed `TreeItem` once and opens directly from
   that stashed row on release; long-press drag is gated by 3 s hold +
   movement and must consume drag motion so touch scrolling cannot retarget the
-  drop/open row.
+  drop/open row. On Android, tree touch handling uses the emulated mouse
+  events and ignores raw `ScreenTouch`/`ScreenDrag` duplicates.
 - **Link index consistency**: anything changing note files without
   `write_note()` must call `scan_notes()` after, or moves can miss links.
 - **`.neonnotes.json` (dot-prefixed) and `exports/` must survive scan

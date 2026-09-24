@@ -1,8 +1,7 @@
 extends Node
 ## Repro: tap vault-tree rows through the REAL input path (viewport push_input)
-## on a phone-sized window with the mobile drawer open. The previous repro
-## ($tests/ReproTreeClick.tscn) emitted gui_input directly with tree-local
-## coordinates, so it could never see a coordinate-space offset.
+## on a phone-sized window with the mobile drawer open. Android devices route
+## the tree through emulated mouse events, so this repro does the same.
 
 var _requested: Array[String] = []
 var _rows: Array = []
@@ -129,23 +128,21 @@ func _tap(tree: Tree, local: Vector2) -> void:
 	await _press_and_release(tree, local, 0.0)
 
 func _press_and_release(tree: Tree, local: Vector2, hold_seconds: float) -> void:
-	var win := get_window().size
-	var vp := get_viewport().get_visible_rect().size
-	var scale := Vector2(win) / vp
 	var viewport_pos := tree.global_position + local
-	var window_pos := viewport_pos * scale
-	var press := InputEventScreenTouch.new()
-	press.index = 0
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
 	press.pressed = true
-	press.position = window_pos
+	press.position = viewport_pos
+	press.global_position = viewport_pos
 	get_viewport().push_input(press)
 	await get_tree().process_frame
 	if hold_seconds > 0.0:
 		await get_tree().create_timer(hold_seconds).timeout
-	var rel := InputEventScreenTouch.new()
-	rel.index = 0
+	var rel := InputEventMouseButton.new()
+	rel.button_index = MOUSE_BUTTON_LEFT
 	rel.pressed = false
-	rel.position = window_pos
+	rel.position = viewport_pos
+	rel.global_position = viewport_pos
 	get_viewport().push_input(rel)
 	await get_tree().process_frame
 	await get_tree().process_frame
