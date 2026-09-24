@@ -167,7 +167,8 @@ _These OVERRIDE the skill's defaults for this project._
   that stashed row on release; long-press drag is gated by 3 s hold +
   movement and must consume drag motion so touch scrolling cannot retarget the
   drop/open row. On Android, tree touch handling uses the emulated mouse
-  events and ignores raw `ScreenTouch`/`ScreenDrag` duplicates.
+  events, ignores raw `ScreenTouch`/`ScreenDrag` duplicates, and applies the
+  tree scroll offset before hit-testing rows or drop targets.
 - **Link index consistency**: anything changing note files without
   `write_note()` must call `scan_notes()` after, or moves can miss links.
 - **`.neonnotes.json` (dot-prefixed) and `exports/` must survive scan

@@ -85,7 +85,8 @@ func build() -> void:
 	_mobile_hold_timer.timeout.connect(_activate_mobile_drag)
 	add_child(_mobile_hold_timer)
 	search.text_changed.connect(_on_search_changed)
-	side_tree.item_activated.connect(_on_tree_selected)
+	if _tree_uses_builtin_activation():
+		side_tree.item_activated.connect(_on_tree_selected)
 	# Match the editor's touch-friendly scrollbar width. Tree exposes its
 	# internal scrollbar as a child rather than via get_v_scroll_bar().
 	for child in side_tree.get_children():
@@ -153,7 +154,7 @@ func _on_tree_gui_input(ev: InputEvent) -> void:
 		_handle_tree_drag_motion(ev.position, true)
 		return
 	if ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_RIGHT and ev.pressed:
-		var it := side_tree.get_item_at_position(side_tree.get_local_mouse_position())
+		var it := _tree_item_at(side_tree.get_local_mouse_position())
 		if _tree_item_has_metadata(it):
 			it.select(0)
 			_tree_menu.popup(Rect2i(get_global_mouse_position(), Vector2i.ZERO))
@@ -162,12 +163,15 @@ func _is_primary_tree_press_release(ev: InputEvent) -> bool:
 	return (ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_LEFT) \
 			or ev is InputEventScreenTouch
 
+func _tree_uses_builtin_activation() -> bool:
+	return OS.get_name() != "Android"
+
 func _tree_ignores_raw_touch() -> bool:
 	return OS.get_name() == "Android"
 
 func _handle_tree_press(pos: Vector2) -> void:
 	_press_pos = pos
-	_press_item = side_tree.get_item_at_position(pos)
+	_press_item = _tree_item_at(pos)
 	_press_item_toggle = _press_item != null and _is_tree_toggle_click(_press_item, pos)
 	_is_touch_dragging = false
 	_drag_just_happened = false
@@ -195,14 +199,14 @@ func _handle_tree_drag_motion(pos: Vector2, consume_event: bool) -> void:
 	if pos.distance_to(_press_pos) <= TREE_DRAG_START_DISTANCE:
 		return
 	_is_touch_dragging = true
-	var target_item := side_tree.get_item_at_position(pos)
+	var target_item := _tree_item_at(pos)
 	var section := _custom_drop_section(target_item, pos)
 	_mark_drop_hint(target_item, section)
 
 func _finish_tree_drag(pos: Vector2) -> void:
 	if _touch_src_path == "":
 		return
-	var target_item := side_tree.get_item_at_position(pos)
+	var target_item := _tree_item_at(pos)
 	var section := _custom_drop_section(target_item, pos)
 	_perform_drop(_touch_src_path, target_item, section)
 
@@ -490,7 +494,7 @@ func ordered_notes(dir: String) -> Array[String]:
 # ---------------------------------------------- tree drag & drop (v3)
 
 func _tree_get_drag(at_position: Vector2) -> Variant:
-	var it := side_tree.get_item_at_position(at_position)
+	var it := _tree_item_at(at_position)
 	var meta := _tree_item_drag_path(it)
 	if meta == "":
 		return null
@@ -520,7 +524,8 @@ func _custom_drop_section(it: TreeItem, at_position: Vector2) -> int:
 	var rect := side_tree.get_item_area_rect(it)
 	if rect.size.y <= 0.0:
 		return side_tree.get_drop_section_at_position(at_position)
-	var rel_y := at_position.y - rect.position.y
+	var hit_position := _tree_hit_position(at_position)
+	var rel_y := hit_position.y - rect.position.y
 	var ratio := clampf(rel_y / rect.size.y, 0.0, 1.0)
 
 	var meta := str(it.get_metadata(0))
@@ -550,7 +555,7 @@ func _tree_can_drop(at_position: Vector2, data: Variant) -> bool:
 	if not ok:
 		_clear_drop_hint()
 		return false
-	var target := side_tree.get_item_at_position(at_position)
+	var target := _tree_item_at(at_position)
 	_mark_drop_hint(target, _custom_drop_section(target, at_position))
 	return true
 
@@ -638,7 +643,7 @@ func _perform_drop(src: String, it: TreeItem, section: int) -> void:
 
 func _tree_drop(at_position: Vector2, data: Variant) -> void:
 	var src := str(data.get("path", ""))
-	var it := side_tree.get_item_at_position(at_position)
+	var it := _tree_item_at(at_position)
 	var section := _custom_drop_section(it, at_position)
 	_perform_drop(src, it, section)
 
@@ -847,6 +852,15 @@ func _re_escape(s: String) -> String:
 
 func _tree_item_has_metadata(item: TreeItem) -> bool:
 	return item != null and is_instance_valid(item) and item.get_metadata(0) != null
+
+func _tree_hit_position(pos: Vector2) -> Vector2:
+	var hit := pos
+	if OS.get_name() == "Android":
+		hit += side_tree.get_scroll()
+	return hit
+
+func _tree_item_at(pos: Vector2) -> TreeItem:
+	return side_tree.get_item_at_position(_tree_hit_position(pos))
 
 func _tree_item_note_path(item: TreeItem) -> String:
 	if item == null:
