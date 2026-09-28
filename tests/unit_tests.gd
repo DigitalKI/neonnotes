@@ -1,5 +1,7 @@
 extends SceneTree
 
+const NoteMetadataHelper := preload("res://scripts/common/note_metadata.gd")
+
 var failures := 0
 
 func _init() -> void:
@@ -13,12 +15,24 @@ func _init() -> void:
 	quit(failures)
 
 func _check_markdown_parser() -> void:
-	var doc := MarkdownParser.parse("---\ntitle: \"Unit\"\ntheme: Toxic Terminal\n---\n\n# Heading\nfirst line\nsecond line\n\n```chart\ntype: line\nlabels: A, B\nvalues: 1, 2\n```")
+	var doc := MarkdownParser.parse("---\ntitle: \"Unit\"\ntheme: Toxic Terminal\ntags: alpha, beta, #gamma\n---\n\n# Heading\nfirst line\nsecond line\n\n```chart\ntype: line\nlabels: A, B\nvalues: 1, 2\n```")
 	_check(doc["meta"].get("title") == "Unit", "front-matter title")
 	_check(doc["meta"].get("theme") == "Toxic Terminal", "front-matter theme")
+	_check(doc["meta"].get("tags", "") == "alpha, beta, #gamma", "front-matter tags remain compatible")
 	_check(doc["blocks"].size() == 3, "parser block count")
 	_check(doc["blocks"][1]["text"].contains("\n"), "paragraph newline preservation")
 	_check(doc["blocks"][2]["chart_type"] == "line", "chart type")
+	_check_metadata_header()
+
+func _check_metadata_header() -> void:
+	var original := "---\ntitle: Old\ntags: alpha, beta\ncreated: 2026-01-02T03:04:05Z\ncustom: keep\n---\n\n# Body\ntext"
+	_check(NoteMetadataHelper.body(original) == "# Body\ntext", "metadata block hidden from body editor")
+	var saved := NoteMetadataHelper.update(NoteMetadataHelper.body(original), original, "New title", ["beta", "gamma"], "2026-03-04T05:06:07Z")
+	_check(saved.contains("title: \"New title\"") and saved.contains("tags: beta, gamma"), "title and tags saved to frontmatter")
+	_check(saved.contains("created: 2026-01-02T03:04:05Z") and saved.contains("updated: 2026-03-04T05:06:07Z"), "created date preserved and updated date advanced")
+	_check(saved.contains("custom: keep") and NoteMetadataHelper.body(saved) == "# Body\ntext", "unknown fields and note body preserved")
+	_check(NoteMetadataHelper.preview("Body text", "New title").begins_with("# New title\n\n"), "metadata title appears as preview H1")
+	_check(NoteMetadataHelper.preview("# New title\n\nBody text", "New title") == "# New title\n\nBody text", "existing matching H1 is not duplicated")
 
 func _check_markdown_spans() -> void:
 	# Flat, source-ordered span stream drives BOTH the highlighter (edit) and

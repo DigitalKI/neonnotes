@@ -51,7 +51,7 @@ func _process(_delta: float) -> void:
 	# The keyboard reports its height before the final Android viewport/layout
 	# resize. Keep correcting for a few frames so edit mode follows the caret,
 	# rather than relying on one adjustment at the wrong geometry.
-	var code_edit: CodeEdit = content.get_node_or_null("EditPadding/SourceEditor")
+	var code_edit: CodeEdit = content.get_node_or_null("EditPadding/EditColumn/SourceEditor")
 	if code_edit != null and code_edit.visible:
 		# The editor's actual size is the reliable signal that Android has
 		# finished resizing the layout for the IME. Keyboard height alone can
@@ -177,7 +177,7 @@ func _apply_safe_area() -> void:
 	# Android, so repeat after the next frame as well. This is important when
 	# the caret is near the bottom: resizing alone does not guarantee that
 	# TextEdit re-centres its viewport.
-	var code_edit: CodeEdit = content.get_node_or_null("EditPadding/SourceEditor")
+	var code_edit: CodeEdit = content.get_node_or_null("EditPadding/EditColumn/SourceEditor")
 	if code_edit != null and code_edit.visible:
 		_keep_caret_visible.call_deferred(code_edit)
 

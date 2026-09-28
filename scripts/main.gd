@@ -55,6 +55,15 @@ var theme_component := ThemeComponent.new()
 var layout_component := LayoutComponent.new()
 var slash_menu := SlashMenuComponent.new()
 @onready var export_component: ExportComponent = %ExportMenu
+@onready var title_panel: PanelContainer = %TitlePanel
+@onready var title_input: LineEdit = %TitleInput
+@onready var tags_panel: PanelContainer = %TagsPanel
+@onready var tags_chips: HFlowContainer = %TagsChips
+@onready var tags_input: LineEdit = %TagsInput
+@onready var tags_add: Button = %TagsAdd
+var _note_tags: Array[String] = []
+var _note_title := ""
+var _metadata_source := ""
 
 # ---- mobile text selection (Android).
 # Plain drag always scrolls (native). A double-tap on a word activates a
@@ -191,9 +200,14 @@ func _refresh_open_note_after_sync() -> void:
 	if help_mode or GameManager.current_rel == "" or source_mode:
 		return
 	var latest := GameManager.read_note(GameManager.current_rel)
-	if latest == code_edit.text:
+	if latest == _compose_note_source():
 		return
-	code_edit.text = latest
+	_note_tags = GameManager._parse_note_meta(latest).get("tags", [])
+	_metadata_source = latest
+	_note_title = NoteMetadata.field(latest, "title", GameManager.current_rel.get_file().trim_suffix(".md"))
+	_set_title_form(_note_title)
+	code_edit.text = NoteMetadata.body(latest)
+	_refresh_note_tag_chips()
 	_render_preview(true)  # keep reading position across the re-render
 	status_bar.flash("↻ Updated " + GameManager.current_rel)
 
@@ -224,6 +238,11 @@ func _build_dynamic_ui() -> void:
 	# container and scroll internally instead.
 	# slightly wider vertical scrollbar for comfortable dragging
 	code_edit.get_v_scroll_bar().custom_minimum_size = Vector2(14, 0)
+	tags_add.pressed.connect(_add_note_tag)
+	tags_input.text_submitted.connect(func(_value: String): _add_note_tag())
+	title_input.text_changed.connect(_on_note_title_changed)
+	tags_panel.visible = false
+	title_panel.visible = false
 	var edit_menu := code_edit.get_menu()
 	for i in range(edit_menu.item_count - 1, -1, -1):
 		if edit_menu.get_item_id(i) > TextEdit.MENU_PASTE:
@@ -240,7 +259,7 @@ func _build_dynamic_ui() -> void:
 	if sc == "Android":
 		selection_overlay = SELECTION_OVERLAY_SCENE.instantiate()
 		selection_overlay.name = "SelectionOverlay"
-		# Child of CodeEdit (not EditPadding): MarginContainer stays single-child,
+		# Child of CodeEdit (not EditPadding): its column keeps the outer margin single-child,
 		# and mouse_filter=IGNORE lets taps/keys reach the editor underneath.
 		code_edit.add_child(selection_overlay)
 		selection_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -507,15 +526,56 @@ func _flush_save() -> void:
 	var fname: String = GameManager.current_rel
 	if fname == "":
 		return
-	if GameManager.write_note(fname, code_edit.text):
+	var old_title: String = GameManager.titles.get(fname, "")
+	var source_to_save := _compose_note_source()
+	if GameManager.write_note(fname, source_to_save):
+		_metadata_source = source_to_save
 		status_bar.flash("✓ Saved " + fname)
 		sync_service.note_saved(fname)  # debounce auto-sync + clear any tombstone
 		# rebuild the tree if the front-matter title changed
-		var old_title: String = GameManager.titles.get(fname, "")
-		var new_title: String = MarkdownParser.parse(code_edit.text).get("meta", {}).get("title", "")
+		var new_title := _note_title
 		if old_title != new_title:
 			GameManager.scan_notes()
 			_refresh_list()
+
+func _compose_note_source() -> String:
+	return NoteMetadata.update(code_edit.text, _metadata_source, _note_title, _note_tags,
+		Time.get_datetime_string_from_system(true, false))
+
+func _on_note_title_changed(value: String) -> void:
+	_note_title = value.strip_edges()
+	toolbar.note_title.text = _note_title if _note_title != "" else GameManager.current_rel.get_file().trim_suffix(".md")
+	_flush_save()
+
+func _set_title_form(value: String) -> void:
+	title_input.set_block_signals(true)
+	title_input.text = value
+	title_input.set_block_signals(false)
+	toolbar.note_title.text = value if value != "" else GameManager.current_rel.get_file().trim_suffix(".md")
+
+func _refresh_note_tag_chips() -> void:
+	for child in tags_chips.get_children():
+		child.queue_free()
+	for tag in _note_tags:
+		var chip := Button.new()
+		chip.text = "◆ " + tag + "   ×"
+		chip.tooltip_text = "Remove tag " + tag
+		chip.custom_minimum_size = Vector2(0, 32)
+		chip.pressed.connect(func():
+			_note_tags.erase(tag)
+			_refresh_note_tag_chips()
+			_flush_save())
+		tags_chips.add_child(chip)
+
+func _add_note_tag() -> void:
+	var tag := tags_input.text.strip_edges().trim_prefix("#")
+	if tag == "" or tag.contains(","):
+		return
+	if not _note_tags.has(tag):
+		_note_tags.append(tag)
+	tags_input.clear()
+	_refresh_note_tag_chips()
+	_flush_save()
 
 ## Recursively delete a vault directory (smoke-test fixture reset + folder deletes).
 func _rm_dir(rel: String) -> void:
@@ -549,9 +609,14 @@ func _on_note_selected(fname: String) -> void:
 	GameManager.last_opened_rel = fname
 	GameManager._save_settings()
 	print("[MAIN-DBG] _on_note_selected fname=", fname)
-	code_edit.text = GameManager.read_note(fname)
+	var source := GameManager.read_note(fname)
+	_metadata_source = source
+	_note_tags = GameManager._parse_note_meta(source).get("tags", [])
+	_note_title = NoteMetadata.field(source, "title", fname.get_file().trim_suffix(".md"))
+	_set_title_form(_note_title)
+	code_edit.text = NoteMetadata.body(source)
+	_refresh_note_tag_chips()
 	help_mode = false
-	note_title.text = fname.trim_suffix(".md")
 	help_folder = fname.get_base_dir() if fname.contains("/") else ""
 	source_mode = false
 	_set_mode()
@@ -581,7 +646,15 @@ func _create_note() -> void:
 		elif sel_path != "":
 			fname = sel_path + "/" + fname
 	if not FileAccess.file_exists(GameManager.vault_abs() + "/" + fname):
-		GameManager.write_note(fname, NOTE_TEMPLATE % [fname.get_file().trim_suffix(".md"), fname.get_file().trim_suffix(".md")])
+		var title := fname.get_file().trim_suffix(".md")
+		_note_tags.clear()
+		_note_title = title
+		var initial := NOTE_TEMPLATE % [title, title]
+		_metadata_source = initial
+		var initialized := NoteMetadata.update(NoteMetadata.body(initial), initial,
+			_note_title, _note_tags, Time.get_datetime_string_from_system(true, false))
+		GameManager.write_note(fname, initialized)
+		_metadata_source = initialized
 	GameManager.scan_notes()
 	_refresh_list()
 	vault_tree.select_note(fname)
@@ -808,6 +881,8 @@ func _set_mode() -> void:
 	code_edit.visible = source_mode
 	edit_search.visible = source_mode
 	edit_padding.visible = source_mode
+	tags_panel.visible = source_mode and not help_mode and GameManager.current_rel != ""
+	title_panel.visible = tags_panel.visible
 	content_host.visible = not source_mode
 	toolbar.mode_btn.text = "✎ Edit" if not source_mode else "◈ Preview"
 	if source_mode:
@@ -852,6 +927,8 @@ func _show_help() -> void:
 	source_mode = false
 	code_edit.visible = false
 	edit_padding.visible = false
+	tags_panel.visible = false
+	title_panel.visible = false
 	content_host.visible = true
 	graph_view.visible = false
 	note_title.text = "Style Guide"
@@ -867,10 +944,12 @@ func _render_preview(preserve_scroll := false) -> void:
 		return
 	code_edit.visible = false
 	edit_padding.visible = false
+	tags_panel.visible = false
+	title_panel.visible = false
 	content_host.visible = true
 	graph_view.visible = false
 	var prev_scroll: float = content_host.scroll_vertical if preserve_scroll else 0.0
-	var doc := MarkdownParser.parse(code_edit.text)
+	var doc := MarkdownParser.parse(NoteMetadata.preview(code_edit.text, _note_title))
 	# per-note theme: front-matter  theme: <Palette>
 	PreviewBuilder.pal_override = GameManager.PALETTES.get(str(doc.get("meta", {}).get("theme", "")), {})
 	PreviewBuilder.build(doc, content_body)
@@ -1024,7 +1103,7 @@ func _use_local_media(path: String) -> void:
 		return
 	var rel := "media/" + path.get_file()
 	code_edit.text = t.substr(0, m.get_start()) + "![](" + rel + ")" + t.substr(m.get_end())
-	GameManager.write_note(GameManager.current_rel, code_edit.text)
+	GameManager.write_note(GameManager.current_rel, _compose_note_source())
 	status_bar.flash("✓ Saved " + GameManager.current_rel)
 	_render_preview()
 
@@ -1224,7 +1303,7 @@ func _on_image_selected(path: String) -> void:
 	# save directly — the click comes from preview mode where the editor is
 	# hidden and _flush_save would bail out
 	if GameManager.current_rel != "":
-		GameManager.write_note(GameManager.current_rel, code_edit.text)
+		GameManager.write_note(GameManager.current_rel, _compose_note_source())
 		status_bar.flash("✓ Saved " + GameManager.current_rel)
 		sync_service.note_saved(GameManager.current_rel)
 	if not source_mode:
@@ -1285,7 +1364,7 @@ func _current_doc() -> Variant:
 	if help_mode or GameManager.current_file == "":
 		return null
 	_flush_save()
-	return MarkdownParser.parse(code_edit.text)
+	return MarkdownParser.parse(NoteMetadata.preview(code_edit.text, _note_title))
 
 func _export_dest(ext: String) -> String:
 	var filename := GameManager.current_rel.get_file().trim_suffix(".md") + "." + ext

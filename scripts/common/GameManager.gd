@@ -234,6 +234,7 @@ func _parse_note_meta(text: String) -> Dictionary:
 				var key := line.substr(0, idx).strip_edges()
 				if key == "title" and title == "":
 					title = line.substr(idx + 1).strip_edges().trim_prefix("\"").trim_suffix("\"")
+					title = title.replace("\\\"", "\"").replace("\\\\", "\\")
 				elif key == "tags":
 					var v := line.substr(idx + 1).strip_edges().trim_prefix("[").trim_suffix("]")
 					for x in v.split(","):

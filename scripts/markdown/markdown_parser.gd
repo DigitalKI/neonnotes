@@ -270,7 +270,8 @@ static func parse(text: String) -> Dictionary:
 			if p >= 0:
 				var key := lines[i].substr(0, p).strip_edges()
 				var value := lines[i].substr(p + 1).strip_edges()
-				if value.length() >= 2 and ((value.begins_with("\"") and value.ends_with("\"")) or (value.begins_with("'") and value.ends_with("'"))): value = value.substr(1, value.length() - 2)
+				if value.length() >= 2 and ((value.begins_with("\"") and value.ends_with("\"")) or (value.begins_with("'") and value.ends_with("'"))):
+					value = value.substr(1, value.length() - 2).replace("\\\"", "\"").replace("\\\\", "\\")
 				meta[key] = value
 			i += 1
 		if i < lines.size(): i += 1

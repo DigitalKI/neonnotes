@@ -27,7 +27,10 @@ _Last updated: 2026-09-24 · Godot 4.7 · renderer: gl_compatibility_
 ## 2. Current state (present-tense facts — git is the changelog)
 
 - Markdown editor + live preview; notes are plain `.md` with YAML front matter
-  (`title:`, `theme:`, `tags:`). Autosave on every keystroke (`_flush_save`).
+  (`title:`, `theme:`, `tags:`, `created:`, `updated:`). The edit header owns
+  title and tag controls; the full frontmatter block is kept out of the visible
+  Markdown source. Saves preserve unknown fields and refresh `updated`; new
+  notes initialize both timestamps. Autosave on every keystroke.
 - Vault tree with folder-as-note merge, drag & drop (notes + folders), custom
   ordering in `vault/.neonnotes.json`, wiki-link rewriting on move, tag chips.
 - Unified Markdown engine: `MarkdownParser` (CommonMark-style delimiter-stack

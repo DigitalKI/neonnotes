@@ -102,7 +102,64 @@ layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="SourceEditor" type="CodeEdit" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding" unique_id=1315287311]
+[node name="EditColumn" type="VBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 8
+
+[node name="TitlePanel" type="PanelContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="TitleRow" type="VBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TitlePanel"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="TitleLabel" type="Label" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TitlePanel/TitleRow"]
+layout_mode = 2
+text = "◈ NOTE TITLE"
+
+[node name="TitleInput" type="LineEdit" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TitlePanel/TitleRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Untitled note"
+
+[node name="TagsPanel" type="PanelContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="TagsRow" type="VBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TagsPanel"]
+layout_mode = 2
+theme_override_constants/separation = 5
+
+[node name="TagsLabel" type="Label" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TagsPanel/TagsRow"]
+layout_mode = 2
+text = "◈ NOTE TAGS"
+
+[node name="TagsChips" type="HFlowContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TagsPanel/TagsRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/h_separation = 6
+theme_override_constants/v_separation = 4
+
+[node name="TagsInputRow" type="HBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TagsPanel/TagsRow"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="TagsInput" type="LineEdit" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TagsPanel/TagsRow/TagsInputRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Add a tag…"
+
+[node name="TagsAdd" type="Button" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TagsPanel/TagsRow/TagsInputRow"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "+ ADD"
+
+[node name="SourceEditor" type="CodeEdit" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn" unique_id=1315287311]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
