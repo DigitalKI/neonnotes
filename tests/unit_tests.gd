@@ -11,6 +11,7 @@ func _init() -> void:
 	_check_html_exporter()
 	_check_move_path_remap()
 	_check_graph_model()
+	_check_media_import()
 	print("UNIT RESULT: %s (%d failures)" % ["FAIL" if failures > 0 else "OK", failures])
 	quit(failures)
 
@@ -33,6 +34,29 @@ func _check_metadata_header() -> void:
 	_check(saved.contains("custom: keep") and NoteMetadataHelper.body(saved) == "# Body\ntext", "unknown fields and note body preserved")
 	_check(NoteMetadataHelper.preview("Body text", "New title").begins_with("# New title\n\n"), "metadata title appears as preview H1")
 	_check(NoteMetadataHelper.preview("# New title\n\nBody text", "New title") == "# New title\n\nBody text", "existing matching H1 is not duplicated")
+
+func _check_media_import() -> void:
+	# decode_image dispatches by magic bytes, not by name/extension.
+	var img := Image.create(2, 2, false, Image.FORMAT_RGBA8)
+	img.fill(Color(1, 0, 0, 1))
+	var png := img.save_png_to_buffer()
+	var decoded := MediaImport.decode_image(png)
+	_check(decoded != null and decoded.get_width() == 2, "png buffer decode")
+	_check(MediaImport.decode_image(PackedByteArray([1, 2, 3])) == null, "garbage bytes rejected")
+	# media_dest_for sanitizes unsafe stems, normalizes extensions and resolves
+	# collisions with a numeric suffix.
+	var tmp := "/tmp/nn-media-unit-test"
+	DirAccess.make_dir_recursive_absolute(tmp)
+	DirAccess.remove_absolute(tmp.path_join("a.png"))
+	var d1 := MediaImport.media_dest_for(tmp, "image%3A2117.png", false)
+	_check(d1 == tmp.path_join("image-2117.png"), "SAF stem sanitized")
+	FileAccess.open(d1, FileAccess.WRITE).store_byte(0)
+	var d2 := MediaImport.media_dest_for(tmp, "image%3A2117.png", false)
+	_check(d2 == tmp.path_join("image-2117-2.png"), "collision suffix")
+	var d3 := MediaImport.media_dest_for(tmp, "photo.jpg", true)
+	_check(d3 == tmp.path_join("photo.png"), "content URI forces png")
+	DirAccess.remove_absolute(tmp.path_join("image-2117.png"))
+	DirAccess.remove_absolute(tmp.path_join("image-2117-2.png"))
 
 func _check_markdown_spans() -> void:
 	# Flat, source-ordered span stream drives BOTH the highlighter (edit) and
