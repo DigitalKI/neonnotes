@@ -58,7 +58,13 @@ _Last updated: 2026-09-29 · Godot 4.7 · renderer: gl_compatibility_
   long-press drag arms after 3 s and consumes drag motion so the tree does not
   scroll away under the held item.
 - Componentized UI: `scripts/components/` (Theme, Layout, SlashMenu, Export,
-  VaultTree, Theme/StatusBar/Toolbar subscenes, Settings, SyncDialog).
+  VaultTree, Theme/StatusBar/Toolbar subscenes, Settings, SyncDialog). Dialogs
+  are now scene-authored components too: `new_note_dialog.tscn`
+  (NewNoteDialog), `vault_dialog.tscn` (plain FileDialog), and the media
+  picker shell in `media_dialog.tscn` (MediaDialog — only the per-file
+  library list is rebuilt in code). They are instanced in `Main.tscn` and
+  wired via signals in `main.gd`; do not reintroduce code-built
+  AcceptDialog/FileDialog UI for these.
 - Tests: `./tests/run_tests.sh` (unit/tree-drag/mobile-tree-touch/sync/smoke),
   graded by per-test `RESULT: OK` markers; `NEONNOTES_SMOKE=1` smoke path.
 

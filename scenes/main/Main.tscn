@@ -8,6 +8,9 @@
 [ext_resource type="PackedScene" uid="uid://dr4466qx0hbpp" path="res://scenes/components/side_panel.tscn" id="7_side"]
 [ext_resource type="PackedScene" uid="uid://dsdpg5sa7q611" path="res://scenes/components/settings_page.tscn" id="8_settings"]
 [ext_resource type="PackedScene" uid="uid://bge6o1gqm4xsx" path="res://scenes/components/export_menu.tscn" id="9_export_menu"]
+[ext_resource type="PackedScene" uid="uid://cn0tedlg1" path="res://scenes/components/new_note_dialog.tscn" id="10_new_note"]
+[ext_resource type="PackedScene" uid="uid://cvltdlg1" path="res://scenes/components/vault_dialog.tscn" id="11_vault"]
+[ext_resource type="PackedScene" uid="uid://cmediadlg1" path="res://scenes/components/media_dialog.tscn" id="12_media"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMat_crt"]
 shader = ExtResource("3_crt")
@@ -189,6 +192,12 @@ custom_minimum_size = Vector2(0, 33)
 layout_mode = 2
 
 [node name="ExportMenu" parent="." unique_id=202875446 instance=ExtResource("9_export_menu")]
+
+[node name="NewNoteDialog" parent="." instance=ExtResource("10_new_note")]
+
+[node name="VaultDialog" parent="." instance=ExtResource("11_vault")]
+
+[node name="MediaDialog" parent="." instance=ExtResource("12_media")]
 
 [node name="CrtOverlay" type="ColorRect" parent="." unique_id=1821292982]
 material = SubResource("ShaderMat_crt")

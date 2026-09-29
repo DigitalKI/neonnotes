@@ -1,0 +1,7 @@
+[gd_scene format=3 uid="uid://cvltdlg1"]
+
+[node name="VaultDialog" type="FileDialog"]
+unique_name_in_owner = true
+title = "Open Folder as Vault"
+file_mode = 0
+access = 2

@@ -43,9 +43,8 @@ func _load_help_doc() -> String:
 var settings_mode := false
 
 var sidebar: PanelContainer
-var new_dialog: AcceptDialog
-var new_line: LineEdit
-var vault_dialog: FileDialog
+@onready var new_dialog: NewNoteDialog = %NewNoteDialog
+@onready var vault_dialog: FileDialog = %VaultDialog
 var help_mode := false
 var source_mode := false
 var autosave_timer := Timer.new()
@@ -352,42 +351,12 @@ func _build_dynamic_ui() -> void:
 		more.add_item("💾 Save HTML", ExportComponent.ID_SAVE_HTML)
 	toolbar.more_btn.get_popup().id_pressed.connect(_on_more_action)
 	toolbar.more_btn.visible = true  # always available (delete/export/etc. on desktop too)
-	# new-note dialog: mobile-friendly row with Enter-to-submit
-	new_dialog = AcceptDialog.new()
-	new_dialog.name = "NewNoteDialog"
-	new_dialog.title = "New Note"
-	var row := HBoxContainer.new()
-	row.name = "Row"
-	row.add_theme_constant_override("separation", 8)
-	new_line = LineEdit.new()
-	new_line.name = "NameField"
-	new_line.placeholder_text = "note name"
-	new_line.custom_minimum_size = Vector2(220, 0)
-	new_line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	new_line.text_submitted.connect(func(_t: String):
-		_create_note()
-		new_dialog.hide())
-	var create_btn := Button.new()
-	create_btn.name = "CreateBtn"
-	create_btn.text = "✓ Create"
-	create_btn.pressed.connect(func():
-		_create_note()
-		new_dialog.hide())
-	row.add_child(new_line)
-	row.add_child(create_btn)
-	new_dialog.add_child(row)
-	new_dialog.get_ok_button().visible = false
-	new_dialog.confirmed.connect(_create_note)
-	add_child(new_dialog)
-
-	# open-folder-as-vault (desktop)
-	vault_dialog = FileDialog.new()
-	vault_dialog.name = "VaultDialog"
-	vault_dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
-	vault_dialog.access = FileDialog.ACCESS_FILESYSTEM
-	vault_dialog.title = "Open Folder as Vault"
+	# dialogs (new-note, vault picker, media picker) are scene-authored
+	# instances in Main.tscn; only their signals are connected here.
+	new_dialog.create_requested.connect(_create_note)
 	vault_dialog.dir_selected.connect(_on_vault_selected)
-	add_child(vault_dialog)
+	media_dialog.media_selected.connect(_use_local_media)
+	media_dialog.device_requested.connect(_choose_device_image)
 
 # ------------------------------------------------------------ mobile selection handles
 
@@ -649,11 +618,10 @@ func _on_note_selected(fname: String) -> void:
 	status_bar.flash("Opened " + fname)
 
 func _on_new_note() -> void:
-	new_line.text = ""
-	new_dialog.popup_centered(Vector2i(400, 130))
+	new_dialog.open()
 
 func _create_note() -> void:
-	var name := new_line.text.strip_edges().trim_suffix("/")
+	var name := new_dialog.name_field.text.strip_edges().trim_suffix("/")
 	if name == "" or name.contains(".."):
 		return
 	var fname := (name if name.ends_with(".md") else name + ".md")
@@ -1024,7 +992,7 @@ func _open_wikilink(target: String) -> void:
 # ------------------------------------------------- image embeds (v3)
 
 var image_dialog: FileDialog
-var media_dialog: AcceptDialog
+@onready var media_dialog: MediaDialog = %MediaDialog
 var _image_target_src := ""
 
 ## An image embed was clicked in the preview: choose an existing vault asset or
@@ -1038,55 +1006,15 @@ func _on_image_click(src: String) -> void:
 	_show_media_dialog()
 
 func _show_media_dialog() -> void:
-	if media_dialog:
-		media_dialog.queue_free()
-	media_dialog = AcceptDialog.new()
-	media_dialog.name = "MediaDialog"
-	media_dialog.title = "CHOOSE MEDIA SOURCE"
-	media_dialog.ok_button_text = "CANCEL"
-	var box := VBoxContainer.new()
-	box.custom_minimum_size = Vector2(420, 260)
-	box.add_theme_constant_override("separation", 10)
-	var heading := Label.new()
-	heading.text = "LOCAL MEDIA LIBRARY"
-	box.add_child(heading)
 	var media_dir := GameManager.vault_abs().path_join("media")
 	# Sync/import failures can leave empty media files behind. Clean these up
 	# before building the library so broken entries are never presented.
 	_cleanup_empty_media(media_dir)
 	var files: Array[String] = []
 	_collect_media_images(media_dir, files)
-	if files.is_empty():
-		var empty := Label.new()
-		empty.text = "No imported images yet."
-		box.add_child(empty)
-	else:
-		var scroll := ScrollContainer.new()
-		scroll.custom_minimum_size = Vector2(0, 150)
-		var list := VBoxContainer.new()
-		for path in files:
-			var item := Button.new()
-			item.text = path.get_file()
-			item.alignment = HORIZONTAL_ALIGNMENT_LEFT
-			item.mouse_filter = Control.MOUSE_FILTER_STOP
-			item.custom_minimum_size = Vector2(0, 64)
-			item.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
-			item.expand_icon = true
-			var img := Image.load_from_file(path)
-			if img:
-				item.icon = ImageTexture.create_from_image(img)
-			item.pressed.connect(_use_local_media.bind(path))
-			list.add_child(item)
-		scroll.add_child(list)
-		box.add_child(scroll)
-	var device := Button.new()
-	device.text = "＋  CHOOSE FROM DEVICE / MACHINE"
-	device.pressed.connect(_choose_device_image)
-	box.add_child(device)
-	media_dialog.add_child(box)
-	add_child(media_dialog)
-	_style_image_dialog()
-	media_dialog.popup_centered(Vector2i(560, 430))
+	# Dialog shell (heading, scroll, device button) is scene-authored in
+	# scenes/components/media_dialog.tscn; only the per-file list is dynamic.
+	media_dialog.open(files)
 
 func _cleanup_empty_media(dir_path: String) -> void:
 	var dir := DirAccess.open(dir_path)
@@ -1116,8 +1044,7 @@ func _collect_media_images(dir_path: String, out: Array[String]) -> void:
 	out.sort()
 
 func _use_local_media(path: String) -> void:
-	if media_dialog:
-		media_dialog.hide()
+	media_dialog.hide()
 	var t := code_edit.text
 	var pattern := "!\\[[^\\]]*\\]\\(\\s*" + ("" if _image_target_src == "" else vault_tree._re_escape(_image_target_src)) + "\\s*\\)"
 	var m := RegEx.create_from_string(pattern).search(t)
@@ -1135,8 +1062,7 @@ func _use_local_media(path: String) -> void:
 	_render_preview()
 
 func _choose_device_image() -> void:
-	if media_dialog:
-		media_dialog.hide()
+	media_dialog.hide()
 	if image_dialog == null:
 		image_dialog = FileDialog.new()
 		image_dialog.name = "ImageDialog"

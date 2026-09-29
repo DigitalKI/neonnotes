@@ -1,8 +1,39 @@
-[gd_scene format=3]
+[gd_scene load_steps=2 format=3 uid="uid://cmediadlg1"]
+
+[ext_resource type="Script" path="res://scripts/components/media_dialog.gd" id="1_md"]
 
 [node name="MediaDialog" type="AcceptDialog"]
+unique_name_in_owner = true
 title = "CHOOSE MEDIA SOURCE"
 ok_button_text = "CANCEL"
+script = ExtResource("1_md")
 
 [node name="Content" type="VBoxContainer" parent="."]
 custom_minimum_size = Vector2(420, 260)
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Heading" type="Label" parent="Content"]
+layout_mode = 2
+text = "LOCAL MEDIA LIBRARY"
+
+[node name="MediaScroll" type="ScrollContainer" parent="Content"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 150)
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="MediaList" type="VBoxContainer" parent="Content/MediaScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="EmptyLabel" type="Label" parent="Content"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "No imported images yet."
+
+[node name="DeviceButton" type="Button" parent="Content"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "＋  CHOOSE FROM DEVICE / MACHINE"
