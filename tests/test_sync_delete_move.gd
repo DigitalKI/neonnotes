@@ -146,6 +146,17 @@ func _case_state_persistence() -> void:
 	_ok(str(svc2._confirmed.get("peer-x", "")) == "deadbeef", "state: confirmed fingerprints persist")
 	_ok(SyncService.state_fingerprint({"a.md": {"modified": 1, "size": 2}}) == SyncService.state_fingerprint({"a.md": {"modified": 1, "size": 2}}), "state: fingerprint is deterministic")
 	_ok(SyncService.state_fingerprint({"a.md": {"modified": 1, "size": 2}}) != SyncService.state_fingerprint({"a.md": {"modified": 2, "size": 2}}), "state: fingerprint tracks mtime")
+	# A non-empty tombstone set must not make collect_manifest() time-dependent:
+	# a "now" timestamp there defeats `_confirmed` on every sync, forcing a full
+	# manifest each time and a per-file read on the receiver (the mobile freeze).
+	var v := GameManager.vault_abs()
+	GameManager.write_note("stable.md", "---\ntitle: Stable\n---\n\nbody\n")
+	GameManager.scan_notes()
+	var m1 := _svc.collect_manifest({"gone.md": 111}, v, ["stable.md"])
+	var m2 := _svc.collect_manifest({"gone.md": 111}, v, ["stable.md"])
+	_ok(SyncService.state_fingerprint(m1) == SyncService.state_fingerprint(m2), "state: tombstone fingerprint is stable")
+	var m3 := _svc.collect_manifest({"gone.md": 222}, v, ["stable.md"])
+	_ok(SyncService.state_fingerprint(m1) != SyncService.state_fingerprint(m3), "state: tombstone fingerprint tracks content")
 	svc.free()
 	svc2.free()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(file))  # never the app's real state
@@ -186,7 +197,7 @@ func _case_self_trust_dropped() -> void:
 	_ok(not GameManager.paired_peers.has(GameManager.device_id), "pairing: self peer entry dropped")
 
 # Inventory-only transfer must lazily read just the paths requested by the
-# receiver; same-time different-size notes are not silently skipped.
+# receiver. A newer logical mtime is requested; equal mtime means in-sync.
 func _case_manifest_only_payloads() -> void:
 	var vault := GameManager.vault_abs()
 	GameManager.write_note("delta.md", "changed contents")

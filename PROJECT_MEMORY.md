@@ -5,7 +5,7 @@
 > decisions, gotchas) — history lives in git, `git log` is the changelog.
 > Size budget ~250 lines: compact in-session if exceeded.
 
-_Last updated: 2026-09-28 · Godot 4.7 · renderer: gl_compatibility_
+_Last updated: 2026-09-29 · Godot 4.7 · renderer: gl_compatibility_
 
 ---
 
@@ -65,7 +65,20 @@ _Last updated: 2026-09-28 · Godot 4.7 · renderer: gl_compatibility_
 ## 3. Direction & next steps
 
 - **Current goal:** stable v3; sync verified on device (phone↔PC over air).
+- Table rendering fixed (2026-09-29): parser skips the `|---|---|` delimiter
+  row (was emitted as an extra header-styled data row; a lone delimiter line is
+  dropped entirely). `PreviewBuilder._hex()` also emitted only 6 hex digits, so
+  every "translucent" color was opaque: table header bg rendered solid accent
+  behind accent-colored header text (invisible titles) and data cells solid
+  black. `_hex()` now emits 8-digit RRGGBBAA whenever alpha < 1.
 - **Next up:**
+  - **Graph-first direction (proposed 2026-09-29):** make the graph the center
+    of the app rather than a toggle — semantic-zoom node cards/digests
+    ("what's inside"), tag + content search filters, explicit folder
+    expand/collapse, hover previews, and creating links directly from the
+    graph. Research + phased plan (G1–G4) live in the Next Steps brief §15;
+    Neon City is the eventual 3D skin over the same model. Do G1 before the
+    visual redesign.
   - SelectionOverlay (Android handles + Cut/Copy/Paste bar) in progress — wire/test on device.
   - Parser: block-level spans for headings/fences; per-block preview cache
     keyed by content hash.
@@ -78,6 +91,8 @@ _Last updated: 2026-09-28 · Godot 4.7 · renderer: gl_compatibility_
   (`name-2.md`) after sync merges. Multi-vault sync state persists per vault in
   `user://sync_state.json`. No transport encryption yet. The headless mobile-tree-touch test fails on this
   machine (null viewport texture / mismatched tree taps), independently of sync.
+  The smoke test also fails on this machine: it expects a 0.8 s autosave
+  debounce but `main.gd` uses 0.5 s (stale check, unrelated to sync).
 
 ## 4. Coding patterns & conventions (project-specific)
 
@@ -128,7 +143,9 @@ _These OVERRIDE the skill's defaults for this project._
   link light; user explicitly chose it over force-directed (2026-09-20).
 - **Metadata-first sync** (`probe` → `manifest` → needed paths → `push_stream`); inventory records sizes + logical mtimes on worker, and only requested payloads are read/transferred. The `probe` gate sends a deterministic content fingerprint (`state_fingerprint` over path|mtime|size); when it matches the fingerprint recorded in `_confirmed[peer_id]`, the whole manifest+payload exchange is skipped (idle sync = bytes each way).
 - **Persistent sync state** (`user://sync_state.json`, keyed by vault path md5): `_mtimes` (logical mtimes), `_tombstones`, and `_confirmed` survive restarts, so received media keeps the sender's timestamp instead of being restamped on receipt. `persist_state=false` makes test/diagnostic harnesses hermetic. State is per-device, not in the vault.
-- **No file reads in the sync hot path** (2026-09-28): `_file_logical_time` uses the persisted `_mtimes` else disk mtime — it never parses front-matter. The receiver's `manifest` handler runs on the main thread and previously opened every note (hundreds of reads/sync → UI freeze). `_sync_log` uses `get_length()` (stat) instead of re-reading the whole log.
+- **No file reads in the sync hot path** (2026-09-28): `_file_logical_time` uses the persisted `_mtimes` else disk mtime — it never parses front-matter. `_sync_log` uses `get_length()` (stat) instead of re-reading the whole log.
+- **Sync freeze fixes** (2026-09-29, mobile freeze every ~20 s): `manifest`/`_receive_item` no longer open each unchanged file for a size tiebreak — the logical mtime alone decides (equal ⇒ same write event ⇒ in sync; sub-second ties are already accepted, so two same-second creations keep the local copy). `collect_manifest` also stopped stamping the tombstone entry with `Time.get_unix_time_from_system()`: that made the fingerprint change on *every* sync once any tombstone existed, so `_confirmed` could never match and every peer re-exchanged a full manifest (feeding the per-file-open storm). The tombstone entry now hashes its JSON (`{"modified":0,"size":tomb_text.hash()}`) — stable while unchanged, different when it changes.
+- **Sync diagnostics & bounded main-thread work** (2026-09-29): `SyncService.debug_log` mirrors `_sync_log` to the Godot Output window (`[sync HH:MM:SS] …`; debug builds, or force with `NEONNOTES_SYNC_DEBUG=1|0`) with phase timings plus a `STALL main thread N ms (syncing=…)` line for any frame >400 ms. `_auto_timer` is one-shot (20 s `_retry_timer` is the periodic sweep); the receiver rescans only for note/structure changes and `main.gd` no longer rescans again; worker socket waits `OS.delay_msec(1)` instead of busy-spinning.
 - **Streaming chunked sync** (`push_stream`/`push_item`/`push_end`, one file
   per frame) — requested payloads loaded one at a time on sender worker;
   receiver reads socket in 64 KiB/frame. Legacy `push` remains for old peers.

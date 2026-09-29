@@ -128,6 +128,16 @@ func _expire_peers() -> void:
 		peers_changed.emit()
 
 func _process(_delta: float) -> void:
+	# Stall detector: a frame that takes far longer than usual is logged with the
+	# sync state at that moment, so a freeze can be tied to a sync phase instead
+	# of guessed at. Only active with debug logging.
+	if debug_log:
+		var now_ms := Time.get_ticks_msec()
+		if _last_frame_ms > 0:
+			var gap := now_ms - _last_frame_ms
+			if gap > 400:
+				_sync_log("STALL main thread %d ms (syncing=%s)" % [gap, str(_syncing)])
+		_last_frame_ms = now_ms
 	_poll_thread_result()
 	_poll_discovery()
 	_poll_server()
@@ -317,6 +327,7 @@ func _handle_message(conn: StreamPeerTCP, msg: Dictionary, st: Dictionary, peer_
 		var entries = msg.get("entries", {})
 		if typeof(entries) != TYPE_DICTIONARY or entries.size() > 50000:
 			return {"ok": false, "error": "bad_manifest"}
+		var manifest_start := Time.get_ticks_msec()
 		var needed: Array[String] = []
 		var vault := GameManager.vault_abs()
 		for path in entries:
@@ -336,14 +347,13 @@ func _handle_message(conn: StreamPeerTCP, msg: Dictionary, st: Dictionary, peer_
 				needed.append(name)
 				continue
 			var local_t := _file_logical_time(local, name, _mtimes)
-			var local_size := -1
-			if remote_t == local_t:
-				var f := FileAccess.open(local, FileAccess.READ)
-				if f:
-					local_size = f.get_length()
-					f.close()
-			if remote_t > local_t or (remote_t == local_t and int(remote.get("size", -1)) != local_size):
+			# Trust the logical mtime: equal means the same write event, so the
+			# receiver already holds this version. Deliberately no per-file open
+			# here — this handler runs on the main thread and opening every
+			# unchanged file (hundreds of files) froze the UI on mobile.
+			if remote_t > local_t:
 				needed.append(name)
+		_sync_log("IN manifest entries=%d needed=%d took=%d ms" % [entries.size(), needed.size(), Time.get_ticks_msec() - manifest_start])
 		return {"ok": true, "needed": needed}
 	if cmd == "push_stream":
 		if not st.get("paired", false):
@@ -461,7 +471,14 @@ func _handle_message(conn: StreamPeerTCP, msg: Dictionary, st: Dictionary, peer_
 			changed_paths.append(name)
 			_sync_log("IN wrote path=%s bytes=%d" % [name, text.to_utf8_buffer().size()])
 		_sync_log("IN done peer=%s wrote=%d deleted=%d skipped=%d invalid=%d" % [str(msg.get("name", "peer")), count, deleted, skipped, invalid])
-		if count > 0 or deleted > 0:
+		var legacy_note_change := deleted > 0
+		if not legacy_note_change:
+			for p in changed_paths:
+				var ps := String(p)
+				if ps.ends_with(".md") or ps.ends_with(".json"):
+					legacy_note_change = true
+					break
+		if legacy_note_change:
 			GameManager.scan_notes()
 		var peer_id := String(st.get("peer_id", ""))
 		if peer_id != "":
@@ -536,14 +553,9 @@ func _receive_item(st: Dictionary, msg: Dictionary) -> void:
 	var dest := vault.path_join(name)
 	if FileAccess.file_exists(dest) and remote_t > 0:
 		var local_t := _file_logical_time(dest, name, _mtimes)
-		var local_size := -1
-		if local_t == remote_t:
-			var local_file := FileAccess.open(dest, FileAccess.READ)
-			if local_file:
-				local_size = local_file.get_length()
-				local_file.close()
-		var remote_size := int(msg.get("size", -1))
-		if local_t > remote_t or (local_t == remote_t and remote_size >= 0 and local_size == remote_size):
+		# Logical mtime is authoritative (LWW): an equal-or-newer local copy wins.
+		# No per-file open for a size tiebreak — this runs on the main thread.
+		if local_t >= remote_t:
 			st["skipped"] = int(st.get("skipped", 0)) + 1
 			_sync_log("IN newer-local path=%s local=%d remote=%d" % [name, local_t, remote_t])
 			return
@@ -581,10 +593,20 @@ func _finish_stream(st: Dictionary) -> Dictionary:
 	var deleted := deleted_paths.size()
 	var changed_paths: Array = st.get("changed_paths", [])
 	var vault := GameManager.vault_abs()
-	# Deletions must rescan too, even when no file was written — otherwise a
-	# delete-only sync leaves the receiver's tree showing the removed folder.
-	if (wrote > 0 or deleted > 0) and vault != "":
+	# Rescan only when notes/structure changed. Deletions always need it; a
+	# media-only transfer does not (the tree/link index are note-based), and a
+	# full vault rescan on the main thread was a multi-second freeze on mobile.
+	var need_scan := deleted > 0
+	if not need_scan:
+		for p in changed_paths:
+			var ps := String(p)
+			if ps.ends_with(".md") or ps.ends_with(".json"):
+				need_scan = true
+				break
+	if need_scan and vault != "":
+		var scan_start := Time.get_ticks_msec()
 		GameManager.scan_notes()
+		_sync_log("IN rescan dims=%d took=%d ms" % [GameManager.notes.size(), Time.get_ticks_msec() - scan_start])
 	var peer_id := String(st.get("batch_peer_id", ""))
 	# The batch finished: we now hold the peer's declared content fingerprint, so
 	# the next probe from it can be skipped wholesale.
@@ -638,6 +660,7 @@ static func push_to(ip: String, port: int, secret: String, files: Dictionary, ti
 	var start := Time.get_ticks_msec()
 	while conn.get_status() != StreamPeerTCP.STATUS_CONNECTED:
 		conn.poll()
+		OS.delay_msec(1)  # yield: a busy poll loop here starved the UI on mobile
 		if conn.get_status() == StreamPeerTCP.STATUS_ERROR or Time.get_ticks_msec() - start > timeout_ms:
 			return {"ok": false, "error": "timeout"}
 	if client_id == "":
@@ -780,11 +803,16 @@ static func _client_roundtrip(conn: StreamPeerTCP, msg: Dictionary, wait_ms := 1
 				return JSON.parse_string(buf.slice(4, 4 + length).get_string_from_utf8())
 		if status != StreamPeerTCP.STATUS_CONNECTED:
 			return null
+		OS.delay_msec(1)  # yield while waiting so the worker never busy-spins
 	return null
 
 # ---------------- Notes ----------------
 
 func _sync_log(message: String) -> void:
+	# Visible in the Godot output window (debug builds / NEONNOTES_SYNC_DEBUG=1).
+	# Also appended to user://sync.log for post-mortem inspection on device.
+	if debug_log:
+		print("[sync %s] %s" % [Time.get_time_string_from_system(), message])
 	var path := "user://sync.log"
 	var f := FileAccess.open(path, FileAccess.READ_WRITE)
 	if f == null:
@@ -831,7 +859,14 @@ func collect_manifest(ts: Dictionary, vault: String, note_list: Array, mtimes: D
 			continue
 		entries[name] = {"modified": _file_logical_time(path, name, mtimes), "size": size}
 	if not ts.is_empty():
-		entries[".neonnotes-tombstones.json"] = {"modified": int(Time.get_unix_time_from_system()), "size": JSON.stringify(ts).to_utf8_buffer().size()}
+		# Deterministic tombstone contribution. A "now" timestamp here made the
+		# fingerprint change on every sync whenever any tombstone existed, so
+		# `_confirmed` could never match and every peer re-exchanged a full
+		# manifest — and the receiver opened every file answering it (a multi
+		# second main-thread stall on mobile). Hash the content instead: stable
+		# while the tombstones are unchanged, different when they change.
+		var tomb_text := JSON.stringify(ts)
+		entries[".neonnotes-tombstones.json"] = {"modified": 0, "size": tomb_text.hash()}
 	return entries
 
 ## Legacy helper: read the whole vault for transfer. New sync uses
@@ -915,6 +950,20 @@ var _sync_thread: Thread
 var _sync_result: Array = []
 var _sync_mutex := Mutex.new()
 var _shutting_down := false
+
+## Mirror `_sync_log` messages to the Godot output window (the editor's Output
+## panel, or `adb logcat` for a debug APK). Defaults to debug builds; override
+## with NEONNOTES_SYNC_DEBUG=1 (force on) or =0 (force off).
+var debug_log := _debug_log_default()
+static func _debug_log_default() -> bool:
+	var env := OS.get_environment("NEONNOTES_SYNC_DEBUG")
+	if env == "1":
+		return true
+	if env == "0":
+		return false
+	return OS.is_debug_build()
+## Last `_process` tick, for the main-thread stall detector below.
+var _last_frame_ms := 0
 
 ## Stable fingerprint of a vault's manifest (paths + logical mtimes + sizes).
 ## Deterministic, so a peer reverting to a previously-sent content set compares
@@ -1022,6 +1071,7 @@ func enable_auto_sync() -> void:
 	if _auto_timer:
 		return
 	_auto_timer = Timer.new()
+	_auto_timer.one_shot = true  # debounce after edits; the 20 s retry timer is the periodic sweep
 	_auto_timer.wait_time = 2.5
 	_auto_timer.timeout.connect(auto_sync)
 	add_child(_auto_timer)
@@ -1118,7 +1168,9 @@ func _sync_worker(targets: Array, ts: Dictionary, vault: String, note_list: Arra
 	var last_name := "peer"
 	var failure := ""
 	var failures := 0
+	var manifest_start := Time.get_ticks_msec()
 	var entries: Dictionary = collect_manifest(ts, vault, note_list, mtimes)
+	_sync_log("OUT manifest entries=%d tombstones=%d took=%d ms" % [entries.size(), ts.size(), Time.get_ticks_msec() - manifest_start])
 	var files := {}
 	if not ts.is_empty():
 		files[".neonnotes-tombstones.json"] = JSON.stringify(ts)
@@ -1135,19 +1187,20 @@ func _sync_worker(targets: Array, ts: Dictionary, vault: String, note_list: Arra
 			var rec: Dictionary = GameManager.paired_peers.get(str(target["id"]), {})
 			if str(rec.get("phrase", "")) != "":
 				phrase = str(rec["phrase"])
+		var push_start := Time.get_ticks_msec()
 		var result: Dictionary = push_to(str(target["ip"]), int(target["port"]), phrase, files, 4000, {}, str(target["ip"]), entries, vault, client_id, client_name)
 		if result.get("ok", false):
 			pairs.append(result)
 			completed = true
 			successful += int(result.get("count", 0))
 			if result.get("already", false):
-				_sync_log("OUT done peer=%s already-in-sync (probe skipped)" % last_name)
+				_sync_log("OUT done peer=%s already-in-sync (probe skipped) took=%d ms" % [last_name, Time.get_ticks_msec() - push_start])
 			else:
-				_sync_log("OUT done peer=%s acknowledged=%d" % [last_name, int(result.get("count", 0))])
+				_sync_log("OUT done peer=%s acknowledged=%d took=%d ms" % [last_name, int(result.get("count", 0)), Time.get_ticks_msec() - push_start])
 		else:
 			failures += 1
 			failure = "%s: %s" % [last_name, str(result.get("error", "unavailable"))]
-			_sync_log("OUT failed peer=%s error=%s" % [last_name, failure])
+			_sync_log("OUT failed peer=%s error=%s took=%d ms" % [last_name, failure, Time.get_ticks_msec() - push_start])
 	_sync_mutex.lock()
 	# A transfer that completed but wrote zero files (peer already up to date) is
 	# still a successful sync, not a failure — otherwise the status dot stays red.

@@ -187,9 +187,14 @@ func _refresh_list() -> void:
 		layout_component.content.visible = not mobile_drawer_was_open
 
 func _on_sync_changed(_peer: String, _count: int, changed_paths: Array, structure_changed: bool) -> void:
+	# The receiver's sync handler already rescanned when notes/structure changed
+	# (see SyncService._finish_stream); rescanning again here doubled a full
+	# vault read on the main thread. Only the tree needs rebuilding now.
 	if structure_changed:
-		GameManager.scan_notes()
+		var t0 := Time.get_ticks_msec()
 		_refresh_list()
+		if sync_service and sync_service.debug_log:
+			print("[sync] tree refresh %d ms" % (Time.get_ticks_msec() - t0))
 	# The note we had open was removed by the peer: don't keep showing stale text.
 	if GameManager.current_rel != "" and not GameManager.notes.has(GameManager.current_rel):
 		GameManager.current_file = ""
