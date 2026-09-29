@@ -110,6 +110,12 @@ _Last updated: 2026-09-29 · Godot 4.7 · renderer: gl_compatibility_
   every "translucent" color was opaque: table header bg rendered solid accent
   behind accent-colored header text (invisible titles) and data cells solid
   black. `_hex()` now emits 8-digit RRGGBBAA whenever alpha < 1.
+- **Component extraction in progress (2026-09-29):** `MediaImport` and
+  `NoteCrud` extracted to `scripts/common/` (main.gd 1380 → 1210 lines).
+  Remaining: split `vault_tree_component.gd` (1046 lines) into
+  `tree_builder.gd` + `tree_drag_handler.gd` behind the existing facade, then
+  the `setup(context)` component contract. Test harnesses keep their own
+  `_rm_dir` copies (they run without the main scene).
 - **Next up:**
   - **Graph-first direction (proposed 2026-09-29):** make the graph the center
     of the app rather than a toggle — semantic-zoom node cards/digests
@@ -211,6 +217,8 @@ _These OVERRIDE the skill's defaults for this project._
 | `res://scripts/markdown/markdown_parser.gd` | Unified parser (blocks + inline spans) |
 | `res://scripts/markdown/wiki_links.gd` | Link extract/resolve/backlinks/graph |
 | `res://scripts/common/path_remap.gd` | Static move/remap helpers (unit-tested) |
+| `res://scripts/common/media_import.gd` | Static media library + image import helpers (magic-byte decode, SAF URIs, dest naming) |
+| `res://scripts/common/note_crud.gd` | Static vault CRUD helpers (rm_dir, erase_note_meta, scrub_order, compute_delete_set) |
 | `res://scripts/render/graph_model.gd` | Dependency-free graph semantics (levels/edges) |
 | `res://scripts/render/` | PreviewBuilder, ChartView, GraphView, FX |
 | `res://scripts/sync/sync_service.gd` | LAN discovery/handshake/streaming transfer |
