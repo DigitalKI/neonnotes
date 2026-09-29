@@ -8,13 +8,17 @@ var _pin_label: Label
 var _discovery_btn: Button
 var _peer_list: ItemList
 var _pin_edit: LineEdit
+var _send_thread: Thread
+var _send_result: Dictionary = {}
+var _send_running := false
+var _send_peer := ""
 var _log: RichTextLabel
 var _send_btn: Button
 var _status_label: Label
 
 func _ready() -> void:
 	_device_label = get_node("Root/DeviceRow/DeviceLabel")
-	_pin_label = get_node("Root/DeviceRow/PinLabel")
+	_pin_label = get_node("Root/PinLabel")
 	_discovery_btn = get_node("Root/Columns/DiscoveryToggle")
 	_peer_list = get_node("Root/Columns/PeerList")
 	_pin_edit = get_node("Root/Columns/PinEdit")
@@ -23,9 +27,7 @@ func _ready() -> void:
 	_status_label = get_node("Root/StatusLabel")
 	_discovery_btn.toggled.connect(_on_discovery_toggled)
 	_send_btn.pressed.connect(_on_send)
-	_pin_edit.text_changed.connect(func(value: String):
-		if value.strip_edges() != "" and _service != null:
-			_service.set_pin(value.strip_edges()))
+
 	title = "LAN Sync"
 	# fit small screens: the fixed 720x460 overflows portrait phones
 	var vp: Vector2i = get_viewport().get_visible_rect().size
@@ -45,15 +47,17 @@ func _ready() -> void:
 	add_theme_stylebox_override("panel", panel)
 	add_theme_color_override("font_color", pal.get("text", Color.WHITE))
 
-	_pin_label.text = "PIN: " + (GameManager.sync_pin if GameManager.sync_pin != "" else "Not set")
-	_pin_edit.text = GameManager.sync_pin
+	_pin_label.text = "Pairing words: " + GameManager.vault_secret
+	_pin_edit.text = ""
 	_service = service if service != null else SyncService.new()
-	_service.name = "SyncService"
-	_service.set_pin(GameManager.sync_pin)
-	add_child(_service)
+	if service == null:
+		_service.name = "SyncService"
+		add_child(_service)
 	_service.peers_changed.connect(_refresh_peers)
 	_service.sync_done.connect(_on_sync_done)
 	_service.sync_failed.connect(_on_sync_failed)
+	close_requested.connect(_on_dialog_closed)
+	canceled.connect(_on_dialog_closed)
 
 	var paired_text := "Not paired"
 	if not GameManager.paired_peers.is_empty():
@@ -62,7 +66,7 @@ func _ready() -> void:
 			names.append(str(peer.get("name", "paired device")))
 		paired_text = "Paired with: " + ", ".join(names)
 	_device_label.text = "Device: " + _service.device_name + "\nID: " + GameManager.device_id + "\nVault: " + GameManager.vault_id + "\n" + paired_text
-	_log.append_text("[color=%s]LAN Sync ready. Start discovery to find peers, then share your PIN to pair. Devices you've paired with before reconnect without a PIN.[/color]\n" % _css(pal.get("accent2", Color.GRAY)))
+	_log.append_text("[color=%s]Share your pairing words with the other device once. Select its vault, enter its words there, and pair. Trusted devices reconnect automatically.[/color]\n" % _css(pal.get("accent2", Color.GRAY)))
 
 func _css(c: Color) -> String:
 	return "#%02x%02x%02x" % [int(c.r * 255), int(c.g * 255), int(c.b * 255)]
@@ -72,12 +76,7 @@ func _on_discovery_toggled(pressed: bool) -> void:
 		if _service.start_discovery():
 			_service.enable_auto_sync()
 			_discovery_btn.text = "Stop Discovery"
-			var pin := GameManager.sync_pin
-			if pin == "":
-				pin = _service.gen_pin()
-				_service.set_pin(pin)
-			_pin_label.text = "PIN: " + pin
-			_log.append_text("[color=%s]Discovery started. PIN: %s. Looking for devices on this LAN…[/color]\n" % [_css(Color.WHITE), pin])
+			_log.append_text("Discovery started. Looking for vaults on this LAN…\n")
 			_status_label.text = "Searching for nearby devices…"
 		else:
 			_discovery_btn.button_pressed = false
@@ -99,46 +98,80 @@ func _refresh_peers() -> void:
 	for ip in _service.peers.keys():
 		var p: Dictionary = _service.peers[ip]
 		var peer_id := str(p.get("id", ""))
-		_peer_list.add_item("◆ %s\n%s" % [str(p["name"]), peer_id])
+		_peer_list.add_item("◆ Vault %s\n%s" % [str(p.get("vault_id", "unknown")), str(p["name"])])
 		_peer_list.set_item_metadata(i, ip)
 		if ip == selected_ip:
 			_peer_list.select(i)
 		i += 1
 
 func _on_send() -> void:
-	var sel := _peer_list.get_selected_items()
-	if sel.size() == 0:
-		_status_label.text = "Select a peer first."
+	if _send_running:
 		return
-	var pin := _pin_edit.text.strip_edges()
-	if pin == "":
-		_status_label.text = "Enter the remote PIN."
+	var sel := _peer_list.get_selected_items()
+	if sel.is_empty():
+		_status_label.text = "Select a vault first."
 		return
 	var ip := str(_peer_list.get_item_metadata(sel[0]))
 	var p: Dictionary = _service.peers.get(ip, {})
-	var port := int(p.get("tcp", SyncService.TCP_PORT))
-	var peer_name := str(p.get("name", ip))
-	var cart: Dictionary = _service.collect_notes({}, GameManager.vault_abs(), GameManager.notes, _service._mtimes.duplicate())
-	var files: Dictionary = cart["files"]
-	if files.is_empty():
-		_status_label.text = "No notes to send."
+	var secret := _pin_edit.text.strip_edges().to_lower().replace(" ", "-")
+	if GameManager.trusted.has(str(p.get("id", ""))) and secret == "":
+		secret = GameManager.vault_secret
+	if secret == "":
+		_status_label.text = "Enter the remote vault's pairing words."
 		return
-	_status_label.text = "Sending %d notes to %s..." % [files.size(), peer_name]
+	_send_peer = str(p.get("name", ip))
+	_status_label.text = "Syncing with %s…" % _send_peer
 	_send_btn.disabled = true
-	await get_tree().process_frame
-	var res: Dictionary = await _send_task(ip, port, pin, files, peer_name, cart["times"])
-	_send_btn.disabled = false
-	_status_label.text = str(res.get("msg", ""))
+	_send_running = true
+	_send_result = {}
+	# Snapshot small state on UI thread; collect payloads and transfer on worker.
+	var ts := _service._tombstones.duplicate()
+	var mtimes := _service._mtimes.duplicate()
+	var vault := GameManager.vault_abs()
+	var paths := GameManager.notes.duplicate()
+	var client_id := GameManager.device_id
+	var client_name := _service.device_name
+	_send_thread = Thread.new()
+	_send_thread.start(func():
+		var entries := _service.collect_manifest(ts, vault, paths, mtimes)
+		var files := {}
+		if not ts.is_empty():
+			files[".neonnotes-tombstones.json"] = JSON.stringify(ts)
+		_send_result = SyncService.push_to(ip, int(p.get("tcp", SyncService.TCP_PORT)), secret, files, 4000, {}, ip, entries, vault, client_id, client_name))
 
-func _send_task(ip: String, port: int, pin: String, files: Dictionary, peer_name: String, times: Dictionary = {}) -> Dictionary:
-	var res := SyncService.push_to(ip, port, pin, files, 4000, times)
-	if res.get("ok", false):
-		var count := int(res.get("count", 0))
-		_log.append_text("[color=green]Sent %d notes to %s[/color]\n" % [count, peer_name])
-		return {"msg": "Sent %d notes to %s." % [count, peer_name]}
+func _process(_delta: float) -> void:
+	if _send_thread == null or _send_thread.is_alive():
+		return
+	_send_thread.wait_to_finish()
+	_send_thread = null
+	_send_running = false
+	_send_btn.disabled = false
+	if _send_result.get("ok", false):
+		SyncService.accept_pair(_send_result, true)  # user drove this pairing
+		_pin_label.text = "Pairing words: " + GameManager.vault_secret
+		_device_label.text = "Device: %s\nID: %s\nVault: %s" % [_service.device_name, GameManager.device_id, GameManager.vault_id]
+		_pin_edit.clear()
+		var count := int(_send_result.get("count", 0))
+		_status_label.text = "Synced %d files with %s." % [count, _send_peer]
+		_log.append_text("[color=green]%s[/color]\n" % _status_label.text)
 	else:
-		_log.append_text("[color=red]Send to %s failed: %s[/color]\n" % [peer_name, str(res.get("error", "?"))])
-		return {"msg": "Send failed: %s" % str(res.get("error", "?"))}
+		_status_label.text = "Sync failed: %s" % str(_send_result.get("error", "?"))
+		_log.append_text("[color=red]%s[/color]\n" % _status_label.text)
+	if not visible:
+		queue_free()
+
+func _on_dialog_closed() -> void:
+	if _send_thread == null:
+		queue_free()
+	else:
+		hide()  # worker finishes without blocking the UI; _process joins it
+
+func _exit_tree() -> void:
+	if _send_thread != null:
+		# Only app teardown reaches this with an active worker. The TCP waits
+		# have timeouts; normal dialog closing defers freeing until it finishes.
+		_send_thread.wait_to_finish()
+		_send_thread = null
 
 func _on_sync_done(peer_name: String, count: int) -> void:
 	_log.append_text("[color=green]Received %d notes from %s[/color]\n" % [count, peer_name])
