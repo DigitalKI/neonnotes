@@ -44,6 +44,7 @@ var _search_render_queue: Array[String] = []
 var _search_render_index := 0
 var _search_pending := false
 var _search_showing_results := false
+var _search_folders := {}  # path -> TreeItem, filtered hierarchy for search rows
 const SEARCH_DEBOUNCE_SECONDS := 0.35
 const SEARCH_ROWS_PER_FRAME := 64
 
@@ -301,6 +302,7 @@ func _on_search_changed(value: String) -> void:
 	_search_pending = true
 	_search_render_queue.clear()
 	_search_render_index = 0
+	_search_folders.clear()
 	# Reset the debounce for every keystroke, including short queries. Do not
 	# rebuild a large unfiltered tree in the text_changed callback.
 	_search_timer.stop()
@@ -373,6 +375,7 @@ func _exit_tree() -> void:
 	_search_timer.stop()
 	_search_render_queue.clear()
 	_search_render_index = 0
+	_search_folders.clear()
 	_search_generation += 1
 	_search_cancel = true
 	# Joining is required before the node is freed: the worker captures this
@@ -439,6 +442,7 @@ func refresh() -> void:
 	root.set_selectable(0, true)
 	_search_showing_results = _search_query.length() >= 3
 	if _search_showing_results:
+		_search_folders = {}
 		_search_render_queue = visible_notes()
 		_search_render_index = 0
 		_render_search_batch()
@@ -493,12 +497,35 @@ func refresh() -> void:
 			if DirAccess.dir_exists_absolute(folder_abs):
 				continue
 			_add_note_leaf(root, n)
+## Search results keep their real folder hierarchy (folders along the paths of
+## matched notes only), so rows remain valid drag targets within the tree.
 func _add_search_result(n: String) -> void:
-	var base := n.get_file().trim_suffix(".md")
+	var parts := n.split("/")
+	var parent: TreeItem = side_tree.get_root()
+	var path := ""
+	for i in parts.size() - 1:
+		path = (path + "/" if path != "" else "") + parts[i]
+		if not _search_folders.has(path):
+			var it := side_tree.create_item(parent)
+			var companion: String = path + ".md"
+			if GameManager.notes.has(companion):
+				var ft: String = GameManager.titles.get(companion, "")
+				if ft == "":
+					ft = parts[i]
+				it.set_text(0, "◈ " + ft)
+			else:
+				it.set_text(0, "▸ " + parts[i])
+			it.set_tooltip_text(0, parts[i])
+			it.set_metadata(0, companion if GameManager.notes.has(companion) else path)
+			it.set_selectable(0, true)
+			it.collapsed = false  # reveal matched notes inside
+			_search_folders[path] = it
+		parent = _search_folders[path]
+	var base := parts[-1].trim_suffix(".md")
 	var label: String = GameManager.titles.get(n, base)
 	if label == "":
 		label = base
-	var leaf := side_tree.create_item(side_tree.get_root())
+	var leaf := side_tree.create_item(parent)
 	leaf.set_text(0, "◈ " + label)
 	var snippet: String = String(_search_snippets.get(n, ""))
 	leaf.set_tooltip_text(0, n + (" — " + snippet if snippet != "" else ""))
@@ -677,11 +704,28 @@ func _perform_drop(src: String, it: TreeItem, section: int) -> void:
 	# (The index was already remapped inside move_path, before the rewrites.)
 	# Only the moved path's own ancestor chain can have become empty.
 	prune_empty_ancestors(src)
+	if _search_showing_results:
+		# Result paths are stale after the move; re-run the current query so the
+		# filtered tree reflects the new structure.
+		_restart_search()
 	refresh()
 	# reopen if the open note was the one moved/renamed
 	if GameManager.current_rel == "" and new_rel.ends_with(".md"):
 		select_note(new_rel)
 	flash_cb.call("Moved → " + new_rel)
+
+## Invalidate cached results and re-run the current query immediately
+## (used after moves/reorders change note paths).
+func _restart_search() -> void:
+	_search_generation += 1
+	_search_cancel = true
+	_search_results = []
+	_search_render_queue.clear()
+	_search_render_index = 0
+	_search_folders.clear()
+	_search_pending = true
+	if _search_thread == null:
+		_start_search()
 
 func _tree_drop(at_position: Vector2, data: Variant) -> void:
 	var src := str(data.get("path", ""))

@@ -15,8 +15,9 @@ func _ready() -> void:
 		var f := FileAccess.open(vault.path_join(n), FileAccess.WRITE)
 		f.store_string("needletoken body" if n != "c.md" else "other body")
 		f.close()
-	GameManager.notes = ["a.md", "b.md", "c.md"] as Array[String]
-	GameManager.titles = {"a.md": "Needletoken title", "b.md": "Other", "c.md": "Other"}
+	DirAccess.remove_absolute(vault.path_join("sub"))  # stray file from earlier runs
+	GameManager.notes = ["a.md", "b.md", "c.md", "sub/inner.md"] as Array[String]
+	GameManager.titles = {"a.md": "Needletoken title", "b.md": "Other", "c.md": "Other", "sub/inner.md": "Inner"}
 	GameManager.tags = {}
 	var panel: VaultTreeComponent = preload("res://scenes/components/side_panel.tscn").instantiate()
 	add_child(panel)
@@ -64,10 +65,40 @@ func _ready() -> void:
 	panel._apply_search_results(panel._search_generation, many)
 	ok = ok and panel.side_tree.get_root().get_child_count() <= panel.SEARCH_ROWS_PER_FRAME
 	ok = ok and panel._search_render_queue.size() == many.size()
+	var batch_deadline := Time.get_ticks_msec() + 4000
+	while panel._search_render_index < panel._search_render_queue.size() and Time.get_ticks_msec() < batch_deadline:
+		await get_tree().process_frame
+	ok = ok and panel.side_tree.get_root().get_child_count() == many.size()
+	# Search results keep their folder hierarchy, so rows stay drag targets.
+	panel._on_search_changed("inner")
+	ok = ok and await _wait_for_results(panel, ["sub/inner.md"])
+	var search_root := panel.side_tree.get_root()
+	ok = ok and search_root.get_child_count() == 1
+	var folder_row := search_root.get_first_child()
+	ok = ok and String(folder_row.get_metadata(0)) == "sub"
+	ok = ok and folder_row.get_first_child().get_metadata(0) == "sub/inner.md"
+	# A move (drop) while searching must refresh the filtered tree: rename the
+	# note on disk and remap the index the way move_path does, then restart.
+	DirAccess.make_dir_recursive_absolute(vault.path_join("sub"))
+	var rf := FileAccess.open(vault.path_join("sub/inner.md"), FileAccess.WRITE)
+	rf.store_string("moved body")
+	rf.close()
+	GameManager.notes = ["a.md", "b.md", "c.md", "inner.md"] as Array[String]
+	GameManager.titles["inner.md"] = "Inner"
+	GameManager.titles.erase("sub/inner.md")
+	GameManager.remap_moved("sub/inner.md", "inner.md")
+	panel._restart_search()
+	ok = ok and await _wait_for_results(panel, ["inner.md"])
+	var moved_root := panel.side_tree.get_root()
+	ok = ok and moved_root.get_child_count() == 1
+	ok = ok and moved_root.get_first_child().get_metadata(0) == "inner.md"
+	DirAccess.remove_absolute(vault.path_join("inner.md"))
+	DirAccess.remove_absolute(vault.path_join("sub/inner.md"))
+	DirAccess.remove_absolute(vault.path_join("sub"))
 	# A stale result must not replace a newer query or re-create old rows.
 	panel._on_search_changed("different")
 	panel._apply_search_results(panel._search_generation - 1, many)
-	ok = ok and panel._search_results == many and panel._search_render_queue.is_empty()
+	ok = ok and panel._search_results == ["inner.md"] and panel._search_render_queue.is_empty()
 	panel._search_timer.stop()
 	panel._search_pending = false
 	_finish(panel, previous_vault, previous_notes, previous_titles, previous_tags, previous_save, vault, ok)
