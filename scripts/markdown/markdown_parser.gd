@@ -346,6 +346,15 @@ static func parse(text: String) -> Dictionary:
 				var cells := lines[i].strip_edges().trim_prefix("|").trim_suffix("|").split("|")
 				var packed := PackedStringArray(); for c in cells: packed.append(c.strip_edges())
 				rows.append(packed); i += 1
+				if i < lines.size() and lines[i].strip_edges().replace("|", "").replace("-", "").replace(":", "").strip_edges() == "":
+					i += 1  # skip the |---|---| delimiter row; not a data row
+			if rows.size() == 1:
+				var only_delims := true
+				for c in rows[0]:
+					if c.is_empty() or c.replace("-", "").replace(":", "").strip_edges() != "":
+						only_delims = false; break
+				if only_delims:
+					continue  # lone delimiter line: no header, no table
 			blocks.append({"type":"table", "rows":rows}); continue
 		var list_match := RegEx.new(); list_match.compile("^(?:[-*+]\\s+|(\\d+)[.)]\\s+)(.*)$"); var m := list_match.search(t)
 		if m:

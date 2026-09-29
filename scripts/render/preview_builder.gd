@@ -366,7 +366,14 @@ static func _chart(block: Dictionary) -> Control:
 	return cv
 
 static func _hex(c: Color, alpha: float = -1.0) -> String:
+	# to_html(false) drops the alpha channel, which previously made every
+	# "translucent" color solid — e.g. the table header background rendered as
+	# opaque accent behind accent-colored header text, hiding the titles.
+	# Emit 8-digit RRGGBBAA whenever an explicit alpha is requested so BBCode
+	# (color/bgcolor/outline/cell bg+border) honors it.
 	var cc := c
 	if alpha >= 0.0:
 		cc.a = alpha
+	if cc.a < 1.0:
+		return cc.to_html(true)
 	return cc.to_html(false)
