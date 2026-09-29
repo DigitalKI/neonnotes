@@ -270,10 +270,10 @@ static func _quote_block(text: String, accent: Color, accent2: Color, text_c: Co
 	box.name = "QuoteLines"
 	panel.add_child(box)
 	var line_index := 0
-	for line in text.split("\\n"):
+	for line in text.split("\n"):
 		if line.strip_edges() == "":
 			continue
-		var prefix := "[color=#%s]❝[/color] " % _hex(accent2) if line_index == 0 else "    "
+		var prefix := "[color=#%s]❝[/color] " % _hex(accent2) if line_index == 0 else "  "
 		box.add_child(_rich(prefix + _inline(escape(line)), text_c))
 		line_index += 1
 	return panel
