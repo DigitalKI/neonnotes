@@ -772,6 +772,20 @@ func _all_dirs(rel: String) -> Array[String]:
 		out.append_array(_all_dirs(child))
 	return out
 
+## Insert a freshly created note into the custom order: directly after
+## `after_rel` (same folder), or as the first child of `folder_rel`.
+func order_new_note(rel: String, dir: String, after_rel: String, as_first_child: bool) -> void:
+	if as_first_child:
+		var lst: Array = GameManager.order.get(dir, [])
+		if lst.is_empty():
+			lst = ordered_notes(dir)
+		lst.erase(rel)
+		lst.insert(0, rel)
+		GameManager.order[dir] = lst
+		GameManager.save_order()
+	else:
+		_apply_order(rel, dir, after_rel, false)
+
 ## Insert `rel` into the folder's order list next to `neighbor`.
 func _apply_order(rel: String, dir: String, neighbor: String, before: bool) -> void:
 	var lst: Array = GameManager.order.get(dir, [])

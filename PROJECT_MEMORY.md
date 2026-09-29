@@ -58,13 +58,35 @@ _Last updated: 2026-09-29 · Godot 4.7 · renderer: gl_compatibility_
   long-press drag arms after 3 s and consumes drag motion so the tree does not
   scroll away under the held item.
 - Componentized UI: `scripts/components/` (Theme, Layout, SlashMenu, Export,
-  VaultTree, Theme/StatusBar/Toolbar subscenes, Settings, SyncDialog). Dialogs
-  are now scene-authored components too: `new_note_dialog.tscn`
-  (NewNoteDialog), `vault_dialog.tscn` (plain FileDialog), and the media
-  picker shell in `media_dialog.tscn` (MediaDialog — only the per-file
-  library list is rebuilt in code). They are instanced in `Main.tscn` and
-  wired via signals in `main.gd`; do not reintroduce code-built
-  AcceptDialog/FileDialog UI for these.
+  VaultTree, StatusBar/Toolbar subscenes, Settings, Sync). Every in-app
+  surface is a **scene-authored page inside `%Content`** — there is no
+  mobile/desktop presentation split left, so desktop and mobile show the same
+  components at the same sizes. Deleted in that unification: the
+  `InlineDialog` overlay base and the `VaultDialog` FileDialog.
+- The only real `Window` dialogs left are the OS-facing pickers
+  (`image_dialog` FileDialog) plus the delete confirmations and the GIF
+  `LoadingDialog`; all of them are styled by `DialogTheme.apply(window)`
+  (panel StyleBoxFlat + mono font + accent colors), re-applied on
+  `palette_changed`. Everything else is a page and inherits the shell
+  styling directly.
+- Export menu: one scene-authored PopupMenu (`export_menu.tscn` → `%Menu`)
+  with Save PNG / Save GIF / Save HTML / Share PNG / Share GIF / Share
+  Markdown / Share HTML on every platform. `Share` falls back to clipboard
+  and the OS file manager on desktop. The ⋮ overflow menu mirrors the same
+  ids. No `mobile_popup`/`desktop_popup` variants.
+- Pages (settings / sync / new note / vault picker / media): all five are **scene instances inside `%Content`** (not overlays, not
+  Windows) so they are sized exactly like an open note and cover the visible
+  screen on mobile: `%SettingsPage`, `%SyncPage`, `%NewNoteDialog`,
+  `%VaultPicker`, `%MediaDialog`. main.gd owns them through `page_mode` + `_open_page()` /
+  `_close_page()`; `_set_mode()`/`_show_help()`/`_toggle_graph()` return early
+  while a page is open. `NewNoteDialog` and `VaultPicker` are `MarginContainer`
+  pages with `begin()`; `MediaDialog` is a page too (`begin(files)`).
+  `SyncPage.bind_service()` adopts main's SyncService (a persistent instance's
+  `_ready` runs before main's, so injection at `_ready` is impossible).
+- New-note placement: the note is ordered **directly below the selected row**
+  (selected note → same folder, right after it; selected folder → first child;
+  nothing selected → vault root, appended) via
+  `VaultTreeComponent.order_new_note()` writing `vault/.neonnotes.json`.
 - Tests: `./tests/run_tests.sh` (unit/tree-drag/mobile-tree-touch/sync/smoke),
   graded by per-test `RESULT: OK` markers; `NEONNOTES_SMOKE=1` smoke path.
 

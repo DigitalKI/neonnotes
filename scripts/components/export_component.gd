@@ -18,8 +18,7 @@ var get_code: Callable
 ## then upscales uniformly (2x) on top.
 var width_cb: Callable
 var popup: PopupMenu
-@onready var mobile_popup: PopupMenu = $Mobile
-@onready var desktop_popup: PopupMenu = $Desktop
+@onready var menu: PopupMenu = $Menu
 
 ## ids shared with the ⋮ overflow menu (which routes export ids here too)
 const ID_PNG := 0
@@ -35,8 +34,9 @@ var _loading: AcceptDialog
 
 
 func _ready() -> void:
-	var mobile := OS.get_name() == "Android"
-	popup = mobile_popup if mobile else desktop_popup
+	# One menu on every platform (share falls back to clipboard / file manager
+	# on desktop), so there is no mobile/desktop variant to select.
+	popup = menu
 	# Popups stay hidden until the Export button explicitly calls popup();
 	# setting visible here is what caused the menu to open at launch.
 	popup.id_pressed.connect(handle_action)
@@ -64,6 +64,7 @@ func _export_width() -> float:
 func _show_loading(message: String) -> void:
 	if _loading == null or not is_instance_valid(_loading):
 		_loading = LOADING_DIALOG_SCENE.instantiate()
+		DialogTheme.apply(_loading)  # GIF export feedback matches the shell
 		add_child(_loading)
 	_loading.set_message(message)
 	_loading.show()

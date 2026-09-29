@@ -1,19 +1,19 @@
 [gd_scene load_steps=2 format=3]
 
-[ext_resource type="Script" path="res://scripts/components/media_dialog.gd" id="1_md"]
+[ext_resource type="Script" path="res://scripts/components/vault_picker.gd" id="1_vp"]
 
-[node name="MediaDialog" type="MarginContainer"]
+[node name="VaultPicker" type="MarginContainer"]
 unique_name_in_owner = true
 visible = false
 theme_override_constants/margin_left = 10
 theme_override_constants/margin_right = 10
 theme_override_constants/margin_top = 10
 theme_override_constants/margin_bottom = 10
-script = ExtResource("1_md")
+script = ExtResource("1_vp")
 
 [node name="Content" type="VBoxContainer" parent="."]
 layout_mode = 2
-theme_override_constants/separation = 10
+theme_override_constants/separation = 8
 
 [node name="TitleRow" type="HBoxContainer" parent="Content"]
 layout_mode = 2
@@ -23,30 +23,36 @@ theme_override_constants/separation = 10
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 20
-text = "🖼 CHOOSE MEDIA SOURCE"
+text = "📂 SELECT VAULT FOLDER"
 
 [node name="CloseButton" type="Button" parent="Content/TitleRow"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "✕ Close"
 
-[node name="MediaScroll" type="ScrollContainer" parent="Content"]
+[node name="CurrentPath" type="Label" parent="Content"]
 unique_name_in_owner = true
 layout_mode = 2
-size_flags_vertical = 3
+autowrap_mode = 2
 
-[node name="MediaList" type="VBoxContainer" parent="Content/MediaScroll"]
+[node name="DirList" type="ItemList" parent="Content"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 180)
+layout_mode = 2
+size_flags_vertical = 3
+allow_reselect = true
+
+[node name="Buttons" type="HBoxContainer" parent="Content"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="UpBtn" type="Button" parent="Content/Buttons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "⬆ Up"
+
+[node name="UseBtn" type="Button" parent="Content/Buttons"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
-
-[node name="EmptyLabel" type="Label" parent="Content"]
-unique_name_in_owner = true
-layout_mode = 2
-text = "No imported images yet."
-
-[node name="DeviceButton" type="Button" parent="Content"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 44)
-layout_mode = 2
-text = "＋  CHOOSE FROM DEVICE / MACHINE"
+text = "✓ Use this folder"

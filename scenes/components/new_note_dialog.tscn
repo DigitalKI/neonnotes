@@ -1,24 +1,55 @@
-[gd_scene format=3 uid="uid://cn0tedlg1"]
+[gd_scene load_steps=2 format=3]
 
 [ext_resource type="Script" path="res://scripts/components/new_note_dialog.gd" id="1_nnd"]
 
-[node name="NewNoteDialog" type="AcceptDialog"]
+[node name="NewNoteDialog" type="MarginContainer"]
 unique_name_in_owner = true
-title = "New Note"
+visible = false
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_bottom = 10
 script = ExtResource("1_nnd")
 
-[node name="Row" type="HBoxContainer" parent="."]
+[node name="Root" type="VBoxContainer" parent="."]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="NameField" type="LineEdit" parent="Row"]
+[node name="TitleRow" type="HBoxContainer" parent="Root"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="Root/TitleRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 20
+text = "＋ NEW NOTE"
+
+[node name="CloseButton" type="Button" parent="Root/TitleRow"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "✕ Close"
+
+[node name="Center" type="CenterContainer" parent="Root"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Column" type="VBoxContainer" parent="Root/Center"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Row" type="HBoxContainer" parent="Root/Center/Column"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="NameField" type="LineEdit" parent="Root/Center/Column/Row"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(220, 0)
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "note name"
 
-[node name="CreateBtn" type="Button" parent="Row"]
+[node name="CreateBtn" type="Button" parent="Root/Center/Column/Row"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "✓ Create"

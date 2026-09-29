@@ -5,7 +5,6 @@ extends Control
 
 const SmokeDriver := preload("res://scripts/dev/smoke_test.gd")
 const MONO_FONT := preload("res://assets/fonts/ShareTechMono-Regular.ttf")
-const SYNC_DIALOG_SCENE := preload("res://scenes/components/sync_dialog.tscn")
 const SELECTION_OVERLAY_SCENE := preload("res://scenes/components/selection_overlay.tscn")
 
 const NOTE_TEMPLATE := """---
@@ -39,12 +38,19 @@ func _load_help_doc() -> String:
 @onready var settings_component: SettingsComponent = %SettingsPage.get_node("VerticalContainer")
 @onready var content_panel: PanelContainer = %Content
 @onready var graph_view: GraphView = %GraphView
+@onready var sync_page: SyncPage = %SyncPage
 @onready var code_edit : CodeEdit = %SourceEditor
-var settings_mode := false
+## Which full-content page owns the screen: "" or one of PAGE_*.
+var page_mode := ""
+const PAGE_SETTINGS := "settings"
+const PAGE_SYNC := "sync"
+const PAGE_NEW_NOTE := "new_note"
+const PAGE_VAULT := "vault"
+const PAGE_MEDIA := "media"
 
 var sidebar: PanelContainer
 @onready var new_dialog: NewNoteDialog = %NewNoteDialog
-@onready var vault_dialog: FileDialog = %VaultDialog
+@onready var vault_picker: VaultPicker = %VaultPicker
 var help_mode := false
 var source_mode := false
 var autosave_timer := Timer.new()
@@ -88,6 +94,7 @@ func _ready() -> void:
 			%Content as PanelContainer, toolbar, code_edit)
 	add_child(theme_component)
 	theme_component.apply()
+	_theme_dialogs()
 	layout_component.name = "LayoutComponent"
 	layout_component.root_ctl = get_node("Root")
 	layout_component.workspace_margin = get_node_or_null("Root/WorkspaceMargin")
@@ -104,9 +111,10 @@ func _ready() -> void:
 	add_child(layout_component)
 	GameManager.palette_changed.connect(func():
 		theme_component.apply()
-		if settings_mode:
+		_theme_dialogs()
+		if page_mode == PAGE_SETTINGS:
 			_show_settings()
-		else:
+		elif page_mode == "":
 			_render_preview())
 	vault_tree.save_cb = _flush_save
 	vault_tree.flash_cb = _flash
@@ -340,23 +348,27 @@ func _build_dynamic_ui() -> void:
 	more.add_item("🔗 Backlinks", 11)
 	more.add_item("🕸 Graph", 12)
 	more.add_separator()
+	# Same export entries as the Export menu, on every platform.
 	more.add_item("⬇ Save PNG", ExportComponent.ID_PNG)
 	more.add_item("⬇ Save GIF", ExportComponent.ID_GIF)
-	if OS.get_name() == "Android":
-		more.add_item("📤 Share PNG", ExportComponent.ID_SHARE_PNG)
-		more.add_item("📤 Share GIF", ExportComponent.ID_SHARE_GIF)
-		more.add_item("📤 Share Markdown", ExportComponent.ID_SHARE_MD)
-		more.add_item("📤 Share HTML", ExportComponent.ID_SHARE_HTML)
-	else:
-		more.add_item("💾 Save HTML", ExportComponent.ID_SAVE_HTML)
+	more.add_item("💾 Save HTML", ExportComponent.ID_SAVE_HTML)
+	more.add_item("📤 Share PNG", ExportComponent.ID_SHARE_PNG)
+	more.add_item("📤 Share GIF", ExportComponent.ID_SHARE_GIF)
+	more.add_item("📤 Share Markdown", ExportComponent.ID_SHARE_MD)
+	more.add_item("📤 Share HTML", ExportComponent.ID_SHARE_HTML)
 	toolbar.more_btn.get_popup().id_pressed.connect(_on_more_action)
 	toolbar.more_btn.visible = true  # always available (delete/export/etc. on desktop too)
-	# dialogs (new-note, vault picker, media picker) are scene-authored
-	# instances in Main.tscn; only their signals are connected here.
+	# pages (new note, vault picker, media picker, sync) are scene-authored
+	# instances inside %Content; only their signals are connected here.
 	new_dialog.create_requested.connect(_create_note)
-	vault_dialog.dir_selected.connect(_on_vault_selected)
+	vault_picker.folder_chosen.connect(_on_vault_selected)
 	media_dialog.media_selected.connect(_use_local_media)
 	media_dialog.device_requested.connect(_choose_device_image)
+	media_dialog.close_requested.connect(_close_page)
+	sync_page.close_requested.connect(_close_sync)
+	sync_page.bind_service(sync_service)
+	new_dialog.close_requested.connect(_close_page)
+	vault_picker.close_requested.connect(_close_page)
 
 # ------------------------------------------------------------ mobile selection handles
 
@@ -581,8 +593,8 @@ func _rm_dir(rel: String) -> void:
 
 func _on_mobile_changed(_is_mobile: bool) -> void:
 	theme_component.apply()
-	if graph_view.visible or settings_mode:
-		return  # graph/settings own the screen; fonts re-apply when they close
+	if graph_view.visible or page_mode != "":
+		return  # graph/pages own the screen; fonts re-apply when they close
 	if help_mode:
 		_show_help()
 	elif not source_mode:
@@ -590,9 +602,9 @@ func _on_mobile_changed(_is_mobile: bool) -> void:
 
 func _on_note_selected(fname: String) -> void:
 	autosave_timer.stop()
-	if settings_mode:
-		_close_settings()
-	# Continue opening the selected note after leaving settings.
+	if page_mode != "":
+		_close_page()
+	# Continue opening the selected note after leaving a page.
 	_flush_save()  # flush previous note first — never lose changes
 	GameManager.current_file = GameManager.vault_abs() + "/" + fname
 	GameManager.current_rel = fname
@@ -618,23 +630,31 @@ func _on_note_selected(fname: String) -> void:
 	status_bar.flash("Opened " + fname)
 
 func _on_new_note() -> void:
-	new_dialog.open()
+	_open_page(PAGE_NEW_NOTE, new_dialog)
+	new_dialog.begin()
 
 func _create_note() -> void:
 	var name := new_dialog.name_field.text.strip_edges().trim_suffix("/")
 	if name == "" or name.contains(".."):
 		return
 	var fname := (name if name.ends_with(".md") else name + ".md")
-	# place the new note as a sibling of the currently selected note / inside
-	# the selected folder in the vault
+	# Placement: directly below the selected row. A selected note keeps its
+	# folder and the new note lands right after it; a selected folder takes the
+	# note as its first child; with nothing selected the note goes to the vault
+	# root at the end of the list.
+	var dir := ""
+	var neighbor := ""
+	var first_child := false
 	var sel := vault_tree.selected_item()
-	if sel != null and sel.get_metadata(0) != null:
-		var sel_path := str(sel.get_metadata(0))
-		if sel_path.ends_with(".md"):
-			var dir := sel_path.get_base_dir()
-			fname = (dir + "/" if dir != "" else "") + fname
-		elif sel_path != "":
-			fname = sel_path + "/" + fname
+	if sel != null and sel != vault_tree.side_tree.get_root():
+		var sel_rel := vault_tree.node_rel(sel)
+		if sel_rel.ends_with(".md"):
+			dir = sel_rel.get_base_dir()
+			neighbor = sel_rel
+		elif sel_rel != "":
+			dir = sel_rel
+			first_child = true
+	fname = (dir + "/" if dir != "" else "") + fname
 	if not FileAccess.file_exists(GameManager.vault_abs() + "/" + fname):
 		var title := fname.get_file().trim_suffix(".md")
 		_note_tags.clear()
@@ -647,6 +667,7 @@ func _create_note() -> void:
 		_metadata_source = initialized
 	GameManager.scan_notes()
 	_refresh_list()
+	vault_tree.order_new_note(fname, dir, neighbor, first_child)
 	vault_tree.select_note(fname)
 
 func _update_delete_controls(_column: int = 0) -> void:
@@ -719,6 +740,7 @@ func _confirm_delete_parent(rel: String) -> void:
 	dlg.ok_button_text = "Cancel"
 	dlg.add_button("🗑 Delete All", false, "del_all")
 	dlg.add_button("Delete Node Only", false, "del_one")
+	DialogTheme.apply(dlg)  # confirmations match the palette like every page
 	add_child(dlg)
 	dlg.custom_action.connect(func(action: String):
 		if action == "del_all":
@@ -736,6 +758,7 @@ func _confirm_delete_leaf(rel: String) -> void:
 	dlg.dialog_text = "Delete \"%s\" permanently?\n\nThis cannot be undone." % rel
 	dlg.ok_button_text = "🗑 Delete"
 	dlg.get_cancel_button().text = "Cancel"
+	DialogTheme.apply(dlg)
 	add_child(dlg)
 	dlg.confirmed.connect(func():
 		_perform_delete(rel, false)
@@ -868,6 +891,8 @@ func _scrub_order(old_rels: Array) -> void:
 # ------------------------------------------------- mode toggle / help
 
 func _set_mode() -> void:
+	if page_mode != "":
+		return  # a page owns the screen until it closes
 	code_edit.visible = source_mode
 	edit_search.visible = source_mode
 	edit_padding.visible = source_mode
@@ -907,11 +932,13 @@ func _toggle_mode() -> void:
 	_set_mode()
 
 func _show_help() -> void:
+	if page_mode != "":
+		return  # a page owns the screen until it closes
 	_flush_save()
-	# Help behaves like opening a note: it replaces the settings page and, on
-	# mobile, collapses the tree drawer so the help content is full-screen.
-	if settings_mode:
-		_close_settings()
+	# Help behaves like opening a note: it replaces any page and, on mobile,
+	# collapses the tree drawer so the help content is full-screen.
+	if page_mode != "":
+		_close_page()
 	help_mode = true
 	GameManager.current_file = ""
 	autosave_timer.stop()
@@ -930,8 +957,10 @@ func _show_help() -> void:
 		layout_component.toggle_sidebar()
 
 func _render_preview(preserve_scroll := false) -> void:
-	if settings_mode:
+	if page_mode == PAGE_SETTINGS:
 		_show_settings()
+		return
+	if page_mode != "":
 		return
 	code_edit.visible = false
 	edit_padding.visible = false
@@ -949,17 +978,29 @@ func _render_preview(preserve_scroll := false) -> void:
 	content_host.scroll_vertical = prev_scroll
 
 func _close_settings() -> void:
-	settings_mode = false
-	if settings_page: settings_page.visible = false
-	_set_mode()
+	_close_page()
 
 func _toggle_settings() -> void:
-	if settings_mode:
-		_close_settings()
+	if page_mode == PAGE_SETTINGS:
+		_close_page()
 		return
+	_open_page(PAGE_SETTINGS, settings_page)
+	_show_settings()
+
+func _show_settings() -> void:
+	settings_component.refresh()
+
+# ------------------------------------------------- content pages (settings / sync / new note / vault)
+
+## Every page is a scene instance inside %Content, so all of them are sized
+## like an open note. Sharing one helper keeps the hide/show rules identical.
+func _pages() -> Array[Control]:
+	return [settings_page, sync_page, new_dialog, vault_picker, media_dialog]
+
+func _open_page(mode: String, page: Control) -> void:
 	_flush_save()
-	settings_mode = true
-	# Settings owns the whole screen on mobile, same as opening a note:
+	page_mode = mode
+	# A page owns the whole screen on mobile, same as opening a note:
 	# collapse the tree drawer first.
 	if layout_component.is_mobile_layout and layout_component.drawer_open:
 		layout_component.toggle_sidebar()
@@ -967,12 +1008,14 @@ func _toggle_settings() -> void:
 	code_edit.visible = false
 	edit_padding.visible = false
 	content_host.visible = false
-	settings_page.visible = true
-	_show_settings()
+	for p in _pages():
+		p.visible = p == page
 
-func _show_settings() -> void:
-	settings_component.refresh()
-	settings_page.visible = true
+func _close_page() -> void:
+	page_mode = ""
+	for p in _pages():
+		p.visible = false
+	_set_mode()
 
 # ------------------------------------------------- v2: wiki / backlinks / graph
 
@@ -1012,9 +1055,16 @@ func _show_media_dialog() -> void:
 	_cleanup_empty_media(media_dir)
 	var files: Array[String] = []
 	_collect_media_images(media_dir, files)
-	# Dialog shell (heading, scroll, device button) is scene-authored in
+	# Page shell (heading, scroll, device button) is scene-authored in
 	# scenes/components/media_dialog.tscn; only the per-file list is dynamic.
-	media_dialog.open(files)
+	_open_page(PAGE_MEDIA, media_dialog)
+	media_dialog.begin(files)
+
+## The image FileDialog is the only real Window left (it must browse files);
+## every other surface is a page that inherits the shell styling directly.
+func _theme_dialogs() -> void:
+	if image_dialog != null:
+		DialogTheme.apply(image_dialog)
 
 func _cleanup_empty_media(dir_path: String) -> void:
 	var dir := DirAccess.open(dir_path)
@@ -1044,7 +1094,6 @@ func _collect_media_images(dir_path: String, out: Array[String]) -> void:
 	out.sort()
 
 func _use_local_media(path: String) -> void:
-	media_dialog.hide()
 	var t := code_edit.text
 	var pattern := "!\\[[^\\]]*\\]\\(\\s*" + ("" if _image_target_src == "" else vault_tree._re_escape(_image_target_src)) + "\\s*\\)"
 	var m := RegEx.create_from_string(pattern).search(t)
@@ -1062,7 +1111,7 @@ func _use_local_media(path: String) -> void:
 	_render_preview()
 
 func _choose_device_image() -> void:
-	media_dialog.hide()
+	_close_page()
 	if image_dialog == null:
 		image_dialog = FileDialog.new()
 		image_dialog.name = "ImageDialog"
@@ -1078,39 +1127,13 @@ func _choose_device_image() -> void:
 		# these filters case-sensitively (camera files commonly use .JPG).
 		image_dialog.filters = ["*.png,*.PNG,*.jpg,*.JPG,*.jpeg,*.JPEG,*.webp,*.WEBP,*.gif,*.GIF ; IMAGE FILES"]
 		image_dialog.file_selected.connect(_on_image_selected)
-		_style_image_dialog()
+		DialogTheme.apply(image_dialog)
 		add_child(image_dialog)
 	var viewport_size := get_viewport().get_visible_rect().size
 	var dialog_size := Vector2i(
 		int(min(700.0, max(300.0, viewport_size.x * 0.92))),
 		int(min(500.0, max(280.0, viewport_size.y * 0.78))))
 	image_dialog.popup_centered(dialog_size)
-
-func _style_image_dialog() -> void:
-	if image_dialog == null:
-		return
-	var accent := GameManager.color("accent")
-	var accent2 := GameManager.color("accent2")
-	var panel := GameManager.color("panel")
-	var text := GameManager.color("text")
-	var bg := StyleBoxFlat.new()
-	bg.bg_color = panel
-	bg.border_color = accent
-	bg.set_border_width_all(2)
-	bg.corner_radius_top_left = 8
-	bg.corner_radius_top_right = 8
-	bg.corner_radius_bottom_left = 8
-	bg.corner_radius_bottom_right = 8
-	bg.content_margin_left = 12
-	bg.content_margin_right = 12
-	bg.content_margin_top = 10
-	bg.content_margin_bottom = 10
-	image_dialog.add_theme_stylebox_override("panel", bg)
-	image_dialog.add_theme_color_override("font_color", text)
-	image_dialog.add_theme_color_override("font_hover_color", accent2)
-	image_dialog.add_theme_color_override("font_selected_color", text)
-	image_dialog.add_theme_color_override("accent_color", accent)
-	image_dialog.add_theme_font_override("font", MONO_FONT)
 
 func _copy_android_content_uri(uri_text: String, dest: String) -> bool:
 	print("[NN image] importing content URI")
@@ -1273,15 +1296,17 @@ func _refresh_backlinks() -> void:
 	vault_tree.refresh_backlinks()
 
 func _toggle_graph() -> void:
+	if page_mode != "" and page_mode != PAGE_SETTINGS:
+		return  # a page owns the screen until it closes
 	if graph_view.visible:
 		graph_view.visible = false
 		content_host.visible = not source_mode
 		return
 	_flush_save()
-	# The graph behaves like opening a note: leave settings and, on mobile,
+	# The graph behaves like opening a note: leave a page and, on mobile,
 	# collapse the tree drawer so the graph fills the screen.
-	if settings_mode:
-		_close_settings()
+	if page_mode != "":
+		_close_page()
 	if layout_component.is_mobile_layout and layout_component.drawer_open:
 		layout_component.toggle_sidebar()
 	code_edit.visible = false
@@ -1292,28 +1317,35 @@ func _toggle_graph() -> void:
 # ------------------------------------------------------------ vault / sync
 
 func _on_open_vault() -> void:
-	vault_dialog.current_dir = GameManager.vault_abs()
-	vault_dialog.popup_centered(Vector2i(720, 480))
+	# Same folder-browser page on every platform: the OS file dialog does not
+	# fit a phone and splits the visuals in two.
+	_open_page(PAGE_VAULT, vault_picker)
+	vault_picker.begin(GameManager.vault_abs())
 
 func _on_vault_selected(path: String) -> void:
+	if page_mode == PAGE_VAULT:
+		_close_page()
 	_flush_save()
 	if GameManager.set_vault_dir(path):
 		# Settings is a live page; refresh its labels immediately after the
 		# vault switch instead of leaving the previous path cached on screen.
-		if settings_mode:
+		if page_mode == PAGE_SETTINGS:
 			settings_component.refresh()
 		_refresh_list()
 		_flash("Vault: " + path)
 	else:
 		_flash("✗ Not a folder: " + path)
 
+## Sync is a page (like settings), not a dialog: on mobile it owns the screen.
 func _on_sync() -> void:
-	_flush_save()
-	var dlg: SyncDialog = SYNC_DIALOG_SCENE.instantiate()
-	dlg.name = "SyncDialog"
-	dlg.service = sync_service
-	add_child(dlg)
-	dlg.popup_centered()  # size set in _ready, clamped to the screen
+	if page_mode == PAGE_SYNC:
+		return
+	sync_page.bind_service(sync_service)
+	_open_page(PAGE_SYNC, sync_page)
+	sync_page.open()
+
+func _close_sync() -> void:
+	_close_page()
 
 # ------------------------------------------------------------ exporting
 

@@ -1,64 +1,65 @@
-class_name SyncDialog
-extends AcceptDialog
+class_name SyncPage
+extends MarginContainer
+## LAN sync as a full in-app page (same pattern as the settings page), not a
+## dialog: on mobile it owns the whole visible screen. The host shows/hides it
+## and connects close_requested. The page never frees itself — main owns
+## `service` for background auto-sync, so hiding the page must not stop it.
 
-var service: SyncService  # optional injected instance (main owns it for auto-sync)
+signal close_requested
+
+var service: SyncService  # injected instance (main owns it for auto-sync)
 var _service: SyncService
-var _device_label: Label
-var _pin_label: Label
-var _discovery_btn: Button
-var _peer_list: ItemList
-var _pin_edit: LineEdit
 var _send_thread: Thread
 var _send_result: Dictionary = {}
 var _send_running := false
 var _send_peer := ""
-var _log: RichTextLabel
-var _send_btn: Button
-var _status_label: Label
+
+@onready var _device_label: Label = %DeviceLabel
+@onready var _pin_label: Label = %PinLabel
+@onready var _discovery_btn: Button = %DiscoveryToggle
+@onready var _peer_list: ItemList = %PeerList
+@onready var _pin_edit: LineEdit = %PinEdit
+@onready var _send_btn: Button = %SendBtn
+@onready var _log: RichTextLabel = %SyncLog
+@onready var _status_label: Label = %StatusLabel
+@onready var _close_btn: Button = %CloseButton
 
 func _ready() -> void:
-	_device_label = get_node("Root/DeviceRow/DeviceLabel")
-	_pin_label = get_node("Root/PinLabel")
-	_discovery_btn = get_node("Root/Columns/DiscoveryToggle")
-	_peer_list = get_node("Root/Columns/PeerList")
-	_pin_edit = get_node("Root/Columns/PinEdit")
-	_send_btn = get_node("Root/Columns/SendBtn")
-	_log = get_node("Root/Columns/SyncLog")
-	_status_label = get_node("Root/StatusLabel")
+	visible = false
 	_discovery_btn.toggled.connect(_on_discovery_toggled)
 	_send_btn.pressed.connect(_on_send)
-
-	title = "LAN Sync"
-	# fit small screens: the fixed 720x460 overflows portrait phones
-	var vp: Vector2i = get_viewport().get_visible_rect().size
-	var narrow := vp.x < 700
-	var dialog_w := mini(720, int(vp.x * (0.86 if narrow else 0.92)))
-	var dialog_h := mini(640 if narrow else 460, int(vp.y * (0.84 if narrow else 0.70)))
-	size = Vector2i(maxi(260, dialog_w), maxi(360, dialog_h))
-	var pal: Dictionary = GameManager.palette()
-	var panel := StyleBoxFlat.new()
-	panel.bg_color = pal.get("panel", Color("1d0d3a"))
-	panel.border_color = pal.get("accent4", Color("8a2be2"))
-	panel.set_border_width_all(1)
-	panel.corner_radius_top_left = 8
-	panel.corner_radius_top_right = 8
-	panel.corner_radius_bottom_left = 8
-	panel.corner_radius_bottom_right = 8
-	add_theme_stylebox_override("panel", panel)
-	add_theme_color_override("font_color", pal.get("text", Color.WHITE))
-
-	_pin_label.text = "Pairing words: " + GameManager.vault_secret
-	_pin_edit.text = ""
+	_close_btn.pressed.connect(func(): close_requested.emit())
+	# A scene instance is already in the tree, so main cannot inject `service`
+	# before _ready: bind_service() rebinds to the host's instance later. A
+	# standalone instantiation (tests) falls back to owning its own service.
 	_service = service if service != null else SyncService.new()
 	if service == null:
 		_service.name = "SyncService"
 		add_child(_service)
+	_attach_service()
+
+## Adopt the host's SyncService (needed because the page is a persistent scene
+## instance whose _ready runs before main's). Safe to call more than once.
+func bind_service(s: SyncService) -> void:
+	if s == null or s == _service:
+		return
+	if _service != null and _service != service and is_instance_valid(_service) and _service.get_parent() == self:
+		_service.queue_free()
+	_service = s
+	_attach_service()
+
+func _attach_service() -> void:
+	if _service.peers_changed.is_connected(_refresh_peers):
+		return
 	_service.peers_changed.connect(_refresh_peers)
 	_service.sync_done.connect(_on_sync_done)
 	_service.sync_failed.connect(_on_sync_failed)
-	close_requested.connect(_on_dialog_closed)
-	canceled.connect(_on_dialog_closed)
 
+## Called by the host every time the page is shown.
+func open() -> void:
+	var pal: Dictionary = GameManager.palette()
+	_pin_label.text = "Pairing words: " + GameManager.vault_secret
+	_pin_edit.text = ""
 	var paired_text := "Not paired"
 	if not GameManager.paired_peers.is_empty():
 		var names: Array[String] = []
@@ -67,6 +68,7 @@ func _ready() -> void:
 		paired_text = "Paired with: " + ", ".join(names)
 	_device_label.text = "Device: " + _service.device_name + "\nID: " + GameManager.device_id + "\nVault: " + GameManager.vault_id + "\n" + paired_text
 	_log.append_text("[color=%s]Share your pairing words with the other device once. Select its vault, enter its words there, and pair. Trusted devices reconnect automatically.[/color]\n" % _css(pal.get("accent2", Color.GRAY)))
+	visible = true
 
 func _css(c: Color) -> String:
 	return "#%02x%02x%02x" % [int(c.r * 255), int(c.g * 255), int(c.b * 255)]
@@ -97,7 +99,6 @@ func _refresh_peers() -> void:
 	var i := 0
 	for ip in _service.peers.keys():
 		var p: Dictionary = _service.peers[ip]
-		var peer_id := str(p.get("id", ""))
 		_peer_list.add_item("◆ Vault %s\n%s" % [str(p.get("vault_id", "unknown")), str(p["name"])])
 		_peer_list.set_item_metadata(i, ip)
 		if ip == selected_ip:
@@ -157,19 +158,11 @@ func _process(_delta: float) -> void:
 	else:
 		_status_label.text = "Sync failed: %s" % str(_send_result.get("error", "?"))
 		_log.append_text("[color=red]%s[/color]\n" % _status_label.text)
-	if not visible:
-		queue_free()
-
-func _on_dialog_closed() -> void:
-	if _send_thread == null:
-		queue_free()
-	else:
-		hide()  # worker finishes without blocking the UI; _process joins it
 
 func _exit_tree() -> void:
 	if _send_thread != null:
 		# Only app teardown reaches this with an active worker. The TCP waits
-		# have timeouts; normal dialog closing defers freeing until it finishes.
+		# have timeouts; hiding the page defers nothing and never blocks the UI.
 		_send_thread.wait_to_finish()
 		_send_thread = null
 

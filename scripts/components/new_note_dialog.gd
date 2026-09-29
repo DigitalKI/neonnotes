@@ -1,24 +1,27 @@
 class_name NewNoteDialog
-extends AcceptDialog
-## Scene-authored new-note dialog. Static layout lives in
-## scenes/components/new_note_dialog.tscn; main.gd only connects
-## create_requested and reads name_field.
+extends MarginContainer
+## New-note page: a scene instance inside %Content, sized exactly like the
+## settings and sync pages (not an overlay). main.gd shows it with the shared
+## page helper, connects create_requested/close_requested, and reads
+## name_field. Layout is authored in scenes/components/new_note_dialog.tscn.
 
 signal create_requested
+signal close_requested
 
 @onready var name_field: LineEdit = %NameField
 @onready var create_btn: Button = %CreateBtn
+@onready var close_btn: Button = %CloseButton
 
 func _ready() -> void:
-	# OK button is unused; Enter in the field or the Create button submits.
-	get_ok_button().visible = false
+	visible = false
 	name_field.text_submitted.connect(func(_t: String): _submit())
 	create_btn.pressed.connect(_submit)
+	close_btn.pressed.connect(func(): close_requested.emit())
 
 func _submit() -> void:
 	create_requested.emit()
-	hide()
 
-func open() -> void:
+## Called by the host when the page is shown.
+func begin() -> void:
 	name_field.text = ""
-	popup_centered(Vector2i(400, 130))
+	name_field.grab_focus()

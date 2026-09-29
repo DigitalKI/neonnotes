@@ -155,9 +155,48 @@ func _run_smoke() -> void:
 	fails += _check(m.graph_view.visible, "graph view visible")
 	var svc: Node = SyncService.new()
 	fails += _check(svc.gen_vault_secret().split("-").size() == 8, "pairing phrase gen")
-	var dlg: Node = load("res://scenes/components/sync_dialog.tscn").instantiate()
-	m.add_child(dlg)
-	fails += _check(dlg.get_child_count() > 0, "sync dialog built")
+	var sync_scene: Node = load("res://scenes/components/sync_page.tscn").instantiate()
+	m.add_child(sync_scene)
+	fails += _check(sync_scene.get_child_count() > 0, "sync page built")
+	sync_scene.queue_free()
+	# Pages (settings / sync / new note / vault picker / media) are scene instances
+	# inside %Content, so they are sized like an open note.
+	m._open_page(m.PAGE_NEW_NOTE, m.new_dialog)
+	m.new_dialog.begin()
+	fails += _check(m.new_dialog.visible and m.new_dialog.get_parent() == m.content_panel
+		and not m.content_host.visible, "new-note page fills the content area")
+	m._open_page(m.PAGE_VAULT, m.vault_picker)
+	m.vault_picker.begin(GameManager.vault_abs())
+	fails += _check(m.vault_picker.visible and not m.new_dialog.visible,
+		"vault picker page replaces the new-note page")
+	m._close_page()
+	await m.get_tree().process_frame
+	fails += _check(not m.vault_picker.visible and m.content_host.visible, "closing a page restores the note")
+	# New notes land directly below the selected row in the custom order.
+	var anchor_note := ""
+	for n in GameManager.notes:
+		if n.get_base_dir() == "" and not n.begins_with("_"):
+			anchor_note = n
+			break
+	m.vault_tree.select_note(anchor_note, false)
+	m.new_dialog.name_field.text = "placed_test"
+	m._create_note()
+	var root_order: Array = GameManager.order.get("", [])
+	var ii := root_order.find(anchor_note)
+	fails += _check(ii >= 0 and ii + 1 < root_order.size() and root_order[ii + 1] == "placed_test.md",
+		"new note is ordered directly below the selected note")
+	# The media picker is the same page shape on every platform.
+	m._open_page(m.PAGE_MEDIA, m.media_dialog)
+	m.media_dialog.begin([])
+	fails += _check(m.media_dialog.visible and not m.vault_picker.visible and m.media_dialog.empty_label.visible,
+		"media page opens with empty state")
+	m._close_page()
+	await m.get_tree().process_frame
+	# No Window-based presentation is left for in-app UI.
+	fails += _check(m.vault_picker.get_parent() == m.content_panel
+		and m.new_dialog.get_parent() == m.content_panel
+		and m.media_dialog.get_parent() == m.content_panel,
+		"all in-app surfaces are content pages (no dialogs)")
 	# v3: tags, image blocks, escapes, device id
 	GameManager.write_note("tagtest.md", "---\ntitle: \"TT\"\ntags: alpha, beta\n---\n\n![]( )\n\n\\*not bold\\* \\\\%\\%no glitch\\%\\%\n")
 	GameManager.scan_notes()
@@ -201,7 +240,6 @@ func _run_smoke() -> void:
 			nl_para = b["text"]
 	fails += _check(nl_para.contains("\n"), "editor newline kept in paragraph")
 	fails += _check(PB._inline(PB.escape(nl_para)).contains("\n"), "newline survives inline transforms")
-	dlg.queue_free()
 	print("SMOKE RESULT: %s (%d fails)" % ["FAIL" if fails > 0 else "OK", fails])
 	m.get_tree().quit(1 if fails > 0 else 0)
 

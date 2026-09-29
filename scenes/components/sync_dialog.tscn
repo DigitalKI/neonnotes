@@ -1,6 +1,6 @@
-[gd_scene format=3 uid="uid://cw2yyiymf2cf5"]
+[gd_scene format=3 uid="uid://b0fo1fed2cvxh"]
 
-[ext_resource type="Script" uid="uid://xjncuhbl7svf" path="res://scripts/sync/sync_dialog.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/sync/sync_dialog.gd" id="1"]
 
 [node name="SyncDialog" type="AcceptDialog" unique_id=1772373089]
 oversampling_override = 1.0
