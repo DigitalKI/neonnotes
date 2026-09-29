@@ -19,7 +19,7 @@ signal delete_requested
 var save_cb: Callable
 var flash_cb: Callable
 var moved_cb: Callable
-var _tree_menu := PopupMenu.new()
+@onready var _tree_menu: PopupMenu = %TreeMenu
 var _press_pos := Vector2.ZERO
 var _press_item: TreeItem
 var _press_item_toggle := false
@@ -138,7 +138,6 @@ func build() -> void:
 	side_tree.gui_input.connect(_on_tree_gui_input)
 	# drag notes/folders between folders + reorder rows (registered once; see
 	# refresh() and the Android repeat-drag gotcha in PROJECT_MEMORY.md)
-	_tree_menu.add_item("🗑 Delete…", 1)
 	_tree_menu.id_pressed.connect(func(id: int):
 		if id == 1:
 			delete_requested.emit())

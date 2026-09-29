@@ -2,19 +2,10 @@ class_name StatusBarComponent
 extends PanelContainer
 ## Compact status bar with a tiny sync health indicator.
 @onready var label: Label = %StatusLabel
+@onready var _sync_dot: Label = %SyncStatus
 var sync_service: SyncService
-var _sync_dot: Label
 
 func _ready() -> void:
-	_sync_dot = Label.new()
-	_sync_dot.name = "SyncStatus"
-	_sync_dot.text = "●"
-	_sync_dot.add_theme_font_size_override("font_size", 10)
-	_sync_dot.custom_minimum_size = Vector2(14, 14)
-	_sync_dot.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_sync_dot.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	add_child(_sync_dot)
-	move_child(_sync_dot, 0)
 	set_sync_service(null)
 
 func set_sync_service(service: SyncService) -> void:

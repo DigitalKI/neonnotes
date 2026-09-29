@@ -14,3 +14,4 @@ extends HFlowContainer
 @onready var backlinks_btn: Button = %BacklinksBtn
 @onready var graph_btn: Button = %GraphBtn
 @onready var more_btn: MenuButton = %MoreBtn
+@onready var more_menu: PopupMenu = %MoreMenu

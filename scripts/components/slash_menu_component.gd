@@ -28,21 +28,13 @@ const SLASH_ITEMS := [
 var code_edit: CodeEdit
 var save_cb: Callable
 
-var _panel: PopupPanel
-var _list: ItemList
+@onready var _panel: PopupPanel = %SlashPanel
+@onready var _list: ItemList = %SlashList
 
 
-func build(p_code_edit: CodeEdit, p_save_cb: Callable) -> void:
-	code_edit = p_code_edit
-	save_cb = p_save_cb
-	_panel = PopupPanel.new()
-	_panel.name = "SlashPanel"
-	_list = ItemList.new()
-	_list.name = "SlashList"
-	_list.max_columns = 2
-	_list.fixed_column_width = 175
-	_list.auto_height = true
-	_list.custom_minimum_size = Vector2(360, 0)
+func _ready() -> void:
+	# Panel/list are authored in slash_menu.tscn; the rows stay data-driven
+	# (SLASH_ITEMS).
 	for i in SLASH_ITEMS.size():
 		_list.add_item(SLASH_ITEMS[i][0])
 	# Use item_clicked rather than item_selected: ItemList does not emit
@@ -52,8 +44,11 @@ func build(p_code_edit: CodeEdit, p_save_cb: Callable) -> void:
 		_panel.hide()
 		_list.deselect_all()
 		_on_action(idx))
-	_panel.add_child(_list)
-	add_child(_panel)
+
+
+func build(p_code_edit: CodeEdit, p_save_cb: Callable) -> void:
+	code_edit = p_code_edit
+	save_cb = p_save_cb
 
 
 func menu_height() -> float:

@@ -58,7 +58,7 @@ var sync_service: SyncService
 var help_folder := "Help"  # sidebar folder items get this metadata
 var theme_component := ThemeComponent.new()
 var layout_component := LayoutComponent.new()
-var slash_menu := SlashMenuComponent.new()
+var slash_menu: SlashMenuComponent = preload("res://scenes/components/slash_menu.tscn").instantiate()
 @onready var export_component: ExportComponent = %ExportMenu
 @onready var title_panel: PanelContainer = %TitlePanel
 @onready var title_input: LineEdit = %TitleInput
@@ -336,27 +336,15 @@ func _build_dynamic_ui() -> void:
 		authored_popup.popup())
 
 
-	# "⋮ more" overflow menu (shown when the toolbar is cramped)
-	# MenuButton uses its own auto-created popup — a plain child PopupMenu
-	# named in the scene is never shown, which made this menu appear empty.
-	var more: PopupMenu = toolbar.more_btn.get_popup()
-	more.add_item("💾 Save Now", 30)
-	more.add_separator()
-	more.add_item("🗑 Delete Note…", 31)
-	more.add_separator()
-	more.add_item("? Help", 10)
-	more.add_item("🔗 Backlinks", 11)
-	more.add_item("🕸 Graph", 12)
-	more.add_separator()
-	# Same export entries as the Export menu, on every platform.
-	more.add_item("⬇ Save PNG", ExportComponent.ID_PNG)
-	more.add_item("⬇ Save GIF", ExportComponent.ID_GIF)
-	more.add_item("💾 Save HTML", ExportComponent.ID_SAVE_HTML)
-	more.add_item("📤 Share PNG", ExportComponent.ID_SHARE_PNG)
-	more.add_item("📤 Share GIF", ExportComponent.ID_SHARE_GIF)
-	more.add_item("📤 Share Markdown", ExportComponent.ID_SHARE_MD)
-	more.add_item("📤 Share HTML", ExportComponent.ID_SHARE_HTML)
-	toolbar.more_btn.get_popup().id_pressed.connect(_on_more_action)
+	# "⋮ more" overflow menu — items are authored in toolbar.tscn (%MoreMenu,
+	# ids owned by more_menu.gd). MenuButton never shows a scene-authored child
+	# popup itself, so open it from the button's pressed signal (same pattern
+	# as the export menu).
+	var more: PopupMenu = toolbar.more_menu
+	toolbar.more_btn.pressed.connect(func():
+		more.position = Vector2i(int(toolbar.more_btn.global_position.x), int(toolbar.more_btn.global_position.y + toolbar.more_btn.size.y))
+		more.popup())
+	more.id_pressed.connect(_on_more_action)
 	toolbar.more_btn.visible = true  # always available (delete/export/etc. on desktop too)
 	# pages (new note, vault picker, media picker, sync) are scene-authored
 	# instances inside %Content; only their signals are connected here.
@@ -674,8 +662,8 @@ func _update_delete_controls(_column: int = 0) -> void:
 	var it := vault_tree.side_tree.get_selected()
 	var root_selected := it == null or it == vault_tree.side_tree.get_root()
 	vault_tree.tree_delete_btn.disabled = root_selected
-	var popup := toolbar.more_btn.get_popup()
-	var idx := popup.get_item_index(31)
+	var popup: PopupMenu = toolbar.more_menu
+	var idx := popup.get_item_index(MoreMenuComponent.ID_DELETE_NOTE)
 	if idx >= 0:
 		popup.set_item_disabled(idx, root_selected)
 
@@ -1376,17 +1364,17 @@ func _flash(msg: String) -> void:
 
 func _on_more_action(id: int) -> void:
 	match id:
-		30:
+		MoreMenuComponent.ID_SAVE_NOW:
 			_flush_save()
 			_flash("✓ Saved")
-		31:
+		MoreMenuComponent.ID_DELETE_NOTE:
 			if not vault_tree.side_tree.get_selected() == vault_tree.side_tree.get_root():
 				_delete_current_note()
-		10:
+		MoreMenuComponent.ID_HELP:
 			_show_help()
-		11:
+		MoreMenuComponent.ID_BACKLINKS:
 			_toggle_backlinks()
-		12:
+		MoreMenuComponent.ID_GRAPH:
 			_toggle_graph()
 		_:
 			export_component.handle_action(id)

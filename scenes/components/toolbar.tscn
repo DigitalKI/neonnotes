@@ -1,6 +1,7 @@
 [gd_scene format=3]
 
 [ext_resource type="Script" path="res://scripts/components/toolbar_component.gd" id="1_comp"]
+[ext_resource type="Script" path="res://scripts/components/more_menu.gd" id="2_more"]
 [ext_resource type="FontFile" path="res://assets/fonts/Orbitron.ttf" id="2_orb"]
 
 [node name="Toolbar" type="HFlowContainer"]
@@ -69,3 +70,35 @@ text = "⋮"
 [node name="MoreMenu" type="PopupMenu" parent="MoreBtn"]
 unique_name_in_owner = true
 oversampling_override = 1.0
+script = ExtResource("2_more")
+item_count = 15
+item_0/text = "💾 Save Now"
+item_0/id = 30
+item_1/text = ""
+item_1/separator = true
+item_2/text = "🗑 Delete Note…"
+item_2/id = 31
+item_3/text = ""
+item_3/separator = true
+item_4/text = "? Help"
+item_4/id = 10
+item_5/text = "🔗 Backlinks"
+item_5/id = 11
+item_6/text = "🕸 Graph"
+item_6/id = 12
+item_7/text = ""
+item_7/separator = true
+item_8/text = "⬇ Save PNG"
+item_8/id = 0
+item_9/text = "⬇ Save GIF"
+item_9/id = 1
+item_10/text = "💾 Save HTML"
+item_10/id = 6
+item_11/text = "📤 Share PNG"
+item_11/id = 2
+item_12/text = "📤 Share GIF"
+item_12/id = 3
+item_13/text = "📤 Share Markdown"
+item_13/id = 4
+item_14/text = "📤 Share HTML"
+item_14/id = 5

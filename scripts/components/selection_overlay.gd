@@ -11,12 +11,15 @@ const HANDLE_RADIUS := 10.0
 const BAR_MARGIN := 8.0
 
 var _editor: CodeEdit
-var _handle_start: Control
-var _handle_end: Control
-var _action_bar: HBoxContainer
-var _btn_cut: Button
-var _btn_copy: Button
-var _btn_paste: Button
+
+## Handles + action bar are authored in selection_overlay.tscn; handle
+## rendering (draw signal), touch routing and positioning stay in code.
+@onready var _handle_start: Control = %HandleStart
+@onready var _handle_end: Control = %HandleEnd
+@onready var _action_bar: HBoxContainer = %ActionBar
+@onready var _btn_cut: Button = %CutBtn
+@onready var _btn_copy: Button = %CopyBtn
+@onready var _btn_paste: Button = %PasteBtn
 
 ## 0 = none, 1 = start handle, 2 = end handle
 var _drag_which := 0
@@ -28,48 +31,11 @@ var _connected := false
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_build_ui()
-	visible = false
-
-
-func _build_ui() -> void:
-	_handle_start = _make_handle("HandleStart")
-	_handle_end = _make_handle("HandleEnd")
 	_attach_handle_input(_handle_start, 1)
 	_attach_handle_input(_handle_end, 2)
-	add_child(_handle_start)
-	add_child(_handle_end)
-
-	_action_bar = HBoxContainer.new()
-	_action_bar.name = "ActionBar"
-	_action_bar.mouse_filter = Control.MOUSE_FILTER_STOP
-	_action_bar.add_theme_constant_override("separation", 6)
-	_btn_cut = _make_action_button("Cut", "cut")
-	_btn_copy = _make_action_button("Copy", "copy")
-	_btn_paste = _make_action_button("Paste", "paste")
-	_action_bar.add_child(_btn_cut)
-	_action_bar.add_child(_btn_copy)
-	_action_bar.add_child(_btn_paste)
-	add_child(_action_bar)
-
-
-func _make_handle(node_name: String) -> Control:
-	var h := Control.new()
-	h.name = node_name
-	h.custom_minimum_size = HANDLE_SIZE
-	h.size = HANDLE_SIZE
-	h.mouse_filter = Control.MOUSE_FILTER_STOP
-	h.draw.connect(_draw_handle.bind(h))
-	return h
-
-
-func _make_action_button(label: String, id: String) -> Button:
-	var b := Button.new()
-	b.name = label + "Btn"
-	b.text = label
-	b.focus_mode = Control.FOCUS_NONE
-	b.pressed.connect(_on_action_pressed.bind(id))
-	return b
+	_handle_start.draw.connect(_draw_handle.bind(_handle_start))
+	_handle_end.draw.connect(_draw_handle.bind(_handle_end))
+	visible = false
 
 
 func _accent() -> Color:
