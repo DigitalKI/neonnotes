@@ -47,10 +47,12 @@ func _check_media_import() -> void:
 	# collisions with a numeric suffix.
 	var tmp := "/tmp/nn-media-unit-test"
 	DirAccess.make_dir_recursive_absolute(tmp)
-	DirAccess.remove_absolute(tmp.path_join("a.png"))
 	var d1 := MediaImport.media_dest_for(tmp, "image%3A2117.png", false)
 	_check(d1 == tmp.path_join("image-2117.png"), "SAF stem sanitized")
-	FileAccess.open(d1, FileAccess.WRITE).store_byte(0)
+	var fh := FileAccess.open(d1, FileAccess.WRITE)
+	if fh != null:
+		fh.store_8(0)
+		fh.close()
 	var d2 := MediaImport.media_dest_for(tmp, "image%3A2117.png", false)
 	_check(d2 == tmp.path_join("image-2117-2.png"), "collision suffix")
 	var d3 := MediaImport.media_dest_for(tmp, "photo.jpg", true)

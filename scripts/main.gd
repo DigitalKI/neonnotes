@@ -243,7 +243,7 @@ func _prepare_smoke_vault() -> void:
 	GameManager.current_file = ""
 	GameManager.current_rel = ""
 	GameManager.order.clear()
-	_rm_dir("")
+	NoteCrud.rm_dir("")
 	DirAccess.make_dir_recursive_absolute(GameManager.vault_abs())
 
 # ------------------------------------------------------------ dynamic UI
@@ -567,18 +567,6 @@ func _add_note_tag() -> void:
 	_refresh_note_tag_chips()
 	_flush_save()
 
-## Recursively delete a vault directory (smoke-test fixture reset + folder deletes).
-func _rm_dir(rel: String) -> void:
-	var abs := GameManager.vault_abs().path_join(rel)
-	if not DirAccess.dir_exists_absolute(abs):
-		return
-	for f in DirAccess.get_files_at(abs):
-		DirAccess.remove_absolute(abs.path_join(f))
-	for d in DirAccess.get_directories_at(abs):
-		_rm_dir(rel + "/" + d)
-		DirAccess.remove_absolute(abs.path_join(d))
-	DirAccess.remove_absolute(abs)
-
 func _on_mobile_changed(_is_mobile: bool) -> void:
 	theme_component.apply()
 	if graph_view.visible or page_mode != "":
@@ -782,13 +770,13 @@ func _perform_delete(rel: String, keep_children: bool = false) -> void:
 		var comp_note := folder_rel + ".md"
 		if FileAccess.file_exists(vault.path_join(comp_note)):
 			DirAccess.remove_absolute(vault.path_join(comp_note))
-			_erase_note_meta(comp_note)
+			NoteCrud.erase_note_meta(comp_note)
 			if GameManager.current_rel == comp_note:
 				GameManager.current_file = ""
 				GameManager.current_rel = ""
 				code_edit.text = ""
 
-		_scrub_order(moved)
+		NoteCrud.scrub_order(moved)
 		vault_tree.prune_empty_dirs()
 		GameManager.scan_notes()
 		_refresh_list()
@@ -798,21 +786,10 @@ func _perform_delete(rel: String, keep_children: bool = false) -> void:
 		return
 
 	# Delete all (node / folder / note / branch)
-	var affected: Array[String] = []
-	var note_rel := folder_rel + ".md"
-	if FileAccess.file_exists(vault.path_join(note_rel)):
-		affected.append(note_rel)
-	if rel.ends_with(".md") and FileAccess.file_exists(vault.path_join(rel)) and not affected.has(rel):
-		affected.append(rel)
-
-	for n in GameManager.notes:
-		var n_str := str(n)
-		if n_str.get_base_dir() == folder_rel or n_str.begins_with(folder_rel + "/"):
-			if not affected.has(n_str):
-				affected.append(n_str)
+	var affected := NoteCrud.compute_delete_set(rel)
 
 	if DirAccess.dir_exists_absolute(vault.path_join(folder_rel)):
-		_rm_dir(folder_rel)
+		NoteCrud.rm_dir(folder_rel)
 
 	for f in affected:
 		var abs_f := vault.path_join(f)
@@ -828,8 +805,8 @@ func _perform_delete(rel: String, keep_children: bool = false) -> void:
 		code_edit.text = ""
 
 	for n in affected:
-		_erase_note_meta(n)
-	_scrub_order(affected)
+		NoteCrud.erase_note_meta(n)
+	NoteCrud.scrub_order(affected)
 	if sync_service:
 		for deleted_path in affected:
 			sync_service.note_deleted(deleted_path)
@@ -857,24 +834,6 @@ func _perform_delete(rel: String, keep_children: bool = false) -> void:
 			vault_tree.select_note(next_note)
 
 	_flash("🗑 Deleted " + rel)
-
-## Forget a note's cached metadata (notes/titles/tags).
-func _erase_note_meta(rel: String) -> void:
-	GameManager.notes.erase(rel)
-	GameManager.titles.erase(rel)
-	GameManager.tags.erase(rel)
-
-## Remove stale relative paths from the persisted custom order.
-func _scrub_order(old_rels: Array) -> void:
-	var changed := false
-	for dir in GameManager.order.keys():
-		var lst: Array = GameManager.order[dir]
-		for r in old_rels:
-			if lst.has(r):
-				lst.erase(r)
-				changed = true
-	if changed:
-		GameManager.save_order()
 
 # ------------------------------------------------- mode toggle / help
 

@@ -85,7 +85,7 @@ func _run_smoke() -> void:
 	GameManager.scan_notes()
 	fails += _check(GameManager.notes.has("sub.md"), "folder without companion note gets one auto-created")
 	# tree drag/move semantics (the same calls _tree_drop make)
-	m._rm_dir("dnd")  # reset fixture from previous runs
+	NoteCrud.rm_dir("dnd")  # reset fixture from previous runs
 	GameManager.write_note("dnd/drag_a.md", "---\ntitle: \"Drag A\"\n---\n\n[[blue]] in Help\n")
 	GameManager.write_note("dnd/Help/blue.md", "---\ntitle: \"blue\"\n---\n\npoints at [[dnd/drag_a]]\n")
 	GameManager.write_note("dnd/Help/child.md", "---\ntitle: \"child\"\n---\n\nx\n")
