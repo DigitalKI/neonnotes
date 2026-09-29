@@ -83,6 +83,17 @@ _Last updated: 2026-09-29 · Godot 4.7 · renderer: gl_compatibility_
   pages with `begin()`; `MediaDialog` is a page too (`begin(files)`).
   `SyncPage.bind_service()` adopts main's SyncService (a persistent instance's
   `_ready` runs before main's, so injection at `_ready` is impossible).
+- Remaining code-built UI converted to scenes (2026-09-29): the ⋮ overflow
+  menu items are serialized in `toolbar.tscn` (`%MoreMenu`, ids owned by
+  `more_menu.gd` `MoreMenuComponent.ID_*`, opened from `MoreBtn.pressed` like
+  the export menu); the slash menu panel/list are authored in
+  `slash_menu.tscn` (rows stay data-driven from `SLASH_ITEMS`); the status bar
+  sync dot is the authored `%SyncStatus` label; SelectionOverlay handles +
+  Cut/Copy/Paste bar are authored in `selection_overlay.tscn` (button presses
+  via scene connections; handle drawing/touch routing stay in code); the vault
+  tree context menu is authored as `%TreeMenu` in `side_panel.tscn`. Backlink
+  rows, tag chips and drag previews remain intentionally code-built
+  (data-driven).
 - New-note placement: the note is ordered **directly below the selected row**
   (selected note → same folder, right after it; selected folder → first child;
   nothing selected → vault root, appended) via
@@ -119,8 +130,8 @@ _Last updated: 2026-09-29 · Godot 4.7 · renderer: gl_compatibility_
   (`name-2.md`) after sync merges. Multi-vault sync state persists per vault in
   `user://sync_state.json`. No transport encryption yet. The headless mobile-tree-touch test fails on this
   machine (null viewport texture / mismatched tree taps), independently of sync.
-  The smoke test also fails on this machine: it expects a 0.8 s autosave
-  debounce but `main.gd` uses 0.5 s (stale check, unrelated to sync).
+  The smoke debounce check was fixed 2026-09-29 (0.5 s) and smoke now passes;
+  the tree-touch failure remains the only known suite failure.
 
 ## 4. Coding patterns & conventions (project-specific)
 
@@ -253,8 +264,9 @@ _These OVERRIDE the skill's defaults for this project._
 - Godot `bind()`/`listen()` return `Error` enums, not bools — always `!= OK`.
 - `Tree.enable_drag_unfolding` (default true) auto-unfolds folders mid-drag —
   disabled in `VaultTreeComponent.build()`.
-- Non-`unique_name_in_owner` child PopupMenu nodes are never shown by
-  MenuButton — author "⋮ More" items in code.
+- MenuButton never shows a scene-authored child PopupMenu itself — open it
+  from the button's `pressed` signal (pattern used by export_menu.tscn and the
+  ⋮ `%MoreMenu`); do NOT populate its auto-created `get_popup()` in code.
 - `_flush_save` skips when the editor is hidden; autosave Timer (0.3 s) is
   only a safety net; `WM_CLOSE_REQUEST` also flushes.
 - Android image import: `content://` URI → `FileAccess.open(uri)` +
