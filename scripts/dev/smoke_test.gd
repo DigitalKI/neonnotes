@@ -133,8 +133,8 @@ func _run_smoke() -> void:
 	# must not write until the idle period or an explicit transition flush.
 	m.code_edit.text = "delayed first"
 	m._on_text_changed()
-	fails += _check(is_equal_approx(m.autosave_timer.wait_time, 0.8) and m.autosave_timer.time_left > 0.0,
-		"typing starts 0.8 s debounce")
+	fails += _check(is_equal_approx(m.autosave_timer.wait_time, 0.5) and m.autosave_timer.time_left > 0.0,
+		"typing starts 0.5 s debounce")
 	fails += _check(not GameManager.read_note("autosave_test.md").contains("delayed first"),
 		"typing does not write immediately")
 	m._flush_save()
