@@ -5,7 +5,7 @@
 > decisions, gotchas) — history lives in git, `git log` is the changelog.
 > Size budget ~250 lines: compact in-session if exceeded.
 
-_Last updated: 2026-09-24 · Godot 4.7 · renderer: gl_compatibility_
+_Last updated: 2026-09-28 · Godot 4.7 · renderer: gl_compatibility_
 
 ---
 
@@ -30,19 +30,20 @@ _Last updated: 2026-09-24 · Godot 4.7 · renderer: gl_compatibility_
   (`title:`, `theme:`, `tags:`, `created:`, `updated:`). The edit header owns
   title and tag controls; the full frontmatter block is kept out of the visible
   Markdown source. Saves preserve unknown fields and refresh `updated`; new
-  notes initialize both timestamps. Autosave on every keystroke.
+  notes initialize both timestamps. Autosave debounced 0.5 s after typing; transitions flush immediately.
 - Vault tree with folder-as-note merge, drag & drop (notes + folders), custom
   ordering in `vault/.neonnotes.json`, wiki-link rewriting on move, tag chips.
 - Unified Markdown engine: `MarkdownParser` (CommonMark-style delimiter-stack
   inline spans + block dicts) consumed by both `PreviewBuilder` and
-  `NeonHighlighter`; wiki-links `[[Note]]`/`[[Note|label]]`, backlinks,
+  `NeonHighlighter`; fenced code preview uses a full-width padded panel
+  (language-specific token highlighting not implemented); wiki-links `[[Note]]`/`[[Note|label]]`, backlinks,
   Obsidian callouts, `==highlight==`, `%%glitch%%`, `++flicker++` escapes.
 - Knowledge graph: radial vault map with flowing (animated, directional)
   link light, folder-spine hierarchy, level semantics, seeded-by-`GraphModel`
   (renderer-agnostic; user wants a "neon city" redesign eventually).
 - LAN sync (`scripts/sync/`): UDP 47770 discovery + TCP 47771 streaming
-  transfer, PIN/QR/wordlist pairing, trusted peers, LWW by logical mtime with
-  tombstones; deletes/folder moves propagate and refresh the receiver. Media
+  transfer, eight-word vault phrase pairing, trusted peers, logical-mtime LWW
+  with tombstones; deletes/folder moves propagate and refresh the receiver. Media
   and `.md` both transfer; `vault/exports/` excluded.
 - Exports: PNG (2×), deterministic GIF (worker thread), HTML, clipboard copy,
   optional CRT FX on export; saves to OS gallery + `vault/exports/`.
@@ -64,15 +65,15 @@ _Last updated: 2026-09-24 · Godot 4.7 · renderer: gl_compatibility_
   - SelectionOverlay (Android handles + Cut/Copy/Paste bar) in progress — wire/test on device.
   - Parser: block-level spans for headings/fences; per-block preview cache
     keyed by content hash.
-  - `_flush_save()` does a full `MarkdownParser.parse()` per keystroke just
-    for the front-matter title — a lightweight front-matter read would help.
   - `GraphModel.MAX_NODES` (400) is a stop-gap; aggregation + MultiMesh
     renderer deferred until the visual redesign is decided.
   - MP4/social-video export deferred (no MP4 MovieWriter in this build; AVI
     path segfaults headless) — needs bundled FFmpeg or GDExtension.
 - **Known bugs / open issues:** drag inside-move drop zones still want a
   visual on-device confirmation; watch companion-note collisions
-  (`name-2.md`) after sync merges.
+  (`name-2.md`) after sync merges. Multi-vault sync state persists per vault in
+  `user://sync_state.json`. No transport encryption yet. The headless mobile-tree-touch test fails on this
+  machine (null viewport texture / mismatched tree taps), independently of sync.
 
 ## 4. Coding patterns & conventions (project-specific)
 
@@ -108,7 +109,7 @@ _These OVERRIDE the skill's defaults for this project._
 - **`gl_compatibility` renderer** — uniform across Linux/Windows/Android.
 - **CRT shader tuned subtle (not noisy)** — "flat so reading isn't distorted";
   global effects subtle, per-note effects are the noisy ones (user-pref).
-- **LAN sync local-only, no cloud** (UDP 47770 + TCP 47771), PIN/QR pairing.
+- **LAN sync local-only, no cloud** (UDP 47770 + TCP 47771), word-secret pairing (no encryption yet).
 - **Sync LWW uses logical mtimes, not disk mtimes** (2026-09-22) — received
   files keep the sender's `modified` (`SyncService._mtimes` + `collect_notes`
   `mtimes` arg) so stale copies can never beat tombstones; local writes
@@ -121,8 +122,20 @@ _These OVERRIDE the skill's defaults for this project._
   rewriting links; drop path is rescan-free (`prune_empty_ancestors`).
 - **Graph = radial hierarchy map** with hierarchical edge bundling + flowing
   link light; user explicitly chose it over force-directed (2026-09-20).
+- **Metadata-first sync** (`probe` → `manifest` → needed paths → `push_stream`); inventory records sizes + logical mtimes on worker, and only requested payloads are read/transferred. The `probe` gate sends a deterministic content fingerprint (`state_fingerprint` over path|mtime|size); when it matches the fingerprint recorded in `_confirmed[peer_id]`, the whole manifest+payload exchange is skipped (idle sync = bytes each way).
+- **Persistent sync state** (`user://sync_state.json`, keyed by vault path md5): `_mtimes` (logical mtimes), `_tombstones`, and `_confirmed` survive restarts, so received media keeps the sender's timestamp instead of being restamped on receipt. `persist_state=false` makes test/diagnostic harnesses hermetic. State is per-device, not in the vault.
+- **No file reads in the sync hot path** (2026-09-28): `_file_logical_time` uses the persisted `_mtimes` else disk mtime — it never parses front-matter. The receiver's `manifest` handler runs on the main thread and previously opened every note (hundreds of reads/sync → UI freeze). `_sync_log` uses `get_length()` (stat) instead of re-reading the whole log.
 - **Streaming chunked sync** (`push_stream`/`push_item`/`push_end`, one file
-  per frame) — bounded memory; legacy single-frame `push` kept for old peers.
+  per frame) — requested payloads loaded one at a time on sender worker;
+  receiver reads socket in 64 KiB/frame. Legacy `push` remains for old peers.
+- **Pairing phrase** is generated per vault in settings; first initiator enters
+  receiver’s phrase and adopts its vault ID/secret. UDP loopback is ignored and a device never targets/trusts its own id
+  (`_drop_self_trust` repairs legacy settings that paired with itself). Nonce-based proof
+  authenticates without transmitting the phrase (verified in code review after a cleartext leak was caught); traffic remains unencrypted.
+  Trust is recorded after successful proof/transfer. If paired devices hold
+  different phrases (paired before the phrase feature), the user re-pairs once
+  from the dialog: `accept_pair(explicit=true)` lets the joining device adopt
+  the receiver's phrase; routine auto-sync never repoints local identity.
 - **Help is `res://docs/help.md`**, not an in-code const (ships via export
   include_filter `*.md`).
 - **godot-mcp/godot_ai addons are AI tooling drivers** — keep installed; the

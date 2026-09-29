@@ -8,7 +8,7 @@ NeonNotes is a local, Markdown-first notebook. Notes remain plain `.md` files in
 
 ## 1. Start here
 
-Use **+ New** to create a note, then select it in the vault tree. Use **✎ Edit** to switch to Markdown source and **◈ Preview** to read the rendered note. Changes are saved automatically as you type.
+Use **+ New** to create a note, then select it in the vault tree. Use **✎ Edit** to switch to Markdown source and **◈ Preview** to read the rendered note. Changes are saved 0.5 seconds after you stop typing, or immediately when you leave the note or edit mode.
 
 Type `/` by itself on a line to open the formatting menu. It inserts headings, emphasis, lists, quotes, tables, charts, and image snippets.
 
@@ -181,9 +181,9 @@ Folders without a companion Markdown file receive a folder note automatically. A
 
 ## 12. Sync
 
-Open **⇄ Sync** to pair devices on the same local network. Each device has a stable four-word identity. The first connection uses the displayed PIN; trusted devices reconnect without entering it again.
+Open **⇄ Sync** to pair devices on the same local network. Discovery shows each vault ID. On the device receiving the pairing, read its generated eight-word pairing phrase; enter that phrase on the device initiating pairing. After successful pairing, the device adopts the receiving vault’s identity and phrase; paired devices reconnect without entering it again. Keep the phrase private: it authenticates pairing using a nonce-based proof without sending the phrase itself, but LAN transfers are not yet encrypted.
 
-Sync is local-only and uses UDP port `47770` for discovery and TCP port `47771` for transfers. Notes, nested folders, and embedded media are synchronized. Conflicts use last-writer-wins based on file modification time. If discovery fails, check the firewall and ensure both devices are on the same network.
+Sync is local-only and uses UDP port `47770` for discovery and TCP port `47771` for transfers. Notes, nested folders, and embedded media are synchronized. Sync sends only files the receiving device needs. Each device advertises a content fingerprint; when a peer already holds that exact state the exchange is skipped entirely, so an idle sync transfers almost nothing. Otherwise the receiving device compares logical modification times and sizes and asks only for what is missing or newer. Notes carry hidden `created` and `updated` frontmatter timestamps; edits refresh `updated` while preserving `created`. Conflicts use last-writer-wins based on logical modification time. If discovery fails, check the firewall and ensure both devices are on the same network.
 
 ## 13. Export and sharing
 

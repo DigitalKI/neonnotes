@@ -25,9 +25,10 @@ Embed live charts in your notes with ` ```chart ` blocks. Export notes as **PNG*
 
 ### 📡 LAN Sync (new in v2!)
 Pair two devices over your local network:
-- **QR code** pairing
-- **Shared key**
-- Or a **wordlist passphrase** — because typing `moon-trombone-cascade` is more fun than typing an IP address
+- Generated eight-word vault pairing phrase, entered once on the device joining the vault
+- Paired devices reconnect automatically and transfer only changed files
+
+The phrase authenticates pairing; LAN transfers are not yet encrypted.
 
 No cloud. No accounts. Your notes never leave your network.
 
