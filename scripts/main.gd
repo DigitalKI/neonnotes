@@ -64,6 +64,9 @@ var slash_menu := SlashMenuComponent.new()
 var _note_tags: Array[String] = []
 var _note_title := ""
 var _metadata_source := ""
+var _saved_body := ""
+var _saved_title := ""
+var _saved_tags: Array[String] = []
 
 # ---- mobile text selection (Android).
 # Plain drag always scrolls (native). A double-tap on a word activates a
@@ -73,6 +76,10 @@ var _metadata_source := ""
 var selection_overlay: SelectionOverlay
 var _last_tap_time := -INF
 const DOUBLE_TAP_WINDOW_MS := 400
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST and is_instance_valid(autosave_timer):
+		_flush_save()
 
 func _ready() -> void:
 	_build_dynamic_ui()
@@ -207,6 +214,7 @@ func _refresh_open_note_after_sync() -> void:
 	_note_title = NoteMetadata.field(latest, "title", GameManager.current_rel.get_file().trim_suffix(".md"))
 	_set_title_form(_note_title)
 	code_edit.text = NoteMetadata.body(latest)
+	_remember_saved_form()
 	_refresh_note_tag_chips()
 	_render_preview(true)  # keep reading position across the re-render
 	status_bar.flash("↻ Updated " + GameManager.current_rel)
@@ -268,11 +276,10 @@ func _build_dynamic_ui() -> void:
 	code_edit.get_menu().id_pressed.connect(_on_edit_menu_action)
 	code_edit.get_menu().popup_hide.connect(_on_edit_menu_closed)
 
-	# autosave: immediate — every keystroke/paste persists (no debounce);
-	# the Timer remains as a safety net for programmatic edits
+	# Debounce typing; transitions still flush immediately.
 	autosave_timer.name = "AutosaveTimer"
 	autosave_timer.one_shot = true
-	autosave_timer.wait_time = 0.3
+	autosave_timer.wait_time = 0.5
 	autosave_timer.timeout.connect(_flush_save)
 	add_child(autosave_timer)
 
@@ -514,22 +521,26 @@ func _show_selection_menu() -> void:
 
 func _on_text_changed() -> void:
 	help_mode = false
-	_flush_save()  # save on every typed/pasted character — never lose changes
+	autosave_timer.start()  # restart after each character/paste
 	slash_menu.check()
 
 # ------------------------------------------------- slash menu (v3)
 
-## Save immediately. Called on debounce, note switch, mode change, quit.
+## Save pending edits. Called on debounce, note switch, mode change, sync, quit.
 func _flush_save() -> void:
+	autosave_timer.stop()
 	if help_mode or GameManager.current_file == "" or not code_edit.visible:
 		return
 	var fname: String = GameManager.current_rel
 	if fname == "":
 		return
+	if code_edit.text == _saved_body and _note_title == _saved_title and _note_tags == _saved_tags:
+		return
 	var old_title: String = GameManager.titles.get(fname, "")
 	var source_to_save := _compose_note_source()
 	if GameManager.write_note(fname, source_to_save):
 		_metadata_source = source_to_save
+		_remember_saved_form()
 		status_bar.flash("✓ Saved " + fname)
 		sync_service.note_saved(fname)  # debounce auto-sync + clear any tombstone
 		# rebuild the tree if the front-matter title changed
@@ -538,6 +549,11 @@ func _flush_save() -> void:
 			GameManager.scan_notes()
 			_refresh_list()
 
+func _remember_saved_form() -> void:
+	_saved_body = code_edit.text
+	_saved_title = _note_title
+	_saved_tags = _note_tags.duplicate()
+
 func _compose_note_source() -> String:
 	return NoteMetadata.update(code_edit.text, _metadata_source, _note_title, _note_tags,
 		Time.get_datetime_string_from_system(true, false))
@@ -545,7 +561,7 @@ func _compose_note_source() -> String:
 func _on_note_title_changed(value: String) -> void:
 	_note_title = value.strip_edges()
 	toolbar.note_title.text = _note_title if _note_title != "" else GameManager.current_rel.get_file().trim_suffix(".md")
-	_flush_save()
+	autosave_timer.start()
 
 func _set_title_form(value: String) -> void:
 	title_input.set_block_signals(true)
@@ -615,6 +631,7 @@ func _on_note_selected(fname: String) -> void:
 	_note_title = NoteMetadata.field(source, "title", fname.get_file().trim_suffix(".md"))
 	_set_title_form(_note_title)
 	code_edit.text = NoteMetadata.body(source)
+	_remember_saved_form()
 	_refresh_note_tag_chips()
 	help_mode = false
 	help_folder = fname.get_base_dir() if fname.contains("/") else ""
@@ -917,6 +934,7 @@ func _toggle_mode() -> void:
 	_set_mode()
 
 func _show_help() -> void:
+	_flush_save()
 	# Help behaves like opening a note: it replaces the settings page and, on
 	# mobile, collapses the tree drawer so the help content is full-screen.
 	if settings_mode:
@@ -1103,7 +1121,11 @@ func _use_local_media(path: String) -> void:
 		return
 	var rel := "media/" + path.get_file()
 	code_edit.text = t.substr(0, m.get_start()) + "![](" + rel + ")" + t.substr(m.get_end())
-	GameManager.write_note(GameManager.current_rel, _compose_note_source())
+	var media_source := _compose_note_source()
+	GameManager.write_note(GameManager.current_rel, media_source)
+	_metadata_source = media_source
+	_remember_saved_form()
+	sync_service.note_saved(GameManager.current_rel)
 	status_bar.flash("✓ Saved " + GameManager.current_rel)
 	_render_preview()
 
@@ -1303,7 +1325,10 @@ func _on_image_selected(path: String) -> void:
 	# save directly — the click comes from preview mode where the editor is
 	# hidden and _flush_save would bail out
 	if GameManager.current_rel != "":
-		GameManager.write_note(GameManager.current_rel, _compose_note_source())
+		var media_source := _compose_note_source()
+		GameManager.write_note(GameManager.current_rel, media_source)
+		_metadata_source = media_source
+		_remember_saved_form()
 		status_bar.flash("✓ Saved " + GameManager.current_rel)
 		sync_service.note_saved(GameManager.current_rel)
 	if not source_mode:
@@ -1340,6 +1365,7 @@ func _on_open_vault() -> void:
 	vault_dialog.popup_centered(Vector2i(720, 480))
 
 func _on_vault_selected(path: String) -> void:
+	_flush_save()
 	if GameManager.set_vault_dir(path):
 		# Settings is a live page; refresh its labels immediately after the
 		# vault switch instead of leaving the previous path cached on screen.

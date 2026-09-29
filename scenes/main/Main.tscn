@@ -102,59 +102,59 @@ layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="EditColumn" type="VBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding"]
+[node name="EditColumn" type="VBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding" unique_id=1692838301]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 theme_override_constants/separation = 8
 
-[node name="TitlePanel" type="PanelContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn"]
+[node name="TitlePanel" type="PanelContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn" unique_id=189551264]
 unique_name_in_owner = true
 layout_mode = 2
 
-[node name="TitleRow" type="VBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TitlePanel"]
+[node name="TitleRow" type="VBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TitlePanel" unique_id=1452771203]
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="TitleLabel" type="Label" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TitlePanel/TitleRow"]
+[node name="TitleLabel" type="Label" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TitlePanel/TitleRow" unique_id=1411190849]
 layout_mode = 2
 text = "◈ NOTE TITLE"
 
-[node name="TitleInput" type="LineEdit" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TitlePanel/TitleRow"]
+[node name="TitleInput" type="LineEdit" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TitlePanel/TitleRow" unique_id=1574681668]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "Untitled note"
 
-[node name="TagsPanel" type="PanelContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn"]
+[node name="TagsPanel" type="PanelContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn" unique_id=1330336696]
 unique_name_in_owner = true
 layout_mode = 2
 
-[node name="TagsRow" type="VBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TagsPanel"]
+[node name="TagsRow" type="VBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TagsPanel" unique_id=1154712658]
 layout_mode = 2
 theme_override_constants/separation = 5
 
-[node name="TagsLabel" type="Label" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TagsPanel/TagsRow"]
+[node name="TagsLabel" type="Label" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TagsPanel/TagsRow" unique_id=1710661633]
 layout_mode = 2
 text = "◈ NOTE TAGS"
 
-[node name="TagsChips" type="HFlowContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TagsPanel/TagsRow"]
+[node name="TagsChips" type="HFlowContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TagsPanel/TagsRow" unique_id=115003094]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/h_separation = 6
 theme_override_constants/v_separation = 4
 
-[node name="TagsInputRow" type="HBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TagsPanel/TagsRow"]
+[node name="TagsInputRow" type="HBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TagsPanel/TagsRow" unique_id=814439955]
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="TagsInput" type="LineEdit" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TagsPanel/TagsRow/TagsInputRow"]
+[node name="TagsInput" type="LineEdit" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TagsPanel/TagsRow/TagsInputRow" unique_id=905177978]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "Add a tag…"
 
-[node name="TagsAdd" type="Button" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TagsPanel/TagsRow/TagsInputRow"]
+[node name="TagsAdd" type="Button" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TagsPanel/TagsRow/TagsInputRow" unique_id=1668094736]
 unique_name_in_owner = true
 layout_mode = 2
 text = "+ ADD"

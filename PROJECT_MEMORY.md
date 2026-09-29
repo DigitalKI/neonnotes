@@ -33,6 +33,10 @@ _Last updated: 2026-09-28 · Godot 4.7 · renderer: gl_compatibility_
   notes initialize both timestamps. Autosave debounced 0.5 s after typing; transitions flush immediately.
 - Vault tree with folder-as-note merge, drag & drop (notes + folders), custom
   ordering in `vault/.neonnotes.json`, wiki-link rewriting on move, tag chips.
+  Search debounces typing (0.35 s), copies only path/title metadata on the UI
+  thread, and reads/matches note bodies on a worker. Cancellation is polled
+  once per frame (not a tight deferred loop); matches are published only on
+  the UI thread after a generation check, and result rows render in batches.
 - Unified Markdown engine: `MarkdownParser` (CommonMark-style delimiter-stack
   inline spans + block dicts) consumed by both `PreviewBuilder` and
   `NeonHighlighter`; fenced code preview uses a full-width padded panel

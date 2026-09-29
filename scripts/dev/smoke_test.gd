@@ -129,6 +129,17 @@ func _run_smoke() -> void:
 	m.code_edit.visible = true
 	m._flush_save()
 	fails += _check(FileAccess.file_exists(GameManager.vault_abs() + "/autosave_test.md"), "autosave flush writes file")
+	# Each character restarts a 1.5 s timer; a second edit before timeout
+	# must not write until the idle period or an explicit transition flush.
+	m.code_edit.text = "delayed first"
+	m._on_text_changed()
+	fails += _check(is_equal_approx(m.autosave_timer.wait_time, 0.8) and m.autosave_timer.time_left > 0.0,
+		"typing starts 0.8 s debounce")
+	fails += _check(not GameManager.read_note("autosave_test.md").contains("delayed first"),
+		"typing does not write immediately")
+	m._flush_save()
+	fails += _check(GameManager.read_note("autosave_test.md").contains("delayed first"),
+		"transition flush saves pending text")
 	# mode toggle
 	m._toggle_mode()
 	fails += _check(m.code_edit.visible and not m.content_host.visible, "mode toggle → source")
@@ -143,7 +154,7 @@ func _run_smoke() -> void:
 	m.graph_view.open(GameManager.current_rel)
 	fails += _check(m.graph_view.visible, "graph view visible")
 	var svc: Node = SyncService.new()
-	fails += _check(svc.gen_pin().length() == 6, "pin gen")
+	fails += _check(svc.gen_vault_secret().split("-").size() == 8, "pairing phrase gen")
 	var dlg: Node = load("res://scenes/components/sync_dialog.tscn").instantiate()
 	m.add_child(dlg)
 	fails += _check(dlg.get_child_count() > 0, "sync dialog built")
@@ -159,6 +170,16 @@ func _run_smoke() -> void:
 			has_img = b["src"] == ""
 	fails += _check(has_img, "image block parsed")
 	const PB := preload("res://scripts/render/preview_builder.gd")
+	var code_panel := PB._code_block("if [x]:\n  print(1)", Color.CYAN, Color.WHITE) as PanelContainer
+	var code_style := code_panel.get_theme_stylebox("panel") as StyleBoxFlat
+	fails += _check(code_panel.name == "CodeBlock" and code_panel.size_flags_horizontal == Control.SIZE_EXPAND_FILL
+		and code_style != null and code_style.bg_color.a > 0.0
+		and code_style.content_margin_left == 12.0 and code_style.content_margin_right == 12.0
+		and code_style.content_margin_top == 12.0, "code block fills width with padded background")
+	var code_text := code_panel.get_child(0) as RichTextLabel
+	fails += _check(code_text.text.contains("[lb]x[rb]") and code_text.text.contains("print(1)"),
+		"code block preserves escaped multiline text")
+	code_panel.free()
 	var escaped_source := "\\*bold\\*"
 	fails += _check(PB._inline(escaped_source).find("[b]") < 0, "escaped chars not formatted")
 	fails += _check(PB._inline(PB.escape("[[hola]]")).contains("[url=hola][color=") and PB._inline(PB.escape("[[hola]]")).contains("[u]hola[/u]"), "wiki-link renders with visible label")
@@ -187,4 +208,3 @@ func _run_smoke() -> void:
 func _check(ok: bool, label: String) -> int:
 	print(("  ✓ " if ok else "  ✗ ") + label)
 	return 0 if ok else 1
-

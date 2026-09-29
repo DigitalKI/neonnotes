@@ -32,6 +32,7 @@ run_godot_test() {
 }
 
 run_godot_test "UNIT RESULT: OK" --headless --path . --script tests/unit_tests.gd
+run_godot_test "SEARCH WORKER RESULT: OK" --headless --path . tests/TestSearchWorker.tscn
 run_godot_test "ALL DRAG TESTS PASSED SUCCESSFULLY!" --headless --path . tests/TestVaultTreeDrag.tscn
 run_godot_test "MOBILE TREE TOUCH RESULT: OK" --headless --path . tests/ReproTreeTap.tscn
 # Sync delete/move propagation over loopback (real frame protocol + tombstones).

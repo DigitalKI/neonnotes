@@ -40,7 +40,12 @@ const TREE_DRAG_START_DISTANCE := 10.0
 var _mobile_touch_candidate := false
 var _mobile_hold_ready := false
 var _mobile_hold_timer := Timer.new()
-var _search_cleanup_scheduled := false
+var _search_render_queue: Array[String] = []
+var _search_render_index := 0
+var _search_pending := false
+var _search_showing_results := false
+const SEARCH_DEBOUNCE_SECONDS := 0.35
+const SEARCH_ROWS_PER_FRAME := 64
 
 ## Wire behavior once the scene nodes are ready. The host connects
 ## palette_btn/vault_btn/sync_btn/tree_delete_btn signals itself.
@@ -77,7 +82,7 @@ func refresh_backlinks() -> void:
 
 func build() -> void:
 	_search_timer.one_shot = true
-	_search_timer.wait_time = 2.0
+	_search_timer.wait_time = SEARCH_DEBOUNCE_SECONDS
 	_search_timer.timeout.connect(_start_search)
 	add_child(_search_timer)
 	_mobile_hold_timer.one_shot = true
@@ -244,12 +249,16 @@ func note_visible(n: String) -> bool:
 func visible_notes() -> Array[String]:
 	var out: Array[String] = []
 	var search_active := _search_query.length() >= 3
-	for n in GameManager.notes:
-		if note_visible(n) and (not search_active or _search_results.has(n)):
-			out.append(n)
 	if search_active:
-		out.sort_custom(func(a: String, b: String) -> bool:
-			return _search_results.find(a) < _search_results.find(b))
+		# Results already have title-first order; do not re-sort with repeated
+		# linear find() calls (quadratic on a large result set).
+		for n in _search_results:
+			if note_visible(n):
+				out.append(n)
+	else:
+		for n in GameManager.notes:
+			if note_visible(n):
+				out.append(n)
 	return out
 
 ## Row of tag chips above the tree: click to filter, click again to clear.
@@ -283,100 +292,131 @@ func _build_tag_bar() -> void:
 		bar.add_child(clear)
 
 func _on_search_changed(value: String) -> void:
-	_search_query = value.strip_edges()
+	var next_query := value.strip_edges()
+	if next_query == _search_query:
+		return
+	_search_query = next_query
 	_search_generation += 1
 	_search_cancel = true
-	_retire_search_thread()
-	if _search_thread != null:
-		# Keep ownership until the worker exits and can be joined safely.
-		_schedule_search_cleanup()
-	else:
-		_search_timer.start()
-	if _search_query.length() < 3:
-		_search_results = []
-		refresh()
+	_search_pending = true
+	_search_render_queue.clear()
+	_search_render_index = 0
+	# Reset the debounce for every keystroke, including short queries. Do not
+	# rebuild a large unfiltered tree in the text_changed callback.
+	_search_timer.stop()
+	_search_timer.start()
 
 func _start_search() -> void:
-	if _search_shutting_down or _search_query.length() < 3:
+	if _search_shutting_down:
 		return
 	if _search_thread != null:
-		_schedule_search_cleanup()
+		# Never rebuild the unfiltered tree while an older worker is still
+		# reading; start/reset only once it exits.
 		return
+	if _search_query.length() < 3:
+		_search_pending = false
+		_search_results = []
+		# Rebuild if we were showing a filtered tree (even if zero matches).
+		# Otherwise short-query typing has not changed the tree.
+		if _search_showing_results:
+			refresh()
+		return
+	_search_pending = false
+	# Invalidate rows from the previous query after the debounce, not on
+	# every keystroke. Clear only filtered rows; unfiltered tree stays visible
+	# until matching completes.
+	if _search_showing_results:
+		side_tree.clear()
+		var root := side_tree.create_item()
+		root.set_text(0, "Vault")
+		root.set_metadata(0, "")
+		root.disable_folding = true
+		root.collapsed = false
+		root.set_selectable(0, true)
 	_search_cancel = false
 	var generation := _search_generation
 	var query := _search_query.to_lower()
-	var snapshot: Array = []
-	for n in GameManager.notes:
-		snapshot.append({"name": n, "title": String(GameManager.titles.get(n, "")), "text": GameManager.read_note(n)})
+	# Capture cheap metadata only; read note bodies on the worker.
+	var names := GameManager.notes.duplicate()
+	var titles := GameManager.titles.duplicate()
+	var vault_path := GameManager.vault_abs()
 	_search_thread = Thread.new()
-	_search_thread.start(_search_worker.bind(snapshot, query, generation))
+	_search_thread.start(_search_worker.bind(names, titles, vault_path, query, generation))
 
 func _activate_mobile_drag() -> void:
 	if _mobile_touch_candidate and _touch_src_path != "":
 		_mobile_hold_ready = true
 		flash_cb.call("DRAG READY — move to place")
 
-func _retire_search_thread() -> void:
-	if _search_thread != null and _search_thread.is_started():
-		_search_cancel = true
+func _process(_delta: float) -> void:
+	# Poll at most once per frame. A self-rescheduling call_deferred() loop can
+	# run many times in one frame and starve input while the worker reads files.
+	if _search_thread != null and not _search_thread.is_alive():
+		_search_thread.wait_to_finish()
+		_search_thread = null
+	if _search_pending and _search_thread == null and _search_timer.is_stopped():
+		_start_search()
+	if _search_render_index < _search_render_queue.size():
+		_render_search_batch()
 
-func _schedule_search_cleanup() -> void:
-	if _search_cleanup_scheduled:
-		return
-	_search_cleanup_scheduled = true
-	call_deferred("_poll_search_cleanup")
-
-func _poll_search_cleanup() -> void:
-	_search_cleanup_scheduled = false
-	if _search_thread == null:
-		if not _search_shutting_down and _search_query.length() >= 3:
-			_search_timer.start()
-		return
-	if _search_thread.is_alive():
-		_schedule_search_cleanup()
-		return
-	_search_thread.wait_to_finish()
-	_search_thread = null
-	if not _search_shutting_down and _search_query.length() >= 3:
-		_search_timer.start()
+func _render_search_batch() -> void:
+	var end := mini(_search_render_index + SEARCH_ROWS_PER_FRAME, _search_render_queue.size())
+	while _search_render_index < end:
+		_add_search_result(_search_render_queue[_search_render_index])
+		_search_render_index += 1
+	if _search_render_index == _search_render_queue.size():
+		_search_render_queue.clear()
+		_search_render_index = 0
 
 func _exit_tree() -> void:
 	_search_shutting_down = true
+	_search_timer.stop()
+	_search_render_queue.clear()
+	_search_render_index = 0
 	_search_generation += 1
 	_search_cancel = true
-	_retire_search_thread()
 	# Joining is required before the node is freed: the worker captures this
-	# instance through its cancellation/generation checks. Search workers only
-	# read their immutable snapshot and stop between files, so this is bounded.
+	# instance through its cancellation/generation checks. Workers stop between
+	# file reads; no UI nodes or mutable GameManager state are accessed there.
 	if _search_thread != null:
 		_search_thread.wait_to_finish()
 		_search_thread = null
 
-func _search_worker(snapshot: Array, query: String, generation: int) -> void:
+func _search_worker(names: Array[String], titles: Dictionary, vault_path: String, query: String, generation: int) -> void:
 	var title_hits: Array = []
 	var content_hits: Array = []
-	for item in snapshot:
+	var words := query.split(" ", false)
+	for name in names:
 		if _search_cancel or generation != _search_generation:
 			return
-		var title: String = String(item.title).to_lower()
-		var haystack: String = (String(item.title) + "\n" + String(item.text)).to_lower()
+		var title: String = String(titles.get(name, ""))
+		var file := FileAccess.open(vault_path.path_join(name), FileAccess.READ)
+		var text := ""
+		if file != null:
+			text = file.get_as_text()
+			file.close()
+		if _search_cancel or generation != _search_generation:
+			return
+		var haystack := (title + "\n" + text).to_lower()
 		var matches_all := true
-		for word in query.split(" ", false):
+		for word in words:
 			if not haystack.contains(word):
 				matches_all = false
 				break
 		if not matches_all:
 			continue
-		if title.contains(query):
-			title_hits.append(item.name)
+		if title.to_lower().contains(query):
+			title_hits.append(name)
 		else:
-			content_hits.append(item.name)
-	_search_results = title_hits + content_hits
-	call_deferred("_apply_search_results", generation)
+			content_hits.append(name)
+	if _search_cancel or generation != _search_generation:
+		return
+	call_deferred("_apply_search_results", generation, title_hits + content_hits)
 
-func _apply_search_results(generation: int) -> void:
+func _apply_search_results(generation: int, results: Array) -> void:
 	if _search_shutting_down or generation != _search_generation or _search_query.length() < 3:
 		return
+	_search_results = results
 	refresh()
 
 func refresh() -> void:
@@ -397,9 +437,11 @@ func refresh() -> void:
 	root.disable_folding = true
 	root.collapsed = false
 	root.set_selectable(0, true)
-	if _search_query.length() >= 3:
-		for n in visible_notes():
-			_add_search_result(n)
+	_search_showing_results = _search_query.length() >= 3
+	if _search_showing_results:
+		_search_render_queue = visible_notes()
+		_search_render_index = 0
+		_render_search_batch()
 		return
 	# build folder hierarchy from relative paths
 	var folders := {}

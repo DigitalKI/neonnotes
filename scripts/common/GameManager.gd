@@ -43,22 +43,39 @@ var notes: Array[String] = []
 
 # Sync identity: a stable 4-word code (e.g. "amber-meteor-vinyl-orbit") that
 # uniquely identifies this device on the LAN, plus the set of device codes we
-# have successfully paired with (trusted → no PIN needed again).
+# have successfully paired with (trusted → no re-entry of words).
 var device_id := ""
 var trusted: Array[String] = []
-var sync_pin := ""
+var sync_pin := ""  # legacy setting, no longer used for pairing
+var vault_secret := ""
 var vault_id := ""
 var paired_vault_id := ""
-var paired_peers: Dictionary = {} # device_id -> {name, vault_id, pin}
+var paired_peers: Dictionary = {} # device_id -> {name, vault_id, ip}
 
 func _ready() -> void:
 	_load_settings()
 	DirAccess.make_dir_recursive_absolute(vault_abs())
 	if device_id == "":
 		device_id = SyncService.gen_device_code()
+	if vault_secret == "":
+		vault_secret = SyncService.gen_vault_secret()
 	if vault_id == "":
 		vault_id = "%s-%s" % [Time.get_unix_time_from_system(), randi()]
+	_drop_self_trust()  # a device can never be its own peer
 	_save_settings()
+
+## Repair legacy settings that recorded this device's own id as a paired peer
+## (UDP loopback + a same-device instance authenticating to itself).
+func _drop_self_trust() -> void:
+	var changed := false
+	if trusted.has(device_id):
+		trusted.erase(device_id)
+		changed = true
+	if paired_peers.has(device_id):
+		paired_peers.erase(device_id)
+		changed = true
+	if changed:
+		print("[Sync] removed self entry from trusted peers (device paired with itself)")
 
 # ------------------------------------------------------------ palette
 
@@ -182,7 +199,10 @@ func _ensure_folder_notes() -> void:
 		while dir != "":
 			var comp: String = dir + ".md"
 			if not notes.has(comp):
-				write_note(comp, FOLDER_NOTE_TEMPLATE % [dir.get_file(), dir.get_file()])
+				var initial := FOLDER_NOTE_TEMPLATE % [dir.get_file(), dir.get_file()]
+				var title := dir.get_file()
+				write_note(comp, NoteMetadata.update(NoteMetadata.body(initial), initial,
+					title, [] as Array[String], Time.get_datetime_string_from_system(true, false)))
 				notes.append(comp)
 			dir = dir.get_base_dir() if dir.contains("/") else ""
 
@@ -371,6 +391,7 @@ func _load_settings() -> void:
 	vault_dir = cf.get_value("vault", "dir", VAULT_DIR)
 	device_id = cf.get_value("sync", "device_id", "")
 	sync_pin = cf.get_value("sync", "pin", "")
+	vault_secret = cf.get_value("sync", "vault_secret", "")
 	vault_id = cf.get_value("sync", "vault_id", "")
 	paired_vault_id = cf.get_value("sync", "paired_vault_id", "")
 	paired_peers = cf.get_value("sync", "paired_peers", {})
@@ -393,6 +414,7 @@ func _save_settings() -> void:
 	cf.set_value("vault", "dir", vault_dir)
 	cf.set_value("sync", "device_id", device_id)
 	cf.set_value("sync", "pin", sync_pin)
+	cf.set_value("sync", "vault_secret", vault_secret)
 	cf.set_value("sync", "vault_id", vault_id)
 	cf.set_value("sync", "paired_vault_id", paired_vault_id)
 	cf.set_value("sync", "paired_peers", paired_peers)

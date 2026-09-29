@@ -55,8 +55,7 @@ static func build(doc: Dictionary, into: VBoxContainer) -> void:
 			"list":
 				into.add_child(_list_block(block, accent, text_c))
 			"code":
-				into.add_child(_rich("[bgcolor=#%s][color=#%s][code]%s[/code][/color][/bgcolor]"
-					% [_hex(Color(0, 0, 0, 0.35)), _hex(accent2), escape(block["text"])], text_c))
+				into.add_child(_code_block(str(block["text"]), accent2, text_c))
 			"table":
 				into.add_child(_table(block["rows"], text_c))
 			"chart":
@@ -175,6 +174,22 @@ static func _rich(bb: String, default_col: Color) -> RichTextLabel:
 			else:
 				open_cb.call(value))
 	return rt
+
+## A BBCode [bgcolor] only paints behind glyphs; the panel spans the preview
+## column and its stylebox margins provide breathing room on every side.
+static func _code_block(text: String, accent2: Color, text_c: Color) -> Control:
+	var panel := PanelContainer.new()
+	panel.name = "CodeBlock"
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.mouse_filter = Control.MOUSE_FILTER_PASS
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0, 0, 0, 0.35)
+	sb.set_corner_radius_all(4)
+	sb.set_content_margin_all(12)
+	panel.add_theme_stylebox_override("panel", sb)
+	var code := _rich("[color=#%s][code]%s[/code][/color]" % [_hex(accent2), escape(text)], text_c)
+	panel.add_child(code)
+	return panel
 
 static func _image_block(block: Dictionary) -> Control:
 	var src := str(block.get("src", ""))
