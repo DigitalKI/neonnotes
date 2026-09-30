@@ -37,6 +37,9 @@ run_godot_test "ALL DRAG TESTS PASSED SUCCESSFULLY!" --headless --path . tests/T
 # Trash: recoverable deletes, dot-hidden, sync-excluded, collision restore, purge.
 # Runs before the known-failing mobile-touch test so `set -e` cannot skip it.
 run_godot_test "TRASH RESULT: OK" --headless --path . tests/TestTrash.tscn
+# Dev/MCP session isolation: NEONNOTES_DEV=1 must redirect the boot to the
+# disposable dev vault and never persist it (keeps agent runs off the real vault).
+NEONNOTES_DEV=1 run_godot_test "DEV ISOLATION RESULT: OK" --headless --path . tests/TestDevIsolation.tscn
 run_godot_test "MOBILE TREE TOUCH RESULT: OK" --headless --path . tests/ReproTreeTap.tscn
 # Sync delete/move propagation over loopback (real frame protocol + tombstones).
 run_godot_test "SYNC DELETE/MOVE RESULT: OK" --headless --path . tests/TestSyncDeleteMove.tscn

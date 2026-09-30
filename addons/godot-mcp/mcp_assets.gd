@@ -22,6 +22,26 @@ extends Node
 const _TEMP_KEEP := 20  # rolling window: keep the N most recent mcp_* temp files
 var _img_counter := 0  # monotonic id for get_image_png temp files
 
+# Agent UI testing must never touch the user's real vault, but a developer's own
+# Play/desktop run must. So isolation is opt-in: `play_scene` marks the game it
+# spawns with NEONNOTES_DEV=1 (the project's GameManager/DevSession policy then
+# redirects it to a disposable vault). The mark is cleared again once the child
+# has spawned and on stop_scene — so a human who presses Play themselves always
+# gets the real vault and real sync identity.
+const DEV_SESSION_ENV := "NEONNOTES_DEV"
+const DEV_MARK_TTL := 15.0  # seconds; child connects its debugger in ~1 s
+
+
+func _mark_dev_session() -> void:
+	OS.set_environment(DEV_SESSION_ENV, "1")
+	if is_inside_tree():
+		get_tree().create_timer(DEV_MARK_TTL).timeout.connect(_clear_dev_mark)
+
+
+func _clear_dev_mark() -> void:
+	if OS.get_environment(DEV_SESSION_ENV) == "1":
+		OS.set_environment(DEV_SESSION_ENV, "")
+
 
 # Read a texture at a res:// path, downscale, save as PNG under user://, return
 # its absolute path. The TS server reads the file and base64->image content
@@ -492,6 +512,9 @@ func clean_temp() -> Dictionary:
 # ping_game to confirm before eval/screenshot/get_console_output.
 func play_scene(mode: String, scene_path: String) -> Dictionary:
 	var was_playing := EditorInterface.is_playing_scene()
+	# Mark the subprocess this starts as an agent session (isolated vault).
+	# Set before the deferred play so the spawned child inherits the env.
+	_mark_dev_session()
 	# CRASH TRAP (pitfalls #22): EditorInterface.stop_playing_scene / play_*
 	# mutate the editor's SceneTree (hide bottom panel, close floating Window,
 	# remove embedded process). Calling them SYNCHRONOUSLY from bridge._process
@@ -523,6 +546,7 @@ func play_scene(mode: String, scene_path: String) -> Dictionary:
 # Stop the running game (kills the subprocess via OS::kill). No-op if not playing.
 func stop_scene() -> Dictionary:
 	var was_playing := EditorInterface.is_playing_scene()
+	_clear_dev_mark()
 	# CRASH TRAP (pitfalls #22): see play_scene above — must call_deferred, else
 	# editor SIGSEGV from SceneTree mutation during bridge._process iteration.
 	if was_playing:

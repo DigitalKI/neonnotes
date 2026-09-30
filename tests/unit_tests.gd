@@ -1,6 +1,7 @@
 extends SceneTree
 
 const NoteMetadataHelper := preload("res://scripts/common/note_metadata.gd")
+const DevSession := preload("res://scripts/common/dev_session.gd")
 
 var failures := 0
 
@@ -12,6 +13,7 @@ func _init() -> void:
 	_check_move_path_remap()
 	_check_graph_model()
 	_check_media_import()
+	_check_dev_session_detection()
 	print("UNIT RESULT: %s (%d failures)" % ["FAIL" if failures > 0 else "OK", failures])
 	quit(failures)
 
@@ -59,6 +61,22 @@ func _check_media_import() -> void:
 	_check(d3 == tmp.path_join("photo.png"), "content URI forces png")
 	DirAccess.remove_absolute(tmp.path_join("image-2117.png"))
 	DirAccess.remove_absolute(tmp.path_join("image-2117-2.png"))
+
+## The dev-session gate that keeps MCP/editor UI testing out of the real vault.
+## Env-driven here because this headless --script run is itself "real use".
+func _check_dev_session_detection() -> void:
+	# Isolation is opt-in only: a plain run (this headless harness, or a normal
+	# desktop/editor Play) must never be treated as a dev session — that would
+	# hijack the real vault and drop sync pairing.
+	_check(not DevSession.is_active(), "plain run is not a dev session")
+	OS.set_environment(DevSession.ENV_DEV, "1")
+	_check(DevSession.is_active(), "NEONNOTES_DEV=1 forces a dev session")
+	OS.set_environment(DevSession.ENV_DEV, "")
+	OS.set_environment(DevSession.ENV_VAULT, "/tmp/nn-dev-vault")
+	_check(DevSession.is_active(), "NEONNOTES_VAULT forces a dev session")
+	OS.set_environment(DevSession.ENV_VAULT, "")
+	_check(not DevSession.is_active(), "env cleared: back to a real session")
+
 
 func _check_markdown_spans() -> void:
 	# Flat, source-ordered span stream drives BOTH the highlighter (edit) and

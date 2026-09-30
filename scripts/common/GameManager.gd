@@ -10,6 +10,9 @@ const VAULT_DIR := "user://vault"
 const SETTINGS := "user://settings.cfg"
 const FRONT_MATTER_SCAN_MAX_LINES := 200  # bound the per-keystroke front-matter scan
 const EXPORTS_SUBDIR := "exports"  # vault/exports/ — rendered PNG/GIF/HTML, hidden from the tree
+## Editor/MCP session detection + the disposable vault such a run uses, so
+## agent-driven UI checks can never read or write the user's real vault.
+const DevSession := preload("res://scripts/common/dev_session.gd")
 
 const PALETTES := {
 	"Synthwave": {
@@ -40,6 +43,7 @@ var export_crt := true  # apply CRT overlay to exported PNG/JPEG/GIF
 var open_start_mode := "last"  # "last" or "homepage"
 var last_opened_rel := ""
 var vault_dir := VAULT_DIR
+var dev_session := false  # true when this run is editor/MCP-driven (isolated vault)
 var current_file := ""  # absolute path of the open note ("" = none)
 var current_rel := ""   # vault-relative path of the open note ("" = none)
 var notes: Array[String] = []
@@ -57,6 +61,12 @@ var paired_peers: Dictionary = {} # device_id -> {name, vault_id, ip}
 
 func _ready() -> void:
 	_load_settings()
+	# An explicitly-marked agent/test session (MCP `play_scene` sets
+	# NEONNOTES_DEV=1, or NEONNOTES_VAULT is set) must run against a disposable
+	# vault and must not persist anything. Do this BEFORE make_dir/_save_settings
+	# so the real vault is never touched. Normal runs are never redirected.
+	if is_dev_session():
+		_apply_dev_isolation()
 	DirAccess.make_dir_recursive_absolute(vault_abs())
 	if device_id == "":
 		device_id = SyncService.gen_device_code()
@@ -66,6 +76,35 @@ func _ready() -> void:
 		vault_id = "%s-%s" % [Time.get_unix_time_from_system(), randi()]
 	_drop_self_trust()  # a device can never be its own peer
 	_save_settings()
+
+## True when this process is an explicitly-marked development/agent session
+## (godot-mcp `play_scene` sets NEONNOTES_DEV=1, or NEONNOTES_VAULT is set).
+## Normal desktop/editor Play runs and the shipped app are NOT dev sessions —
+## they keep the real vault and sync identity. See DevSession.
+static func is_dev_session() -> bool:
+	return DevSession.is_active()
+
+## Redirect a dev session to a scratch vault and neutralise everything that
+## would leak into the user's real state: the vault path is assigned directly
+## (never via set_vault_dir, which persists), _save_settings() is suppressed,
+## and any loaded pairing is dropped so a test session cannot auto-reconnect and
+## exchange notes with a real peer. Mirrors Main._prepare_smoke_vault().
+func _apply_dev_isolation() -> void:
+	dev_session = true
+	var scratch := OS.get_environment(DevSession.ENV_VAULT)
+	if scratch == "":
+		scratch = DevSession.DEFAULT_VAULT
+	vault_dir = scratch
+	suppress_settings_save = true  # never repoint/persist the user's real vault
+	current_file = ""
+	current_rel = ""
+	order.clear()
+	collapsed_folders.clear()
+	trusted.clear()
+	paired_peers.clear()
+	paired_vault_id = ""
+	vault_id = "dev-" + (device_id if device_id != "" else "session")
+	print("[dev] isolated session — vault=%s (real vault untouched)" % vault_abs())
 
 ## Repair legacy settings that recorded this device's own id as a paired peer
 ## (UDP loopback + a same-device instance authenticating to itself).
