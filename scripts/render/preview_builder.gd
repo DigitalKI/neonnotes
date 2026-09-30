@@ -167,26 +167,52 @@ static func _inline(s: String) -> String:
 	out += escape(s.substr(cursor))
 	return out
 
-## Shared emoji-capable font: a FontVariation over the theme default with
-## SystemFont fallbacks for the platform emoji fonts. Without this, emojis
-## only render when the OS default font happens to cover them — exported
-## SubViewports (and some Linux setups) lose them.
-static var _emoji_font: Font = null
-static var _emoji_font_name := ""
-static func _font_with_emoji() -> Font:
-	# Rebuild when the user picks a different UI font: base_font must be the
-	# selected face (a null base resolves to the project default, which would
-	# pin previews back to Share Tech Mono and ignore the setting).
-	var want := GameManager.font_name
-	if _emoji_font == null or _emoji_font_name != want:
+## Bold/italic synthesis values matching Godot's default theme, which builds
+## bold_font/italics_font/bold_italics_font as FontVariations over the base
+## face. Overriding those slots with a plain FontVariation (no embolden, no
+## skew) made [i] and [b][i] render as regular upright text.
+const _BOLD_EMBOLDEN := 1.2
+const _ITALIC_SKEW := 0.2
+
+## Platform emoji faces, resolved once and shared by every variant.
+static var _emoji_fallback: Font = null
+
+## The four RichTextLabel font slots, one per text flag (normal/bold/italic/
+## bold-italic), all backed by the selected UI face plus the emoji fallback.
+## Rebuilt only when the user picks a different UI font.
+static var _font_variants: Dictionary = {}
+static var _font_variants_name := ""
+
+static func _emoji_system_font() -> Font:
+	if _emoji_fallback == null:
 		var emoji := SystemFont.new()
 		emoji.font_names = PackedStringArray(["Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol"])
-		var fv := FontVariation.new()
-		fv.base_font = GameManager.font()
-		fv.fallbacks = [emoji]
-		_emoji_font = fv
-		_emoji_font_name = want
-	return _emoji_font
+		_emoji_fallback = emoji
+	return _emoji_fallback
+
+static func _make_variant(embolden: float, skew: float, emoji: Font) -> FontVariation:
+	var fv := FontVariation.new()
+	# base_font must be the selected face; a null base resolves to the project
+	# default, which would pin previews to Share Tech Mono and ignore the setting.
+	fv.base_font = GameManager.font()
+	fv.variation_embolden = embolden
+	if not is_zero_approx(skew):
+		fv.variation_transform = Transform2D(Vector2(1.0, skew), Vector2(0.0, 1.0), Vector2.ZERO)
+	fv.fallbacks = [emoji]
+	return fv
+
+static func _font_variants_for_ui() -> Dictionary:
+	var want := GameManager.font_name
+	if _font_variants.is_empty() or _font_variants_name != want:
+		var emoji := _emoji_system_font()
+		_font_variants = {
+			"normal_font": _make_variant(0.0, 0.0, emoji),
+			"bold_font": _make_variant(_BOLD_EMBOLDEN, 0.0, emoji),
+			"italics_font": _make_variant(0.0, _ITALIC_SKEW, emoji),
+			"bold_italics_font": _make_variant(_BOLD_EMBOLDEN, _ITALIC_SKEW, emoji),
+		}
+		_font_variants_name = want
+	return _font_variants
 
 static func _rich(bb: String, default_col: Color) -> RichTextLabel:
 	# Landscape phones shrink every body font and the user font-size setting
@@ -206,12 +232,9 @@ static func _rich(bb: String, default_col: Color) -> RichTextLabel:
 	# Attach the emoji fallback so 🚀🎉✨ etc. render in both the on-screen
 	# preview and PNG/GIF exports. (Theme *overrides* do not propagate to child
 	# controls, so this must stay per-label rather than on the container.)
-	var ef := _font_with_emoji()
-	if ef != null:
-		rt.add_theme_font_override("normal_font", ef)
-		rt.add_theme_font_override("bold_font", ef)
-		rt.add_theme_font_override("italics_font", ef)
-		rt.add_theme_font_override("bold_italics_font", ef)
+	var variants := _font_variants_for_ui()
+	for slot in variants:
+		rt.add_theme_font_override(StringName(slot), variants[slot])
 	rt.text = bb
 	# Install the text effects only on labels that actually use them: every
 	# installed effect is walked on each of that label's redraws, and a large

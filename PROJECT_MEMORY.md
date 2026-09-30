@@ -160,6 +160,14 @@ _Last updated: 2026-09-30 · Godot 4.7 · renderer: gl_compatibility_
   headings, charts, editor and toolbar buttons all follow one scale. Orbitron
   remains the display face for the title/headings. PNG/GIF exports inherit the
   window theme; OS `FileDialog`s are re-themed by `DialogTheme`.
+- **Preview emphasis fonts (2026-09-30):** the preview adds an emoji-capable
+  `FontVariation` to every `RichTextLabel` (`PreviewBuilder._font_variants_for_ui()`).
+  Those overrides must preserve Godot's synthetic styles: `bold_font` /
+  `bold_italics_font` carry `variation_embolden = 1.2` (`_BOLD_EMBOLDEN`) and
+  `italics_font` / `bold_italics_font` a `variation_transform` skew of 0.2
+  (`_ITALIC_SKEW`); all four variants also carry the emoji fallbacks. Replacing
+  all four slots with a single plain variation rendered `[i]` and `[b][i]` as
+  regular upright text (fixed by rebuilding the four per-slot variants).
 - New-note placement: the note is ordered **directly below the selected row**
   (selected note → same folder, right after it; selected folder → first child;
   nothing selected → vault root, appended) via
@@ -544,6 +552,14 @@ _These OVERRIDE the skill's defaults for this project._
 - Sharing format is plain `.md` (user pref); export menu: PNG/GIF/HTML + copy.
 - `README.md` rewritten 2026-09-30 as the user-facing overview (features,
   Markdown reference, vault layout, settings, Android build, dev notes,
-  roadmap). `docs/help.md` stays the in-app guide. **There is no `LICENSE` file
-  in the repo** — the README now says so explicitly; decide/add a license if
-  that changes.
+  roadmap). **There is no `LICENSE` file in the repo** — the README now says so
+  explicitly; decide/add a license if that changes.
+- `docs/help.md` refreshed 2026-09-30 to match the app: interface/toolbar map,
+  the `keywords + #tag` search grammar (≥3-char keywords, tag-only is
+  disk-free), tag autocomplete/browse, in-editor Find in document, editor
+  title/tags panels vs. optional `theme` front matter, the protected
+  `_homepage.md` root, Settings table, and per-vault sync. **Gotcha:** the
+  preview parser only nests nothing — a fence closes on a line that is exactly
+  three backticks, so do not use 4-backtick outer fences in `help.md`; the old
+  nested-fence example parsed wrong (verified via a throwaway
+  `MarkdownParser.parse()` harness, since removed).

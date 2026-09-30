@@ -247,6 +247,19 @@ func _run_smoke() -> void:
 	GameManager.set_font("VT323")
 	fails += _check(GameManager.font_name == "VT323" and win_theme.default_font == GameManager.font(),
 		"font family switch reaches the window theme")
+	# Preview must keep bold/italic synthesis while carrying the emoji fallback.
+	# Overriding all four RichTextLabel font slots with one plain FontVariation
+	# rendered [i]/[b][i] as regular upright text; the variants must track the
+	# selected face, keep the emoji fallback, and carry Godot's embolden/skew.
+	var pv: Dictionary = PB._font_variants_for_ui()
+	var ital: FontVariation = pv["italics_font"]
+	var bold_ital: FontVariation = pv["bold_italics_font"]
+	fails += _check(is_equal_approx(bold_ital.variation_embolden, PB._BOLD_EMBOLDEN) \
+			and is_equal_approx(ital.variation_transform.x.y, PB._ITALIC_SKEW) \
+			and is_equal_approx(bold_ital.variation_transform.x.y, PB._ITALIC_SKEW),
+		"preview italic/bold-italic fonts keep their skew + embolden")
+	fails += _check(ital.base_font == GameManager.font() and not ital.fallbacks.is_empty(),
+		"preview font variants track the UI face and keep the emoji fallback")
 	GameManager.set_font_size(GameManager.BASE_FONT_SIZE + 4)
 	fails += _check(win_theme.default_font_size == GameManager.BASE_FONT_SIZE + 4,
 		"font size setting applies globally")
