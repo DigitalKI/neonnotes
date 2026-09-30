@@ -153,6 +153,28 @@ _Last updated: 2026-09-30 · Godot 4.7 · renderer: gl_compatibility_
   `set -e`, so the known mobile-tree-touch failure aborts the run before
   sync/smoke (trash was moved ahead of it so it still runs) — run sync/smoke
   individually.
+- **Godot-docs test vault (2026-09-30):** `tools/gen_godot_docs_vault.py`
+  turns every class in `godotengine/godot-docs` @ `4.7` (**1078**) into one
+  NeonNotes note in a scratch vault (`build/godot-docs-vault`, gitignored):
+  ~1088 notes / 8 MiB / ~12.7k `[[wiki-link]]`s, scan ~100 ms. reST→Markdown
+  is converted in-process (no docutils/pandoc dependency) with YAML front
+  matter and a controlled tag vocabulary — always `godot/api/class`, an
+  inheritance-branch tag (`core`, `built-in-types`, `refcounted-types`,
+  `resources`, `nodes`, `2d`, `3d`, `ui`, `animations`), heuristic topic tags
+  (`physics`, `rendering`, `networking`, `math`, … from the class summary only,
+  so big classes don't tag half the engine) and attribute tags (`popular`,
+  `deprecated`, `experimental`, `abstract`, `has-methods/-signals/-…`). Folder
+  companion notes are emitted so folder-as-note merge works. Sources cache under
+  `build/.godot-docs-cache/<branch>/`, so repeat runs are offline (`--offline`);
+  `--tutorials scripting,ui` adds manual pages (area tag + `#tutorial`).
+  Validate/index with `NEONNOTES_VAULT=$PWD/build/godot-docs-vault godot
+  --headless --path . scenes/dev/VerifyDocsVault.tscn` — it scans through the
+  real `GameManager`/`WikiLinks` and asserts note/tag/link/graph health.
+  **Gotcha: a folder name must never equal a class name** — a `node/` folder
+  companion note would win the wiki-link basename lookup and steal every
+  `[[Node]]` link, hence `nodes/`, `resources/`, `refcounted-types/`, etc.
+  Built by hand (not part of `run_tests.sh`): it needs a generated + gitignored
+  vault, and `NEONNOTES_VAULT` keeps the run off the real vault.
 - **Dev/MCP session isolation (2026-09-30, revised):** isolated *opt-in* only.
   The godot-mcp `play_scene` tool sets `NEONNOTES_DEV=1` for the game it spawns
   (cleared on `stop_scene`, after the child has started, and at editor startup),
@@ -211,7 +233,9 @@ _Last updated: 2026-09-30 · Godot 4.7 · renderer: gl_compatibility_
   every frame while visible (throttle if label cost shows up on mobile). HTML
   export parses + writes on the main thread.
 - **Export hygiene (2026-09-30):** `tests/*`, `scenes/dev/*` and `scripts/dev/*`
-  are in `exclude_filter`; `SmokeDriver` is loaded lazily in `_start_smoke()`
+  are in `exclude_filter` (`tools/*` holds only the Python docs-vault
+  generator — harmless if exported, but add it there when next editing the
+  preset in the editor); `SmokeDriver` is loaded lazily in `_start_smoke()`
   so `scripts/dev/` is droppable from exports.
 - **Boot profiling (2026-09-30):** main.gd `_boot_mark()` prints
   `[boot] <phase> +Nms total Nms` in any debug build (or with
@@ -373,6 +397,8 @@ _These OVERRIDE the skill's defaults for this project._
 | `res://scripts/sync/sync_service.gd` | LAN discovery/handshake/streaming transfer |
 | `res://scripts/components/` | Theme/Layout/SlashMenu/Export/VaultTree components |
 | `res://tests/` | `run_tests.sh` + unit/drag/sync/smoke scenes |
+| `tools/gen_godot_docs_vault.py` | Builds the big Godot-docs test vault (reST→Markdown, tags, wiki-links) |
+| `scripts/dev/verify_docs_vault.gd` | Scans/validates the generated docs vault (`scenes/dev/VerifyDocsVault.tscn`) |
 
 ## 7. Invariants & gotchas
 
