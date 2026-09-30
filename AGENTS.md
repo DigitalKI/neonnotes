@@ -22,6 +22,17 @@ enabled, run the main scene, then use MCP scene-tree inspection, screenshots,
 runtime-error collection, and node evaluation before guessing at layout or
 state bugs. The main scene is `res://scenes/main/Main.tscn`.
 
+**MCP runs are isolated; the developer's own runs are not.** The `play_scene`
+MCP tool marks the game it spawns with `NEONNOTES_DEV=1`, which
+`GameManager.is_dev_session()` turns into an isolated session: the disposable
+`user://neonnotes-dev` vault, `suppress_settings_save` on, sync pairing dropped.
+So agent-based UI testing can never create notes in, or repoint, the user's real
+vault — and a normal editor Play / `godot --path .` / shipped app keeps the real
+vault **and real sync identity**. When you launch the app yourself (not via
+`play_scene`), set `NEONNOTES_DEV=1` to stay isolated, or
+`NEONNOTES_VAULT=<path>` for a specific scratch vault. Never launch an automated
+run without one of those.
+
 ## Important project rules
 
 - Use `GameManager` for global vault state; do not add another autoload.
@@ -33,6 +44,13 @@ state bugs. The main scene is `res://scenes/main/Main.tscn`.
   field without saving and `GameManager.suppress_settings_save` blocks any
   settings write during smoke; the drag test saves the original vault back.
   Changing a vault for an ad-hoc harness still requires restoring it yourself.
+- **Dev/MCP sessions never touch the real vault.** Isolation is opt-in:
+  `NEONNOTES_DEV=1` (set automatically by the MCP `play_scene` tool) or
+  `NEONNOTES_VAULT=<path>` makes `GameManager.is_dev_session()` redirect the run
+  to `user://neonnotes-dev` with settings writes suppressed and sync pairing
+  cleared. There is no auto-detection on editor/desktop launches — that would
+  hijack a normal run's vault and sync. Set one of those env vars for every
+  automated launch.
 - Flush edits before switching notes, modes, sync, or closing.
 - Preserve folder-as-note merging, drag/drop link rewriting, and mobile drawer behavior.
 - Keep exports under `vault/exports/` and embedded media under `vault/media/`.

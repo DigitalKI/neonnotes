@@ -109,11 +109,25 @@ _Last updated: 2026-09-30 · Godot 4.7 · renderer: gl_compatibility_
   nothing selected → vault root, appended) via
   `VaultTreeComponent.order_new_note()` writing `vault/.neonnotes.json`.
 - Tests: `./tests/run_tests.sh`
-  (unit/tree-drag/mobile-tree-touch/sync/trash/smoke), graded by per-test
+  (unit/search-worker/tree-drag/trash/dev-isolation/mobile-tree-touch/sync/smoke),
+  graded by per-test
   `RESULT: OK` markers; `NEONNOTES_SMOKE=1` smoke path. `run_tests.sh` uses
   `set -e`, so the known mobile-tree-touch failure aborts the run before
   sync/smoke (trash was moved ahead of it so it still runs) — run sync/smoke
   individually.
+- **Dev/MCP session isolation (2026-09-30, revised):** isolated *opt-in* only.
+  The godot-mcp `play_scene` tool sets `NEONNOTES_DEV=1` for the game it spawns
+  (cleared on `stop_scene`, after the child has started, and at editor startup),
+  and `GameManager.is_dev_session()` reacts to `NEONNOTES_DEV=1` /
+  `NEONNOTES_VAULT=<path>` by redirecting to the disposable `user://neonnotes-dev`
+  vault, setting `suppress_settings_save`, and clearing loaded sync pairing — so
+  agent UI testing cannot create notes in, or repoint, the real vault. There is
+  **no heuristic on editor/desktop launches**: a normal Play/F5/`godot --path .`
+  run and the shipped app keep the real vault *and real sync identity* (an earlier
+  "editor binary with a window" heuristic hijacked those, opening `neonnotes-dev`
+  and killing sync). Policy lives in `scripts/common/dev_session.gd`
+  (dependency-free so `--script` harnesses can preload it); unit-tested via
+  `DevSession.is_active()` and `tests/TestDevIsolation.tscn`.
 
 ## 3. Direction & next steps
 
@@ -308,6 +322,7 @@ _These OVERRIDE the skill's defaults for this project._
 | `res://scenes/main/Main.tscn` | Authored UI shell; instances component subscenes |
 | `res://scripts/main.gd` | Main wiring: modes, autosave, sync, settings page, smoke test |
 | `res://scripts/common/GameManager.gd` | Autoload — global state, scan, palettes, settings, link index |
+| `res://scripts/common/dev_session.gd` | Static editor/MCP dev-session detection (isolates agent runs from the real vault) |
 | `res://scripts/markdown/markdown_parser.gd` | Unified parser (blocks + inline spans) |
 | `res://scripts/markdown/wiki_links.gd` | Link extract/resolve/backlinks/graph |
 | `res://scripts/common/path_remap.gd` | Static move/remap helpers (unit-tested) |
@@ -330,6 +345,25 @@ _These OVERRIDE the skill's defaults for this project._
   `GameManager.vault_dir` directly; `GameManager.suppress_settings_save`
   makes `_save_settings()` a no-op during tests (opening a note alone would
   otherwise persist the smoke vault).
+- **Ephemeral sessions must never sync.** Test/dev harnesses set
+  `suppress_settings_save` and run a fixture vault while sharing this device's
+  real vault id/secret. `Main._start_background_sync()` and
+  `SyncService.start_discovery()` / `enable_auto_sync()` therefore refuse to run
+  when `GameManager.suppress_settings_save` is true. Without that gate a fixture
+  vault announces/listens on the LAN as the real vault and syncs its test notes
+  to paired peers — 2026-09-30 incident: `tests/ReproTreeTap.tscn` and the smoke
+  run pushed `Note00`…`Note39`, `Folder*`, `sub/*`, `dnd/*`, `imgtest.md`,
+  `media/nn_smoke_img.png` to the paired phone (Android-8928). The loopback
+  sync test bypasses discovery (`_poll_server` + `push_to`), so it is unaffected.
+  Don't remove the gate; if a harness needs real sync, it must use its own
+  vault id/secret, not the real device's.
+- **Isolation is explicit, never guessed**: `GameManager._apply_dev_isolation()`
+  runs only when `DevSession.is_active()` (i.e. `NEONNOTES_DEV=1`, set by MCP
+  `play_scene`, or `NEONNOTES_VAULT=<path>`). It assigns the disposable vault
+  directly, suppresses settings writes and drops sync pairing before anything
+  scans or writes. **Do not add editor/debugger/desktop heuristics back** — that
+  hijacked normal runs (test vault + no sync) while still missing real agent
+  launches. Every automated launch must set one of those env vars.
 - **Flush before switching**: `_flush_save()` before note/mode switches, sync,
   and close. It skips when the editor is hidden (preview) — code paths that
   edit text from preview (image picker) must call `GameManager.write_note`
