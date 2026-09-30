@@ -1,6 +1,6 @@
 class_name VaultTreeComponent
 extends PanelContainer
-## SidePanel subscene root + vault-tree controller: tag chips, tree building
+## SidePanel subscene root + vault-tree controller: #tag search, tree building
 ## (folder-as-note merge), drag & drop, ordering (vault/.neonnotes.json),
 ## move/rename with wiki-link rewrite, and empty-folder pruning.
 ## Note-state stays in GameManager; the host injects save_cb (_flush_save)
@@ -15,6 +15,8 @@ signal delete_requested
 @onready var backlinks_box: VBoxContainer = %BacklinksBox
 @onready var config_btn: Button = %ConfigBtn
 @onready var search: LineEdit = %Search
+@onready var tag_browse_btn: Button = %TagBrowseBtn
+@onready var active_tags: HFlowContainer = %ActiveTags
 
 var save_cb: Callable
 var flash_cb: Callable
@@ -47,6 +49,12 @@ var _search_showing_results := false
 var _search_folders := {}  # path -> TreeItem, filtered hierarchy for search rows
 const SEARCH_DEBOUNCE_SECONDS := 0.35
 const SEARCH_ROWS_PER_FRAME := 64
+const TAG_SUGGEST_SCENE := preload("res://scenes/components/tag_suggest.tscn")
+## Keyword portion of the query (everything that is not a #tag).
+var _text_query := ""
+## Lower-cased tags parsed out of the query; a note must have all of them.
+var _parsed_tags: Array[String] = []
+var _tag_suggest: TagSuggest
 
 ## Wire behavior once the scene nodes are ready. The host connects
 ## palette_btn/vault_btn/sync_btn/tree_delete_btn signals itself.
@@ -91,6 +99,8 @@ func build() -> void:
 	_mobile_hold_timer.timeout.connect(_activate_mobile_drag)
 	add_child(_mobile_hold_timer)
 	search.text_changed.connect(_on_search_changed)
+	_setup_tag_suggest()
+	tag_browse_btn.pressed.connect(_on_tag_browse_pressed)
 	if _tree_uses_builtin_activation():
 		side_tree.item_activated.connect(_on_tree_selected)
 	# Match the editor's touch-friendly scrollbar width. Tree exposes its
@@ -175,6 +185,8 @@ func _tree_ignores_raw_touch() -> bool:
 	return OS.get_name() == "Android"
 
 func _handle_tree_press(pos: Vector2) -> void:
+	if _tag_suggest != null:
+		_tag_suggest.close()
 	_press_pos = pos
 	_press_item = _tree_item_at(pos)
 	_press_item_toggle = _press_item != null and _is_tree_toggle_click(_press_item, pos)
@@ -236,17 +248,30 @@ func _reset_tree_touch_state() -> void:
 	_press_item_toggle = false
 
 
-## Active tag filter ("" = show all). Set by the tag chips above the tree.
-var active_tag := ""
-
-
+## True when `n` carries every tag in the query. Case-insensitive; the
+## index keeps the original casing.
 func note_visible(n: String) -> bool:
-	return active_tag == "" or GameManager.tags.get(n, []).has(active_tag)
+	if _parsed_tags.is_empty():
+		return true
+	var note_tags: Array = GameManager.tags.get(n, [])
+	for want in _parsed_tags:
+		var found := false
+		for t in note_tags:
+			if String(t).to_lower() == want:
+				found = true
+				break
+		if not found:
+			return false
+	return true
+
+## A query is active with any #tag, or a keyword of at least 3 chars.
+## Tag-only queries never touch the disk: they filter the in-memory index.
+func _has_active_search() -> bool:
+	return not _parsed_tags.is_empty() or _text_query.length() >= 3
 
 func visible_notes() -> Array[String]:
 	var out: Array[String] = []
-	var search_active := _search_query.length() >= 3
-	if search_active:
+	if _search_showing_results:
 		# Results already have title-first order; do not re-sort with repeated
 		# linear find() calls (quadratic on a large result set).
 		for n in _search_results:
@@ -258,41 +283,85 @@ func visible_notes() -> Array[String]:
 				out.append(n)
 	return out
 
-## Row of tag chips above the tree: click to filter, click again to clear.
-func _build_tag_bar() -> void:
-	var bar := side_tree.get_parent().get_node_or_null("TagBar") as HFlowContainer
-	if bar == null:
-		bar = HFlowContainer.new()
-		bar.name = "TagBar"
-		var vbox := side_tree.get_parent()
-		vbox.add_child(bar)
-		vbox.move_child(bar, side_tree.get_index())
-	var all := GameManager.all_tags()
-	bar.visible = all.size() > 0
-	for c in bar.get_children():
+## Split the stripped query into #tags (lower-cased, deduplicated) + keywords.
+func _parse_query() -> void:
+	var tags: Array[String] = []
+	var words: Array[String] = []
+	for token in _search_query.split(" ", false):
+		if token.begins_with("#"):
+			var t := token.substr(1).strip_edges().to_lower()
+			if t != "" and not tags.has(t):
+				tags.append(t)
+		else:
+			words.append(token)
+	_parsed_tags = tags
+	_text_query = " ".join(words)
+
+## Notes carrying every parsed tag, in vault order (in-memory, no disk).
+func _tag_candidates() -> Array[String]:
+	var out: Array[String] = []
+	for n in GameManager.notes:
+		if note_visible(n):
+			out.append(n)
+	return out
+
+## Autocomplete overlay for the search field + browse button + filter chips.
+func _setup_tag_suggest() -> void:
+	var overlay_parent := get_tree().current_scene
+	if overlay_parent == null:
+		overlay_parent = self
+	_tag_suggest = TAG_SUGGEST_SCENE.instantiate()
+	overlay_parent.add_child(_tag_suggest)
+	_tag_suggest.bind(search, TagSuggest.Mode.INLINE)
+	# Accepting a suggestion rewrites the field; re-run the search explicitly
+	# (a programmatic text assignment does not emit text_changed).
+	_tag_suggest.tag_chosen.connect(func(_tag: String): _on_search_changed(search.text))
+
+func _on_tag_browse_pressed() -> void:
+	if _tag_suggest == null:
+		return
+	if _tag_suggest.is_open():
+		_tag_suggest.close()
+	else:
+		_tag_suggest.open_browse()
+
+## Chips under the search field showing applied tags (× removes one).
+func _refresh_active_tag_chips() -> void:
+	# Detach immediately so the count is accurate this frame; queue_free
+	# avoids freeing the chip whose pressed signal we may be inside.
+	for c in active_tags.get_children():
+		active_tags.remove_child(c)
 		c.queue_free()
-	for tag in all:
-		var b := Button.new()
-		b.text = ("● " if tag == active_tag else "#") + tag
-		b.toggle_mode = false
-		b.pressed.connect(func():
-			active_tag = "" if active_tag == tag else tag
-			refresh())
-		bar.add_child(b)
-	if all.size() > 0:
-		var clear := Button.new()
-		clear.text = "✕"
-		clear.visible = active_tag != ""
-		clear.pressed.connect(func():
-			active_tag = ""
-			refresh())
-		bar.add_child(clear)
+	active_tags.visible = not _parsed_tags.is_empty()
+	for tag in _parsed_tags:
+		var chip := Button.new()
+		chip.text = "#" + tag + "  ×"
+		chip.tooltip_text = "Remove tag filter " + tag
+		chip.focus_mode = Control.FOCUS_NONE
+		chip.pressed.connect(_remove_tag_from_query.bind(tag))
+		active_tags.add_child(chip)
+
+func _remove_tag_from_query(tag: String) -> void:
+	_parsed_tags.erase(tag)
+	var kept: Array[String] = []
+	for t in _parsed_tags:
+		kept.append("#" + t)
+	if _text_query != "":
+		kept.append(_text_query)
+	search.text = " ".join(kept)
+	search.caret_column = search.text.length()
+	# Programmatic assignment does not emit text_changed: re-run explicitly.
+	_on_search_changed(search.text)
 
 func _on_search_changed(value: String) -> void:
 	var next_query := value.strip_edges()
 	if next_query == _search_query:
 		return
 	_search_query = next_query
+	_parse_query()
+	# Chips are in-memory only: update them as the user types, not on the
+	# debounced tree refresh.
+	_refresh_active_tag_chips()
 	_search_generation += 1
 	_search_cancel = true
 	_search_pending = true
@@ -311,7 +380,7 @@ func _start_search() -> void:
 		# Never rebuild the unfiltered tree while an older worker is still
 		# reading; start/reset only once it exits.
 		return
-	if _search_query.length() < 3:
+	if not _has_active_search():
 		_search_pending = false
 		_search_results = []
 		# Rebuild if we were showing a filtered tree (even if zero matches).
@@ -333,13 +402,17 @@ func _start_search() -> void:
 		root.set_selectable(0, true)
 	_search_cancel = false
 	var generation := _search_generation
-	var query := _search_query.to_lower()
-	# Capture cheap metadata only; read note bodies on the worker.
-	var names := GameManager.notes.duplicate()
+	# Tags already narrowed the in-memory index, so only these files are read.
+	var candidates := _tag_candidates()
+	if _text_query.length() < 3:
+		# Tag-only query: no worker, no disk — publish the filtered list now.
+		_apply_search_results(generation, candidates)
+		return
 	var titles := GameManager.titles.duplicate()
 	var vault_path := GameManager.vault_abs()
+	var query := _text_query.to_lower()
 	_search_thread = Thread.new()
-	_search_thread.start(_search_worker.bind(names, titles, vault_path, query, generation))
+	_search_thread.start(_search_worker.bind(candidates, titles, vault_path, query, generation))
 
 func _activate_mobile_drag() -> void:
 	if _mobile_touch_candidate and _touch_src_path != "":
@@ -380,6 +453,9 @@ func _exit_tree() -> void:
 	if _search_thread != null:
 		_search_thread.wait_to_finish()
 		_search_thread = null
+	if _tag_suggest != null and is_instance_valid(_tag_suggest):
+		_tag_suggest.queue_free()
+		_tag_suggest = null
 
 func _search_worker(names: Array[String], titles: Dictionary, vault_path: String, query: String, generation: int) -> void:
 	var title_hits: Array = []
@@ -389,6 +465,16 @@ func _search_worker(names: Array[String], titles: Dictionary, vault_path: String
 		if _search_cancel or generation != _search_generation:
 			return
 		var title: String = String(titles.get(name, ""))
+		var title_lower := title.to_lower()
+		var title_matches := true
+		for word in words:
+			if not title_lower.contains(word):
+				title_matches = false
+				break
+		if title_matches:
+			# The title already carries every keyword: a hit with no disk read.
+			title_hits.append(name)
+			continue
 		var file := FileAccess.open(vault_path.path_join(name), FileAccess.READ)
 		var text := ""
 		if file != null:
@@ -402,18 +488,14 @@ func _search_worker(names: Array[String], titles: Dictionary, vault_path: String
 			if not haystack.contains(word):
 				matches_all = false
 				break
-		if not matches_all:
-			continue
-		if title.to_lower().contains(query):
-			title_hits.append(name)
-		else:
+		if matches_all:
 			content_hits.append(name)
 	if _search_cancel or generation != _search_generation:
 		return
 	call_deferred("_apply_search_results", generation, title_hits + content_hits)
 
 func _apply_search_results(generation: int, results: Array) -> void:
-	if _search_shutting_down or generation != _search_generation or _search_query.length() < 3:
+	if _search_shutting_down or generation != _search_generation or not _has_active_search():
 		return
 	_search_results = results
 	refresh()
@@ -421,7 +503,7 @@ func _apply_search_results(generation: int, results: Array) -> void:
 func refresh() -> void:
 	side_tree.clear()
 	side_tree.hide_root = false
-	_build_tag_bar()
+	_refresh_active_tag_chips()
 	# Drag notes/folders between folders + reorder rows. Tree rows are never
 	# expanded by hover; folder expansion is handled only by the arrow click.
 	side_tree.set_drop_mode_flags(Tree.DROP_MODE_ON_ITEM | Tree.DROP_MODE_INBETWEEN)
@@ -436,7 +518,7 @@ func refresh() -> void:
 	root.disable_folding = true
 	root.collapsed = false
 	root.set_selectable(0, true)
-	_search_showing_results = _search_query.length() >= 3
+	_search_showing_results = _has_active_search()
 	if _search_showing_results:
 		_search_folders = {}
 		_search_render_queue = visible_notes()
@@ -495,29 +577,17 @@ func refresh() -> void:
 			_add_note_leaf(root, n)
 ## Search results keep their real folder hierarchy (folders along the paths of
 ## matched notes only), so rows remain valid drag targets within the tree.
+## Folder-as-note companions are merged into their folder row exactly like the
+## unfiltered tree, so a companion note never shows up twice.
 func _add_search_result(n: String) -> void:
-	var parts := n.split("/")
-	var parent: TreeItem = side_tree.get_root()
-	var path := ""
-	for i in parts.size() - 1:
-		path = (path + "/" if path != "" else "") + parts[i]
-		if not _search_folders.has(path):
-			var it := side_tree.create_item(parent)
-			var companion: String = path + ".md"
-			if GameManager.notes.has(companion):
-				var ft: String = GameManager.titles.get(companion, "")
-				if ft == "":
-					ft = parts[i]
-				it.set_text(0, "◈ " + ft)
-			else:
-				it.set_text(0, "▸ " + parts[i])
-			it.set_tooltip_text(0, parts[i])
-			it.set_metadata(0, companion if GameManager.notes.has(companion) else path)
-			it.set_selectable(0, true)
-			it.collapsed = false  # reveal matched notes inside
-			_search_folders[path] = it
-		parent = _search_folders[path]
-	var base := parts[-1].trim_suffix(".md")
+	var base := n.get_file().trim_suffix(".md")
+	if n.ends_with(".md") and DirAccess.dir_exists_absolute(
+			GameManager.vault_abs().path_join(n.trim_suffix(".md"))):
+		# Folder-as-note: `x.md` + `x/` share one row (metadata = the note), so
+		# build/reuse that folder row instead of a separate leaf.
+		_ensure_search_dir(n.trim_suffix(".md"))
+		return
+	var parent := _ensure_search_dir(n.get_base_dir())
 	var label: String = GameManager.titles.get(n, base)
 	if label == "":
 		label = base
@@ -526,6 +596,35 @@ func _add_search_result(n: String) -> void:
 	var snippet: String = String(_search_snippets.get(n, ""))
 	leaf.set_tooltip_text(0, n + (" — " + snippet if snippet != "" else ""))
 	leaf.set_metadata(0, n)
+
+## Create (or reuse) the folder rows for `dir` and its ancestors, returning the
+## row for `dir`. A folder with a companion note is one merged row whose
+## metadata is the note, matching the unfiltered tree's folder-as-note merge.
+func _ensure_search_dir(dir: String) -> TreeItem:
+	var parent: TreeItem = side_tree.get_root()
+	if dir == "":
+		return parent
+	var path := ""
+	for part in dir.split("/"):
+		path = (path + "/" if path != "" else "") + part
+		if not _search_folders.has(path):
+			var it := side_tree.create_item(parent)
+			var companion: String = path + ".md"
+			var merged: bool = GameManager.notes.has(companion)
+			if merged:
+				var ft: String = GameManager.titles.get(companion, "")
+				if ft == "":
+					ft = part
+				it.set_text(0, "◈ " + ft)
+			else:
+				it.set_text(0, "▸ " + part)
+			it.set_tooltip_text(0, part)
+			it.set_metadata(0, companion if merged else path)
+			it.set_selectable(0, true)
+			it.collapsed = false  # reveal matched notes inside
+			_search_folders[path] = it
+		parent = _search_folders[path]
+	return parent
 
 func _add_note_leaf(parent: TreeItem, n: String) -> void:
 	var base := n.get_file().trim_suffix(".md")
@@ -662,6 +761,9 @@ func _clear_drop_hint() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_DRAG_END:
 		_clear_drop_hint()
+	elif what == NOTIFICATION_VISIBILITY_CHANGED and not is_visible_in_tree() \
+			and _tag_suggest != null:
+		_tag_suggest.close()
 
 func _perform_drop(src: String, it: TreeItem, section: int) -> void:
 	if src == "":

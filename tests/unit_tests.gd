@@ -3,6 +3,7 @@ extends SceneTree
 const NoteMetadataHelper := preload("res://scripts/common/note_metadata.gd")
 const DevSession := preload("res://scripts/common/dev_session.gd")
 const GameManagerScript := preload("res://scripts/common/GameManager.gd")
+const TagMatchScript := preload("res://scripts/common/tag_match.gd")
 
 var failures := 0
 
@@ -16,6 +17,7 @@ func _init() -> void:
 	_check_media_import()
 	_check_dev_session_detection()
 	_check_font_settings()
+	_check_tag_suggest()
 	print("UNIT RESULT: %s (%d failures)" % ["FAIL" if failures > 0 else "OK", failures])
 	quit(failures)
 
@@ -282,6 +284,13 @@ func _check_graph_model() -> void:
 	_check(m.node_label("Root/Gamedev/Design/Levels.md") == "Level Design",
 		"labels use the front-matter title")
 	_check(m.node_label("Root/JW.md") == "JW", "labels fall back to the file name")
+
+func _check_tag_suggest() -> void:
+	_check(TagMatchScript.score("jw", "jw") == 0, "exact tag match ranks first")
+	_check(TagMatchScript.score("jw", "j") == 0, "prefix tag match")
+	_check(TagMatchScript.score("jw", "j-w") >= 0, "near-duplicate tag surfaces (jw / j-w)")
+	_check(TagMatchScript.score("coding", "code") >= 0, "near-duplicate tag surfaces (coding / code)")
+	_check(TagMatchScript.score("home", "work") < 0, "unrelated tag does not surface")
 
 func _check(ok: bool, label: String) -> void:
 	if ok:

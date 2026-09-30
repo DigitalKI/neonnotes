@@ -9,11 +9,29 @@ script = ExtResource("1_comp")
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Search" type="LineEdit" parent="SideVBox" unique_id=1750153400]
+[node name="SearchRow" type="HBoxContainer" parent="SideVBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Search" type="LineEdit" parent="SideVBox/SearchRow" unique_id=1750153400]
 unique_name_in_owner = true
 layout_mode = 2
-placeholder_text = "Search notes (3+ characters)…"
+size_flags_horizontal = 3
+placeholder_text = "Search notes or #tags…"
 clear_button_enabled = true
+
+[node name="TagBrowseBtn" type="Button" parent="SideVBox/SearchRow"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Browse all tags"
+text = "🏷"
+
+[node name="ActiveTags" type="HFlowContainer" parent="SideVBox"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/h_separation = 4
+theme_override_constants/v_separation = 4
 
 [node name="TreeDeleteBar" type="HBoxContainer" parent="SideVBox" unique_id=836007085]
 layout_mode = 2

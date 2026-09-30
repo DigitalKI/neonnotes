@@ -157,7 +157,7 @@ theme_override_constants/separation = 6
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
-placeholder_text = "Add a tag…"
+placeholder_text = "Add or pick a tag…"
 
 [node name="TagsAdd" type="Button" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TagsPanel/TagsRow/TagsInputRow" unique_id=1668094736]
 unique_name_in_owner = true

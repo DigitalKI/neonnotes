@@ -95,10 +95,57 @@ func _ready() -> void:
 	DirAccess.remove_absolute(vault.path_join("inner.md"))
 	DirAccess.remove_absolute(vault.path_join("sub/inner.md"))
 	DirAccess.remove_absolute(vault.path_join("sub"))
+	DirAccess.remove_absolute(vault.path_join("proj/task.md"))
+	DirAccess.remove_absolute(vault.path_join("proj"))
+	DirAccess.remove_absolute(vault.path_join("proj.md"))
 	# A stale result must not replace a newer query or re-create old rows.
 	panel._on_search_changed("different")
 	panel._apply_search_results(panel._search_generation - 1, many)
 	ok = ok and panel._search_results == ["inner.md"] and panel._search_render_queue.is_empty()
+	panel._search_timer.stop()
+	panel._search_pending = false
+	# Folder-as-note merge under filtering: `proj.md` + `proj/` must be ONE row
+	# (never a folder row plus a duplicate companion leaf).
+	DirAccess.make_dir_recursive_absolute(vault.path_join("proj"))
+	var pf := FileAccess.open(vault.path_join("proj.md"), FileAccess.WRITE)
+	pf.store_string("proj body")
+	pf.close()
+	var ptf := FileAccess.open(vault.path_join("proj/task.md"), FileAccess.WRITE)
+	ptf.store_string("proj task body")
+	ptf.close()
+	GameManager.notes = ["a.md", "b.md", "c.md", "inner.md", "proj.md", "proj/task.md"] as Array[String]
+	GameManager.titles["proj.md"] = "Proj"
+	GameManager.titles["proj/task.md"] = "Proj Task"
+	panel._on_search_changed("proj")
+	ok = ok and await _wait_for_results(panel, ["proj.md", "proj/task.md"])
+	var proj_root := panel.side_tree.get_root()
+	ok = ok and proj_root.get_child_count() == 1
+	var proj_row := proj_root.get_first_child()
+	ok = ok and String(proj_row.get_metadata(0)) == "proj.md"
+	ok = ok and proj_row.get_child_count() == 1
+	ok = ok and String(proj_row.get_first_child().get_metadata(0)) == "proj/task.md"
+	# --- #tag search: in-memory filter, AND semantics, no worker for tag-only ---
+	GameManager.tags = {"a.md": ["work", "urgent"], "b.md": ["work"], "c.md": ["home"]}
+	panel._on_search_changed("#work")
+	ok = ok and await _wait_for_results(panel, ["a.md", "b.md"])
+	panel._on_search_changed("#urgent")
+	ok = ok and await _wait_for_results(panel, ["a.md"])
+	panel._on_search_changed("#work #urgent")
+	ok = ok and await _wait_for_results(panel, ["a.md"])
+	# Keywords run only over the tag-filtered candidates (c.md is never read).
+	panel._on_search_changed("#work needletoken")
+	ok = ok and await _wait_for_results(panel, ["a.md", "b.md"])
+	panel._on_search_changed("#missing")
+	ok = ok and await _wait_for_results(panel, [])
+	# Parsing + active-filter chips remove a single tag from the field.
+	panel._on_search_changed("#work #urgent")
+	ok = ok and panel._parsed_tags.size() == 2 and panel._parsed_tags[0] == "work" \
+		and panel._parsed_tags[1] == "urgent" and panel._text_query == ""
+	ok = ok and panel.active_tags.visible and panel.active_tags.get_child_count() == 2
+	panel._remove_tag_from_query("work")
+	ok = ok and panel._parsed_tags.size() == 1 and panel._parsed_tags[0] == "urgent"
+	ok = ok and panel.search.text == "#urgent"
+	panel._on_search_changed("")
 	panel._search_timer.stop()
 	panel._search_pending = false
 	_finish(panel, previous_vault, previous_notes, previous_titles, previous_tags, previous_save, vault, ok)

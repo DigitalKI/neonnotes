@@ -67,6 +67,8 @@ var slash_menu: SlashMenuComponent = preload("res://scenes/components/slash_menu
 @onready var tags_chips: HFlowContainer = %TagsChips
 @onready var tags_input: LineEdit = %TagsInput
 @onready var tags_add: Button = %TagsAdd
+const TAG_SUGGEST_SCENE := preload("res://scenes/components/tag_suggest.tscn")
+var _tag_suggest: TagSuggest
 var _note_tags: Array[String] = []
 
 ## Boot timing: printed when `NEONNOTES_BOOT_DEBUG=1` (or always in a debug build).
@@ -296,6 +298,7 @@ func _build_dynamic_ui() -> void:
 	code_edit.get_v_scroll_bar().custom_minimum_size = Vector2(14, 0)
 	tags_add.pressed.connect(_add_note_tag)
 	tags_input.text_submitted.connect(func(_value: String): _add_note_tag())
+	_setup_tag_suggest()
 	title_input.text_changed.connect(_on_note_title_changed)
 	tags_panel.visible = false
 	title_panel.visible = false
@@ -568,6 +571,26 @@ func _add_note_tag() -> void:
 	tags_input.clear()
 	_refresh_note_tag_chips()
 	_flush_save()
+
+## Tag autocomplete for the note editor's TagsInput: lists every vault tag
+## with its note count and surfaces near-matches (jw / j-w) so near-duplicate
+## tags are caught before they are created.
+func _setup_tag_suggest() -> void:
+	var overlay_parent := get_tree().current_scene
+	if overlay_parent == null:
+		overlay_parent = self
+	_tag_suggest = TAG_SUGGEST_SCENE.instantiate()
+	overlay_parent.add_child(_tag_suggest)
+	_tag_suggest.bind(tags_input, TagSuggest.Mode.WHOLE)
+	_tag_suggest.tag_chosen.connect(_on_tag_suggestion_chosen)
+
+func _on_tag_suggestion_chosen(_tag: String) -> void:
+	# The component already wrote the canonical tag into the field; add it.
+	_add_note_tag()
+
+func _close_tag_suggest() -> void:
+	if _tag_suggest != null:
+		_tag_suggest.close()
 
 func _on_font_changed() -> void:
 	# Family and size both flow through ThemeComponent + LayoutComponent; the
@@ -852,6 +875,7 @@ func _perform_delete(rel: String, keep_children: bool = false) -> void:
 func _set_mode() -> void:
 	if page_mode != "":
 		return  # a page owns the screen until it closes
+	_close_tag_suggest()
 	code_edit.visible = source_mode
 	edit_search.visible = source_mode
 	edit_padding.visible = source_mode

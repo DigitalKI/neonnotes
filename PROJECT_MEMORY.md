@@ -42,7 +42,29 @@ _Last updated: 2026-09-30 · Godot 4.7 · renderer: gl_compatibility_
   tombstone) or purges. `NoteCrud.purge_expired()` drops items older than
   `TRASH_RETENTION_DAYS` (30) on launch and vault switch.
 - Vault tree with folder-as-note merge, drag & drop (notes + folders), custom
-  ordering in `vault/.neonnotes.json`, wiki-link rewriting on move, tag chips.
+  ordering in `vault/.neonnotes.json`, wiki-link rewriting on move.
+- **Tag search + tag autocomplete (2026-09-30):** the always-visible tag-chip
+  bar above the tree is **removed**. The search field now takes free text *and*
+  `#tags`: a query is `keywords` + `#tag`s, AND-composed and case-insensitive.
+  Tags filter the in-memory `GameManager.tags` index first, so the worker only
+  reads the matching files (a note whose title already carries every keyword is
+  a hit with no disk read at all); a **tag-only** query publishes instantly with
+  no worker and no disk. Parsed tags render as removable chips under the field,
+  and a 🏷 button opens the full tag list. Filtered rows reuse the unfiltered
+  folder-as-note merge (`_ensure_search_dir`): a companion `x.md` shares its
+  `x/` row (metadata = the note), so it is never drawn as a second leaf. A
+  shared **`TagSuggest`** overlay
+  (`scenes/components/tag_suggest.tscn`, an in-scene `top_level` panel: no
+  `Window`/`PopupMenu` focus steal, rows are `FOCUS_NONE` so the LineEdit keeps
+  focus and the Android keyboard stays open, height-capped to the visible
+  space and scrollable) autocompletes tags with note counts, ranked
+  prefix → substring → near-match. The same overlay is bound to the note
+  editor's `TagsInput` (whole-value mode), so near-duplicate tags (jw/j-w,
+  coding/code) surface the canonical tag before a new one is created.
+  `TagMatch` (`scripts/common/tag_match.gd`) holds the pure scoring shared by
+  the overlay and the unit tests. The overlay closes on Esc, accept, field
+  blur, and on a click/tap anywhere outside the field or the overlay (needed
+  because non-focusable areas never fire `focus_exited`).
   Search debounces typing (0.35 s), copies only path/title metadata on the UI
   thread, and reads/matches note bodies on a worker. Cancellation is polled
   once per frame (not a tight deferred loop); matches are published only on
@@ -55,6 +77,8 @@ _Last updated: 2026-09-30 · Godot 4.7 · renderer: gl_compatibility_
 - Knowledge graph: radial vault map with flowing (animated, directional)
   link light, folder-spine hierarchy, level semantics, seeded-by-`GraphModel`
   (renderer-agnostic; user wants a "neon city" redesign eventually).
+  **Follow-up:** when the graph gains filtering, reuse the tree search's
+  `keywords + #tag` grammar so the vocabulary behaves identically everywhere.
 - LAN sync (`scripts/sync/`): UDP 47770 discovery + TCP 47771 streaming
   transfer, eight-word vault phrase pairing, trusted peers, logical-mtime LWW
   with tombstones; deletes/folder moves propagate and refresh the receiver. Media
@@ -68,7 +92,7 @@ _Last updated: 2026-09-30 · Godot 4.7 · renderer: gl_compatibility_
   long-press drag arms after 3 s and consumes drag motion so the tree does not
   scroll away under the held item.
 - Componentized UI: `scripts/components/` (Theme, Layout, SlashMenu, Export,
-  VaultTree, StatusBar/Toolbar subscenes, Settings, Sync). Every in-app
+  VaultTree, StatusBar/Toolbar subscenes, Settings, Sync, TagSuggest). Every in-app
   surface is a **scene-authored page inside `%Content`** — there is no
   mobile/desktop presentation split left, so desktop and mobile show the same
   components at the same sizes. Deleted in that unification: the
@@ -122,7 +146,8 @@ _Last updated: 2026-09-30 · Godot 4.7 · renderer: gl_compatibility_
   nothing selected → vault root, appended) via
   `VaultTreeComponent.order_new_note()` writing `vault/.neonnotes.json`.
 - Tests: `./tests/run_tests.sh`
-  (unit/search-worker/tree-drag/trash/dev-isolation/mobile-tree-touch/sync/smoke),
+  (unit incl. tag-match scoring/search-worker/tree-drag/trash/dev-isolation/
+  mobile-tree-touch/sync/smoke),
   graded by per-test
   `RESULT: OK` markers; `NEONNOTES_SMOKE=1` smoke path. `run_tests.sh` uses
   `set -e`, so the known mobile-tree-touch failure aborts the run before
