@@ -75,7 +75,7 @@ static func _add_block(block: Dictionary, into: VBoxContainer) -> void:
 	var compact: bool = ChartView.compact
 	var d := LayoutComponent.ui_font_delta
 	var sizes := ([38, 30, 24, 20] if not compact else [32, 27, 22, 19])
-	if d > 0:
+	if d != 0:
 		for i in sizes.size():
 			sizes[i] -= d
 	match block["type"]:
@@ -172,21 +172,28 @@ static func _inline(s: String) -> String:
 ## only render when the OS default font happens to cover them — exported
 ## SubViewports (and some Linux setups) lose them.
 static var _emoji_font: Font = null
+static var _emoji_font_name := ""
 static func _font_with_emoji() -> Font:
-	if _emoji_font == null:
+	# Rebuild when the user picks a different UI font: base_font must be the
+	# selected face (a null base resolves to the project default, which would
+	# pin previews back to Share Tech Mono and ignore the setting).
+	var want := GameManager.font_name
+	if _emoji_font == null or _emoji_font_name != want:
 		var emoji := SystemFont.new()
 		emoji.font_names = PackedStringArray(["Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol"])
 		var fv := FontVariation.new()
-		fv.base_font = null
+		fv.base_font = GameManager.font()
 		fv.fallbacks = [emoji]
 		_emoji_font = fv
+		_emoji_font_name = want
 	return _emoji_font
 
 static func _rich(bb: String, default_col: Color) -> RichTextLabel:
-	# Landscape phones shrink every body font by LayoutComponent.ui_font_delta.
-	# Wrapping the whole bbcode scales everything without explicit sizes; tags
-	# that set their own font_size (headings) still win over the wrapper.
-	if LayoutComponent.ui_font_delta > 0:
+	# Landscape phones shrink every body font and the user font-size setting
+	# grows/shrinks it — both via LayoutComponent.ui_font_delta. Wrapping the
+	# whole bbcode scales everything without explicit sizes; tags that set their
+	# own font_size (headings) still win over the wrapper.
+	if LayoutComponent.ui_font_delta != 0:
 		bb = "[font_size=%d]%s[/font_size]" % [16 - LayoutComponent.ui_font_delta, bb]
 	var rt := RichTextLabel.new()
 	rt.name = "PreviewRichText"

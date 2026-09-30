@@ -11,9 +11,11 @@ signal mobile_changed(is_mobile: bool)
 const MOBILE_MARGIN_SIDE := 10
 const MOBILE_MARGIN_BOTTOM := 10
 
-## Font points subtracted from all UI/content fonts when a phone is in
-## landscape (set by update_layout, read by ThemeComponent/PreviewBuilder).
-## Vertical/portrait layout keeps the baseline sizes untouched.
+## Font points subtracted from all UI/content fonts (set by update_layout,
+## read by ThemeComponent/PreviewBuilder). It combines the landscape-phone
+## shrink (2) with the user's font-size preference: a size above the
+## GameManager baseline yields a negative delta (i.e. fonts grow). Portrait
+## desktop layout with the default size keeps it at 0.
 static var ui_font_delta := 0
 
 var root_ctl: Control
@@ -94,7 +96,6 @@ func update_layout() -> void:
 		sidebar.custom_minimum_size = Vector2(mini(280, int(vp.x * 0.75)), 0)
 		# mobile: tree and editor never share space — hide content while the drawer is open
 		content.visible = not drawer_open
-		note_title.add_theme_font_size_override("font_size", 10 if landscape else 14)
 		for btn in toolbar.get_children():
 			if btn is Button:
 				btn.custom_minimum_size = Vector2(46, 38) if landscape else Vector2(52, 44)
@@ -115,12 +116,31 @@ func update_layout() -> void:
 		sidebar.visible = true
 		sidebar.custom_minimum_size = Vector2(220, 0)
 		content.visible = true
-		note_title.add_theme_font_size_override("font_size", 18)
+		_apply_note_title_size()
 		for btn in toolbar.get_children():
 			if btn is Button:
 				btn.custom_minimum_size = Vector2(56, 36)
-	ui_font_delta = 2 if (mobile and vp.x > vp.y) else 0
+	ui_font_delta = (2 if (mobile and vp.x > vp.y) else 0) - GameManager.font_delta()
+	_apply_note_title_size()
 	mobile_changed.emit(is_mobile_layout)
+
+
+## Re-derive the toolbar title size after a font-size change (update_layout
+## early-returns when the mobile/desktop breakpoint has not moved).
+func refresh_fonts() -> void:
+	_apply_note_title_size()
+
+
+## The note title owns its size here (not via ThemeComponent capture): it is
+## smaller on landscape phones and grows/shrinks with the user font size.
+func _apply_note_title_size() -> void:
+	if note_title == null:
+		return
+	var base := 18
+	if is_mobile_layout:
+		var vp := get_viewport().get_visible_rect().size
+		base = 10 if vp.x > vp.y else 14
+	note_title.add_theme_font_size_override("font_size", base + GameManager.font_delta())
 
 
 func toggle_sidebar() -> void:

@@ -240,6 +240,30 @@ func _run_smoke() -> void:
 			nl_para = b["text"]
 	fails += _check(nl_para.contains("\n"), "editor newline kept in paragraph")
 	fails += _check(PB._inline(PB.escape(nl_para)).contains("\n"), "newline survives inline transforms")
+	# UI font family / size customization (GameManager.font_changed → theme).
+	var win_theme := m.get_tree().root.theme
+	fails += _check(win_theme != null and win_theme.default_font_size == GameManager.BASE_FONT_SIZE,
+		"baseline font size reproduces the old look")
+	GameManager.set_font("VT323")
+	fails += _check(GameManager.font_name == "VT323" and win_theme.default_font == GameManager.font(),
+		"font family switch reaches the window theme")
+	GameManager.set_font_size(GameManager.BASE_FONT_SIZE + 4)
+	fails += _check(win_theme.default_font_size == GameManager.BASE_FONT_SIZE + 4,
+		"font size setting applies globally")
+	var title_px: int = m.toolbar.note_title.get_theme_font_size("font_size")
+	fails += _check(title_px == 18 + 4, "note title grows with the font size (got %d)" % title_px)
+	# Settings page controls are wired to GameManager (not just the setters).
+	m._toggle_settings()
+	var opt: OptionButton = m.settings_component.font_opt
+	fails += _check(opt.item_count == GameManager.FONTS.size(), "settings lists every font")
+	opt.select(1)
+	opt.item_selected.emit(1)
+	fails += _check(GameManager.font_name == opt.get_item_text(1), "font picker applies the selection")
+	m.settings_component.font_size.value = 20.0
+	fails += _check(GameManager.font_size == 20, "font size control applies the selection")
+	m._close_settings()
+	GameManager.set_font("Share Tech Mono")
+	GameManager.set_font_size(GameManager.BASE_FONT_SIZE)
 	print("SMOKE RESULT: %s (%d fails)" % ["FAIL" if fails > 0 else "OK", fails])
 	m.get_tree().quit(1 if fails > 0 else 0)
 

@@ -2,6 +2,9 @@ extends Node
 ## Global app state: vault location, color palettes, current note (NeonNotes v2).
 
 signal palette_changed
+## Emitted when the UI font family or font size changes, so the shell can
+## re-apply fonts and re-render the preview/editor.
+signal font_changed
 ## Emitted when the background metadata pass (load_metadata_async) has filled
 ## titles/tags/links for the whole vault. Backlinks/graph/search can then refresh.
 signal metadata_ready
@@ -38,6 +41,24 @@ const PALETTES := {
 }
 
 var palette_name := "Synthwave"
+## Selectable UI fonts. "Share Tech Mono" is the original body/mono face;
+## "VT323" is a CRT/VT terminal face that matches the synthwave + scanline
+## identity. Headings, the note title and toolbar keep Orbitron (the display
+## face) — this setting swaps the body/label/editor font.
+const FONTS := {
+	"Share Tech Mono": "res://assets/fonts/ShareTechMono-Regular.ttf",
+	"VT323": "res://assets/fonts/VT323-Regular.ttf",
+}
+const DEFAULT_FONT := "Share Tech Mono"
+## Baseline UI/body point size. The stored font_size is applied as a delta on
+## top of every authored size, so the default (16) reproduces the old look.
+const BASE_FONT_SIZE := 16
+const MIN_FONT_SIZE := 12
+const MAX_FONT_SIZE := 28
+
+var font_name := DEFAULT_FONT
+var font_size := BASE_FONT_SIZE
+var _font_cache: Dictionary = {}
 var graph_levels := 2
 var export_crt := true  # apply CRT overlay to exported PNG/JPEG/GIF
 var open_start_mode := "last"  # "last" or "homepage"
@@ -136,6 +157,37 @@ func set_palette(name: String) -> void:
 ## Toggle the CRT overlay on exports. Persists so it survives restarts.
 func set_export_crt(on: bool) -> void:
 	export_crt = on
+	_save_settings()
+
+# ------------------------------------------------------------ fonts
+
+## Resolved font resource for the active font family (cached per path).
+func font() -> Font:
+	var path: String = FONTS.get(font_name, FONTS[DEFAULT_FONT])
+	if _font_cache.has(path):
+		return _font_cache[path]
+	var f: Font = load(path)
+	_font_cache[path] = f
+	return f
+
+## Points added to every authored font size. The default size yields 0, so the
+## out-of-the-box look is byte-for-byte the old one.
+func font_delta() -> int:
+	return font_size - BASE_FONT_SIZE
+
+func set_font(name: String) -> void:
+	if not FONTS.has(name) or name == font_name:
+		return
+	font_name = name
+	font_changed.emit()
+	_save_settings()
+
+func set_font_size(size: int) -> void:
+	var clamped := clampi(size, MIN_FONT_SIZE, MAX_FONT_SIZE)
+	if clamped == font_size:
+		return
+	font_size = clamped
+	font_changed.emit()
 	_save_settings()
 
 # ------------------------------------------------------------ vault
@@ -476,6 +528,8 @@ func _load_settings() -> void:
 		return
 	palette_name = cf.get_value("ui", "palette", palette_name)
 	export_crt = bool(cf.get_value("export", "crt", export_crt))
+	font_name = String(cf.get_value("ui", "font", font_name))
+	font_size = clampi(int(cf.get_value("ui", "font_size", font_size)), MIN_FONT_SIZE, MAX_FONT_SIZE)
 	graph_levels = clampi(int(cf.get_value("ui", "graph_levels", graph_levels)), 1, 10)
 	open_start_mode = String(cf.get_value("ui", "open_start_mode", open_start_mode))
 	if open_start_mode != "last" and open_start_mode != "homepage":
@@ -483,6 +537,8 @@ func _load_settings() -> void:
 	last_opened_rel = String(cf.get_value("ui", "last_opened_rel", last_opened_rel))
 	if not PALETTES.has(palette_name):
 		palette_name = "Synthwave"
+	if not FONTS.has(font_name):
+		font_name = DEFAULT_FONT
 	vault_dir = cf.get_value("vault", "dir", VAULT_DIR)
 	device_id = cf.get_value("sync", "device_id", "")
 	sync_pin = cf.get_value("sync", "pin", "")
@@ -503,6 +559,8 @@ func _save_settings() -> void:
 	var cf := ConfigFile.new()
 	cf.set_value("ui", "palette", palette_name)
 	cf.set_value("export", "crt", export_crt)
+	cf.set_value("ui", "font", font_name)
+	cf.set_value("ui", "font_size", font_size)
 	cf.set_value("ui", "graph_levels", graph_levels)
 	cf.set_value("ui", "open_start_mode", open_start_mode)
 	cf.set_value("ui", "last_opened_rel", last_opened_rel)

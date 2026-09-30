@@ -99,7 +99,7 @@ func _ready() -> void:
 	edit_search.text_changed.connect(_find_in_editor)
 	theme_component.name = "ThemeComponent"
 	theme_component.setup(%Bg, toolbar.note_title, %SidePanel as PanelContainer,
-			%Content as PanelContainer, toolbar, code_edit)
+			%Content as PanelContainer, toolbar, code_edit, self)
 	add_child(theme_component)
 	theme_component.apply()
 	_theme_dialogs()
@@ -124,6 +124,7 @@ func _ready() -> void:
 			_show_settings()
 		elif page_mode == "":
 			_render_preview())
+	GameManager.font_changed.connect(_on_font_changed)
 	GameManager.metadata_ready.connect(_on_metadata_ready)
 	vault_tree.save_cb = _flush_save
 	vault_tree.flash_cb = _flash
@@ -168,6 +169,9 @@ func _ready() -> void:
 	_refresh_list()
 	_boot_mark("tree-build")
 	layout_component.update_layout()
+	# Re-apply fonts now that update_layout() has folded the saved font size
+	# (and any landscape delta) into LayoutComponent.ui_font_delta.
+	theme_component.apply()
 	_boot_mark("layout")
 	_open_start_page.call_deferred()
 	GameManager.load_metadata_async()
@@ -564,6 +568,17 @@ func _add_note_tag() -> void:
 	tags_input.clear()
 	_refresh_note_tag_chips()
 	_flush_save()
+
+func _on_font_changed() -> void:
+	# Family and size both flow through ThemeComponent + LayoutComponent; the
+	# preview/editor must be rebuilt so text is re-rasterized at the new size.
+	theme_component.apply()
+	_theme_dialogs()
+	layout_component.refresh_fonts()
+	if page_mode == PAGE_SETTINGS:
+		_show_settings()
+	elif page_mode == "":
+		_render_preview()
 
 func _on_mobile_changed(_is_mobile: bool) -> void:
 	theme_component.apply()

@@ -2,6 +2,7 @@ extends SceneTree
 
 const NoteMetadataHelper := preload("res://scripts/common/note_metadata.gd")
 const DevSession := preload("res://scripts/common/dev_session.gd")
+const GameManagerScript := preload("res://scripts/common/GameManager.gd")
 
 var failures := 0
 
@@ -14,6 +15,7 @@ func _init() -> void:
 	_check_graph_model()
 	_check_media_import()
 	_check_dev_session_detection()
+	_check_font_settings()
 	print("UNIT RESULT: %s (%d failures)" % ["FAIL" if failures > 0 else "OK", failures])
 	quit(failures)
 
@@ -77,6 +79,21 @@ func _check_dev_session_detection() -> void:
 	OS.set_environment(DevSession.ENV_VAULT, "")
 	_check(not DevSession.is_active(), "env cleared: back to a real session")
 
+func _check_font_settings() -> void:
+	# The UI font family/size setting: the default must reproduce the old look
+	# (Share Tech Mono at 16) and every offered face must be loadable.
+	_check(GameManagerScript.FONTS.size() >= 2, "at least two UI fonts are offered")
+	_check(GameManagerScript.FONTS.has(GameManagerScript.DEFAULT_FONT),
+		"the default font is one of the selectable faces")
+	var default_size: int = GameManagerScript.BASE_FONT_SIZE
+	_check(default_size == 16, "baseline font size preserves the previous look")
+	_check(GameManagerScript.MIN_FONT_SIZE < default_size
+			and GameManagerScript.MAX_FONT_SIZE > default_size,
+		"the default size sits inside the selectable range")
+	for font_name in GameManagerScript.FONTS:
+		var path: String = GameManagerScript.FONTS[font_name]
+		_check(ResourceLoader.exists(path), "font file present: " + font_name)
+		_check(load(path) is Font, "font loads: " + font_name)
 
 func _check_markdown_spans() -> void:
 	# Flat, source-ordered span stream drives BOTH the highlighter (edit) and

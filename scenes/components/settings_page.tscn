@@ -69,6 +69,25 @@ text = "Style"
 unique_name_in_owner = true
 layout_mode = 2
 
+[node name="FontLabel" type="Label" parent="VerticalContainer"]
+layout_mode = 2
+text = "Font"
+
+[node name="Font" type="OptionButton" parent="VerticalContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="FontSizeLabel" type="Label" parent="VerticalContainer"]
+layout_mode = 2
+text = "Font size"
+
+[node name="FontSize" type="SpinBox" parent="VerticalContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 12.0
+max_value = 28.0
+value = 16.0
+
 [node name="CrtExportLabel" type="Label" parent="VerticalContainer" unique_id=2012189999]
 layout_mode = 2
 text = "Exports"

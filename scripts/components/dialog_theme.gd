@@ -5,8 +5,6 @@ extends RefCounted
 ## %Content). Applies the same panel StyleBoxFlat, mono font and accent colors
 ## the shell uses. Call apply() when the dialog is created and again on
 ## GameManager.palette_changed.
-const MONO_FONT := preload("res://assets/fonts/ShareTechMono-Regular.ttf")
-
 static func apply(dialog: Window) -> void:
 	if dialog == null:
 		return
@@ -32,4 +30,7 @@ static func apply(dialog: Window) -> void:
 	dialog.add_theme_color_override("font_hover_color", accent2)
 	dialog.add_theme_color_override("font_selected_color", text)
 	dialog.add_theme_color_override("accent_color", accent)
-	dialog.add_theme_font_override("font", MONO_FONT)
+	# Follow the user's font family/size preference (real OS Window dialogs do
+	# not inherit the window-root theme, so this is set explicitly).
+	dialog.add_theme_font_override("font", GameManager.font())
+	dialog.add_theme_font_size_override("font_size", GameManager.font_size)

@@ -15,6 +15,16 @@ var _running := false
 ## frame count at real frame timing.
 const ANIMATION_DURATION := 0.9
 
+## Chart labels follow the user-selected UI font + size (not ThemeDB's
+## project-default font), matching the rest of the preview.
+static var _font_cache: Font = null
+static var _font_cache_name := ""
+func _chart_font() -> Font:
+	if _font_cache == null or _font_cache_name != GameManager.font_name:
+		_font_cache = GameManager.font()
+		_font_cache_name = GameManager.font_name
+	return _font_cache
+
 func _ready() -> void:
 	custom_minimum_size.y = 200.0 if compact else 280.0
 	queue_redraw()
@@ -46,7 +56,7 @@ func _draw() -> void:
 	var h := size.y
 	var top := 34.0
 	draw_rect(Rect2(0, 0, w, h), Color(0.03, 0.04, 0.11, 0.92), true)
-	if title != "": draw_string(ThemeDB.fallback_font, Vector2(16, 23), title, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, text_color)
+	if title != "": draw_string(_chart_font(), Vector2(16, 23), title, HORIZONTAL_ALIGNMENT_LEFT, -1, 16 - LayoutComponent.ui_font_delta, text_color)
 	var area := Rect2(42, top + 12, maxf(20, w - 64), maxf(40, h - top - 42))
 	if values.is_empty(): return
 	match chart_type.to_lower():
@@ -66,7 +76,7 @@ func _draw_bars(area: Rect2) -> void:
 		var c := color if i % 2 == 0 else color2
 		draw_rect(Rect2(x - 5, base - bh - 5, bw + 10, bh + 10), Color(c, 0.10), true)
 		draw_rect(Rect2(x, base - bh, bw, bh), c, true)
-		if i < labels.size(): draw_string(ThemeDB.fallback_font, Vector2(x, base + 18), str(labels[i]), HORIZONTAL_ALIGNMENT_CENTER, bw, 11, text_color)
+		if i < labels.size(): draw_string(_chart_font(), Vector2(x, base + 18), str(labels[i]), HORIZONTAL_ALIGNMENT_CENTER, bw, 11 - LayoutComponent.ui_font_delta, text_color)
 
 func _draw_line(area: Rect2) -> void:
 	var maxv := maxf(0.01, _max_value())
@@ -82,7 +92,7 @@ func _draw_line(area: Rect2) -> void:
 	for i in count:
 		draw_circle(pts[i], 10, Color(color2, 0.10))
 		draw_circle(pts[i], 4, color2)
-		if i < labels.size(): draw_string(ThemeDB.fallback_font, Vector2(pts[i].x - 20, area.end.y + 18), str(labels[i]), HORIZONTAL_ALIGNMENT_CENTER, 40, 11, text_color)
+		if i < labels.size(): draw_string(_chart_font(), Vector2(pts[i].x - 20, area.end.y + 18), str(labels[i]), HORIZONTAL_ALIGNMENT_CENTER, 40, 11 - LayoutComponent.ui_font_delta, text_color)
 
 func _draw_pie(area: Rect2) -> void:
 	var total := 0.0
@@ -102,7 +112,7 @@ func _draw_pie(area: Rect2) -> void:
 			draw_colored_polygon(poly, c)
 			draw_arc(center, radius + 5, angle, angle + shown, 32, Color(c, 0.18), 12.0, true)
 		var pct := 100.0 * float(values[i]) / total
-		if i < labels.size(): draw_string(ThemeDB.fallback_font, Vector2(area.position.x + area.size.x * 0.62, area.position.y + 20 + i * 18), "%s  %.0f%%" % [str(labels[i]), pct], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, text_color)
+		if i < labels.size(): draw_string(_chart_font(), Vector2(area.position.x + area.size.x * 0.62, area.position.y + 20 + i * 18), "%s  %.0f%%" % [str(labels[i]), pct], HORIZONTAL_ALIGNMENT_LEFT, -1, 12 - LayoutComponent.ui_font_delta, text_color)
 		angle += sweep
 
 func _max_value() -> float:

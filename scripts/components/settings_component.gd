@@ -7,6 +7,8 @@ signal close_requested
 @onready var paired_devices: Label = %PairedDevices
 @onready var graph_levels: SpinBox = %GraphLevels
 @onready var style: OptionButton = %Style
+@onready var font_opt: OptionButton = %Font
+@onready var font_size: SpinBox = %FontSize
 @onready var vault_button: Button = %VaultButton
 @onready var sync_button: Button = %SyncButton
 @onready var close_button: Button = %CloseButton
@@ -28,12 +30,20 @@ func _ready() -> void:
 	for p in GameManager.PALETTES.keys():
 		style.add_item(p)
 	style.item_selected.connect(func(i: int): GameManager.set_palette(style.get_item_text(i)))
+	for f in GameManager.FONTS.keys():
+		font_opt.add_item(f)
+	font_opt.item_selected.connect(func(i: int): GameManager.set_font(font_opt.get_item_text(i)))
+	font_size.min_value = GameManager.MIN_FONT_SIZE
+	font_size.max_value = GameManager.MAX_FONT_SIZE
+	font_size.value_changed.connect(func(v: float): GameManager.set_font_size(int(v)))
 
 func refresh() -> void:
 	vault_path.text = "Vault: " + GameManager.vault_abs() + "\nName: " + GameManager.vault_abs().get_file()
 	paired_devices.text = "Paired devices: " + (str(GameManager.paired_peers.keys()) if not GameManager.paired_peers.is_empty() else "None")
 	graph_levels.value = GameManager.graph_levels
 	style.select(maxi(0, GameManager.PALETTES.keys().find(GameManager.palette_name)))
+	font_opt.select(maxi(0, GameManager.FONTS.keys().find(GameManager.font_name)))
+	font_size.set_value_no_signal(GameManager.font_size)
 	crt_export.button_pressed = GameManager.export_crt
 	open_start.select(0 if GameManager.open_start_mode == "last" else 1)
 
