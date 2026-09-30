@@ -55,6 +55,10 @@ var _levels := {}
 var _collapsed := {}
 var _keys: Array[String] = []
 var _routes: Array = []          # {"samples": PackedVector2Array, "bidir": bool}
+# Resolve maps (full-path + basename) built once per open(). Reused by the
+# level and route passes — resolving each link via WikiLinks.resolve() rebuilt
+# them per call, which was O(links × notes): ~7 s at docs-vault scale.
+var _resolve_maps: Array = []
 
 func _ready() -> void:
 	# Pan/zoom is a draw transform: clip so the map never spills past the
@@ -72,6 +76,9 @@ func open(center_note: String = "") -> void:
 	_accent = GameManager.color("accent")
 	_accent2 = GameManager.color("accent2")
 	_text = GameManager.color("text")
+	# Build the note→path lookup maps once; both passes below resolve every
+	# link against them (WikiLinks.resolve() per link was O(links × notes)).
+	_resolve_maps = WikiLinks.resolve_maps()
 	_build_hierarchy()
 	_build_levels()
 	visible = true
@@ -177,7 +184,7 @@ func _build_levels() -> void:
 	for n in GameManager.notes:
 		var out: Array[String] = []
 		for t in GameManager.links.get(n, []):
-			var r := WikiLinks.resolve(t)
+			var r := WikiLinks.resolve_with(t, _resolve_maps)
 			if r != "" and not out.has(r):
 				out.append(r)
 		resolved[n] = out
@@ -193,7 +200,7 @@ func _resolved_links() -> Dictionary:
 	for src in GameManager.links.keys():
 		var lst: Array[String] = []
 		for dst in GameManager.links[src]:
-			var r := WikiLinks.resolve(String(dst))
+			var r := WikiLinks.resolve_with(String(dst), _resolve_maps)
 			if r != "" and not lst.has(r):
 				lst.append(r)
 		if not lst.is_empty():

@@ -72,6 +72,16 @@ unique_name_in_owner = true
 layout_mode = 2
 text = "Pair / Sync → Vault"
 
+[node name="UnpairBtn" type="Button" parent="Scroll/Root/Columns"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Unpair this vault"
+
+[node name="ResetBtn" type="Button" parent="Scroll/Root/Columns"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "↺ Reset pairing words…"
+
 [node name="SyncLog" type="RichTextLabel" parent="Scroll/Root/Columns"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 120)

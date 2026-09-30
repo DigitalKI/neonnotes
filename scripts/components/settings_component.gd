@@ -39,7 +39,9 @@ func _ready() -> void:
 
 func refresh() -> void:
 	vault_path.text = "Vault: " + GameManager.vault_abs() + "\nName: " + GameManager.vault_abs().get_file()
-	paired_devices.text = "Paired devices: " + (str(GameManager.paired_peers.keys()) if not GameManager.paired_peers.is_empty() else "None")
+	paired_devices.text = "Sync: %s · paired devices: %s" % [
+		GameManager.vault_id if GameManager.vault_id != "" else "(none)",
+		(str(GameManager.paired_peers.keys()) if not GameManager.paired_peers.is_empty() else "None")]
 	graph_levels.value = GameManager.graph_levels
 	style.select(maxi(0, GameManager.PALETTES.keys().find(GameManager.palette_name)))
 	font_opt.select(maxi(0, GameManager.FONTS.keys().find(GameManager.font_name)))

@@ -36,14 +36,15 @@ func _populate() -> void:
 	if dir == null:
 		current_path.text = _cwd + "\n(folder is not readable)"
 		return
+	dir.include_hidden = true  # DirAccess hides "." entries by default
 	var subdirs: Array[String] = []
+	# Hidden (".") folders are listed too, so a vault kept in a dot-dir (e.g.
+	# ~/.notes) can be browsed to and chosen. They are marked with a dot icon.
 	for name in dir.get_directories():
-		if name.begins_with("."):
-			continue
 		subdirs.append(name)
 	subdirs.sort()
 	for name in subdirs:
-		dir_list.add_item("📁 " + name)
+		dir_list.add_item(("· 📁 " if name.begins_with(".") else "📁 ") + name)
 		dir_list.set_item_metadata(dir_list.item_count - 1, _cwd.path_join(name))
 
 func _enter_selected() -> void:

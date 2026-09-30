@@ -1104,6 +1104,16 @@ func _open_tree_item(item: TreeItem) -> void:
 		note_requested.emit(fname)
 
 func select_note(fname: String, open_note := true) -> void:
+	# The homepage has no leaf row — it is opened through the Vault root item
+	# (see _refresh_list). Matching on metadata alone would miss it, so a graph
+	# node (or wiki-link) pointing at the homepage would do nothing.
+	var root := side_tree.get_root()
+	if fname == _root_homepage and root != null:
+		side_tree.scroll_to_item(root, false)
+		side_tree.set_selected(root, 0)
+		if open_note:
+			_open_tree_item(root)
+		return
 	# find matching leaf in the tree
 	var stack: Array[TreeItem] = [side_tree.get_root()]
 	while not stack.is_empty():

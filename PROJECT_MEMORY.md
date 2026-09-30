@@ -42,7 +42,10 @@ _Last updated: 2026-09-30 · Godot 4.7 · renderer: gl_compatibility_
   tombstone) or purges. `NoteCrud.purge_expired()` drops items older than
   `TRASH_RETENTION_DAYS` (30) on launch and vault switch.
 - Vault tree with folder-as-note merge, drag & drop (notes + folders), custom
-  ordering in `vault/.neonnotes.json`, wiki-link rewriting on move.
+  ordering in `vault/.neonnotes.json`, wiki-link rewriting on move. The vault
+  picker (`VaultPicker`) lists hidden (dot) folders too — `DirAccess.include_hidden
+  = true`, so a vault kept in a dot-dir is browsable; hidden entries get a `·`
+  marker.
 - **Tag search + tag autocomplete (2026-09-30):** the always-visible tag-chip
   bar above the tree is **removed**. The search field now takes free text *and*
   `#tags`: a query is `keywords` + `#tag`s, AND-composed and case-insensitive.
@@ -80,9 +83,25 @@ _Last updated: 2026-09-30 · Godot 4.7 · renderer: gl_compatibility_
   **Follow-up:** when the graph gains filtering, reuse the tree search's
   `keywords + #tag` grammar so the vocabulary behaves identically everywhere.
 - LAN sync (`scripts/sync/`): UDP 47770 discovery + TCP 47771 streaming
-  transfer, eight-word vault phrase pairing, trusted peers, logical-mtime LWW
-  with tombstones; deletes/folder moves propagate and refresh the receiver. Media
-  and `.md` both transfer; `vault/exports/` excluded.
+  transfer, **per-vault** eight-word phrase pairing, trusted peers, logical-mtime
+  LWW with tombstones; deletes/folder moves propagate and refresh the receiver.
+  Media and `.md` both transfer; `vault/exports/` excluded. The phrase never
+  leaves the device — pairing/auto-sync use a nonce-based proof, not the phrase
+  (LAN transfers themselves are still unencrypted).
+- **Per-vault sync identity (2026-09-30):** sync is bound to the vault, not the
+  device. The non-secret vault id lives in the vault folder as `.neonnotes-id`
+  (never synced); the phrase + trusted/paired peers live device-local in
+  `settings.cfg [sync] vaults`, keyed by vault id. `GameManager.sync_vaults`
+  holds the store with a live view (`vault_secret`/`trusted`/`paired_peers`) for
+  the active vault; `set_vault_dir()` re-binds (save outgoing → adopt incoming);
+  `SyncService.on_vault_changed()` flushes the outgoing vault's `sync_state`,
+  clears peers and rebroadcasts (its `_vault_key()` is now the vault id, not the
+  path, so history survives a move). `unpair_vault()` drops peers but keeps the
+  phrase; `reset_vault_words()` forks (new phrase + new id). `SyncPage` shows the
+  active vault's identity with **Unpair**/**Reset** controls. A legacy single
+  global identity migrates onto the open vault on first run; all other vaults
+  start unpaired. `device_id` stays device-global. `.neonnotes-id` is rejected
+  by `_valid_sync_path` (only `.neonnotes.json` + the tombstone cart sync).
 - Exports: PNG (2×), deterministic GIF (worker thread), HTML, clipboard copy,
   optional CRT FX on export; saves to OS gallery + `vault/exports/`.
 - Mobile: drawer sidebar, safe-area insets, landscape font delta
@@ -147,7 +166,7 @@ _Last updated: 2026-09-30 · Godot 4.7 · renderer: gl_compatibility_
   `VaultTreeComponent.order_new_note()` writing `vault/.neonnotes.json`.
 - Tests: `./tests/run_tests.sh`
   (unit incl. tag-match scoring/search-worker/tree-drag/trash/dev-isolation/
-  mobile-tree-touch/sync/smoke),
+  mobile-tree-touch/sync/per-vault-sync/smoke),
   graded by per-test
   `RESULT: OK` markers; `NEONNOTES_SMOKE=1` smoke path. `run_tests.sh` uses
   `set -e`, so the known mobile-tree-touch failure aborts the run before
@@ -232,6 +251,17 @@ _Last updated: 2026-09-30 · Godot 4.7 · renderer: gl_compatibility_
   incremental/worker scan. `GraphView._process` `queue_redraw()`s the whole map
   every frame while visible (throttle if label cost shows up on mobile). HTML
   export parses + writes on the main thread.
+- **Graph link resolution fix (2026-09-30):** opening the graph on the docs
+  vault (~1080 notes / ~8.6k links) took ~14 s because `GraphView` resolved
+  every wiki-link via `WikiLinks.resolve()`, which rebuilds the note→path
+  lookup maps (full-path + basename) per call — O(links × notes). Measured:
+  7 133 ms/pass vs 5.2 ms when the maps are built once (`resolve_maps()` +
+  `resolve_with()`), a ~1 400× win; `open()` now builds `_resolve_maps` once
+  and both `_build_levels()` and `_resolved_links()` share it. `WikiLinks.graph()`
+  already used the hoisted pattern; the view was the straggler. Follow-up (B):
+  memoize a shared resolved-link index in `GameManager` (invalidated on
+  `write_note`/`scan_paths`/`remap_moved`/sync apply) so backlinks, rename
+  rewriting and `WikiLinks.graph()` all reuse it.
 - **Export hygiene (2026-09-30):** `tests/*`, `scenes/dev/*` and `scripts/dev/*`
   are in `exclude_filter` (`tools/*` holds only the Python docs-vault
   generator — harmless if exported, but add it there when next editing the
@@ -452,6 +482,14 @@ _These OVERRIDE the skill's defaults for this project._
   soon as the list is scrolled (regression fixed 2026-09-24).
 - **Link index consistency**: anything changing note files without
   `write_note()` must call `scan_notes()` after, or moves can miss links.
+- **The homepage has no tree leaf row.** `_homepage.md` is opened through the
+  Vault **root** item (`_refresh_list` skips it as a normal leaf), so that
+  `TreeItem.get_metadata(0)` is `""`, not the path. Any lookup matching on
+  metadata must special-case it: `VaultTreeComponent.select_note()` now routes
+  `_root_homepage` to the root item before the metadata scan. Before that, a
+  graph node (or wiki-link) pointing at the homepage silently did nothing —
+  every other graph node opened fine (verified at ~1080-note scale, where
+  folders collapse to hubs).
 - **`.neonnotes.json` (dot-prefixed) and `exports/` must survive scan
   changes** (order file skipped by dot rule; exports excluded by name).
 - **Trash stays hidden and unsynced**: `vault/.trash/` must never appear in

@@ -114,6 +114,24 @@ func stop_discovery() -> void:
 		peers.clear()
 		peers_changed.emit()
 
+## The active vault changed: flush the outgoing vault's runtime state, drop
+## peers, and re-key everything (sync_state, discovery broadcast) to the new
+## vault identity. Call AFTER GameManager has switched vaults/identity.
+func on_vault_changed() -> void:
+	_save_state()                    # persist under the outgoing vault's key
+	_state_key = ""
+	_mtimes.clear()
+	_tombstones.clear()
+	_confirmed.clear()
+	if peers.size() > 0:
+		peers.clear()
+		peers_changed.emit()
+	_ensure_state_loaded()           # load the new vault's stored state
+	if GameManager.is_vault_paired():
+		enable_auto_sync()
+	if _broadcasting:
+		_send_broadcast()            # announce the new vault id at once
+
 func _send_broadcast() -> void:
 	if _udp == null:
 		return
@@ -415,9 +433,9 @@ func _handle_message(conn: StreamPeerTCP, msg: Dictionary, st: Dictionary, peer_
 			return {"ok": false, "error": "no_vault"}
 		for fname in files.keys():
 			var name := String(fname)
-			# allow subfolders; reject traversal/absolute paths and exports
-			if name == "" or name.begins_with("/") or name.contains("\\") or name.contains("..") \
-					or name.get_base_dir() == GameManager.EXPORTS_SUBDIR:
+			# Shared policy: rejects traversal/absolute paths, exports, dot-files
+			# and the Trash (the tombstone cart is allowed and handled below).
+			if not _valid_sync_path(name):
 				invalid += 1
 				_sync_log("IN invalid path=%s" % name)
 				continue
@@ -502,7 +520,7 @@ func _handle_message(conn: StreamPeerTCP, msg: Dictionary, st: Dictionary, peer_
 			rec["ip"] = str(st["peer_ip"])
 			rec["phrase"] = str(st.get("peer_phrase", ""))
 			GameManager.paired_peers[peer_id] = rec
-			GameManager._save_settings()
+			GameManager._save_vault_identity()
 		sync_done.emit(str(msg.get("name", "peer")), total)
 		sync_changed.emit(str(msg.get("name", "peer")), total, changed_paths, structural)
 		return {"ok": true, "count": total}
@@ -511,9 +529,15 @@ func _handle_message(conn: StreamPeerTCP, msg: Dictionary, st: Dictionary, peer_
 # ---------------- Stream receive (bounded memory) ----------------
 
 static func _valid_sync_path(name: String) -> bool:
-	# The Trash is device-local (trash never syncs); deletes still propagate as
-	# tombstones, so a peer is never sent recoverable copies of deleted files.
-	if name == NoteCrud.TRASH_DIR or name.begins_with(NoteCrud.TRASH_DIR + "/"):
+	# Two dot-names are deliberately synced: the shared folder ordering file
+	# and the synthetic tombstone cart (never written to disk — the receiver
+	# handles it specially).
+	if name == ".neonnotes.json" or name == ".neonnotes-tombstones.json":
+		return true
+	# Every other dot-file/dot-dir is device-local: the vault id file must never
+	# be overwritten by a peer, and the Trash never syncs (its deletes still
+	# propagate as tombstones, so a peer is not sent recoverable copies).
+	if name.begins_with(".") or name.get_file().begins_with("."):
 		return false
 	return name != "" and not name.begins_with("/") and not name.contains("\\") and not name.contains("..") and name.get_base_dir() != GameManager.EXPORTS_SUBDIR
 
@@ -522,9 +546,9 @@ static func _secret_proof(secret: String, nonce: String) -> String:
 
 func _receive_item(st: Dictionary, msg: Dictionary) -> void:
 	var name := String(msg.get("name", ""))
-	# allow subfolders; reject traversal/absolute paths and exports
-	if name == "" or name.begins_with("/") or name.contains("\\") or name.contains("..") \
-			or name.get_base_dir() == GameManager.EXPORTS_SUBDIR:
+	# Shared policy: rejects traversal/absolute paths, exports, dot-files and
+	# the Trash (the tombstone cart is allowed and handled below).
+	if not _valid_sync_path(name):
 		st["invalid"] = int(st.get("invalid", 0)) + 1
 		_sync_log("IN invalid path=%s" % name)
 		return
@@ -628,7 +652,7 @@ func _finish_stream(st: Dictionary) -> Dictionary:
 		if str(st.get("peer_ip", "")) != "":
 			GameManager.paired_peers[peer_id] = {"name": str(st.get("batch_peer_name", peer_id)),
 				"vault_id": GameManager.vault_id, "ip": str(st["peer_ip"])}
-			GameManager._save_settings()
+			GameManager._save_vault_identity()
 		enable_auto_sync()  # receiver can send its newer/missing notes back
 	# A tombstone deletion is a structural change even if its path is a folder
 	# companion (no ".md" and no parent folder in the path).
@@ -783,12 +807,15 @@ static func accept_pair(result: Dictionary, explicit := false) -> void:
 	if GameManager.trusted.has(peer_id) and secret != GameManager.vault_secret and not explicit:
 		return
 	if not GameManager.trusted.has(peer_id) or explicit:
-		GameManager.vault_secret = secret
-		GameManager.vault_id = vault_id
-	GameManager.paired_vault_id = vault_id
+		# Explicit pairing adopts the peer's vault identity (its id + phrase):
+		# this is "type the other vault's words and join it".
+		if explicit:
+			GameManager.adopt_vault_id(vault_id)
+			GameManager.vault_secret = secret
+		GameManager.paired_vault_id = vault_id
 	GameManager.paired_peers[peer_id] = {"name": str(result.get("peer_name", peer_id)), "vault_id": vault_id, "ip": str(result.get("ip", "")), "phrase": secret}
 	GameManager.add_trusted(peer_id)
-	GameManager._save_settings()
+	GameManager._save_vault_identity()
 
 static func _client_roundtrip(conn: StreamPeerTCP, msg: Dictionary, wait_ms := 15000) -> Variant:
 	var bytes := JSON.stringify(msg).to_utf8_buffer()
@@ -952,7 +979,12 @@ static func state_fingerprint(entries: Dictionary) -> String:
 	return buf.sha256_text()
 
 func _vault_key() -> String:
-	return GameManager.vault_abs().md5_text()
+	# Keyed by the vault's stable id (survives a move/rename), falling back to
+	# the path only for a vault that somehow has no id yet.
+	var vid := GameManager.vault_id
+	if vid != "":
+		return "id:" + vid.md5_text()
+	return "path:" + GameManager.vault_abs().md5_text()
 
 func _ensure_state_loaded() -> void:
 	var key := _vault_key()
@@ -998,8 +1030,8 @@ func _persistence_enabled() -> bool:
 func _save_state() -> void:
 	if not _persistence_enabled():
 		return
-	if _state_key != _vault_key():
-		return  # not loaded for this vault yet — do not clobber stored state
+	if _state_key == "":
+		return  # nothing loaded yet — do not clobber stored state
 	var data := {}
 	var f := FileAccess.open(_state_file(), FileAccess.READ)
 	if f != null:
@@ -1007,7 +1039,9 @@ func _save_state() -> void:
 		f.close()
 		if typeof(parsed) == TYPE_DICTIONARY:
 			data = parsed
-	data[_vault_key()] = {"mtimes": _mtimes, "tombstones": _tombstones, "confirmed": _confirmed}
+	# Write under the key we actually loaded, so a flush right after a vault
+	# switch still lands on the outgoing vault.
+	data[_state_key] = {"mtimes": _mtimes, "tombstones": _tombstones, "confirmed": _confirmed}
 	var out := FileAccess.open(_state_file(), FileAccess.WRITE)
 	if out:
 		out.store_string(JSON.stringify(data))

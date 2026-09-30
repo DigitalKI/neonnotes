@@ -19,7 +19,7 @@ func set_sync_service(service: SyncService) -> void:
 		service.sync_failed.connect(_on_sync_failed)
 	if not service.sync_pending.is_connected(_on_sync_pending):
 		service.sync_pending.connect(_on_sync_pending)
-	if not GameManager.trusted.is_empty() or not GameManager.paired_peers.is_empty() or GameManager.paired_vault_id != "":
+	if GameManager.is_vault_paired():
 		_set_dot(Color.INDIAN_RED)
 	else:
 		_set_dot(Color.DIM_GRAY)

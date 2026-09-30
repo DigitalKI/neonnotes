@@ -43,4 +43,7 @@ NEONNOTES_DEV=1 run_godot_test "DEV ISOLATION RESULT: OK" --headless --path . te
 run_godot_test "MOBILE TREE TOUCH RESULT: OK" --headless --path . tests/ReproTreeTap.tscn
 # Sync delete/move propagation over loopback (real frame protocol + tombstones).
 run_godot_test "SYNC DELETE/MOVE RESULT: OK" --headless --path . tests/TestSyncDeleteMove.tscn
+# Sync identity is per vault (in-folder id + device-local phrase); switching
+# vaults swaps identity, unpair keeps the phrase, reset words forks.
+run_godot_test "PER-VAULT SYNC RESULT: OK" --headless --path . tests/TestPerVaultSync.tscn
 NEONNOTES_SMOKE=1 run_godot_test "SMOKE RESULT: OK" --headless --path .

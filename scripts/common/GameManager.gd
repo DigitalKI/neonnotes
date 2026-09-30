@@ -8,11 +8,17 @@ signal font_changed
 ## Emitted when the background metadata pass (load_metadata_async) has filled
 ## titles/tags/links for the whole vault. Backlinks/graph/search can then refresh.
 signal metadata_ready
+## Emitted when the active vault's sync identity changes in place (unpair or
+## reset words) so the shell can refresh its sync indicator.
+signal sync_identity_changed
 
 const VAULT_DIR := "user://vault"
 const SETTINGS := "user://settings.cfg"
 const FRONT_MATTER_SCAN_MAX_LINES := 200  # bound the per-keystroke front-matter scan
 const EXPORTS_SUBDIR := "exports"  # vault/exports/ — rendered PNG/GIF/HTML, hidden from the tree
+## Non-secret vault id stored in the vault folder (never synced). Binds a
+## folder to its device-local sync phrase + trusted peers.
+const VAULT_ID_FILE := ".neonnotes-id"
 ## Editor/MCP session detection + the disposable vault such a run uses, so
 ## agent-driven UI checks can never read or write the user's real vault.
 const DevSession := preload("res://scripts/common/dev_session.gd")
@@ -69,16 +75,24 @@ var current_file := ""  # absolute path of the open note ("" = none)
 var current_rel := ""   # vault-relative path of the open note ("" = none)
 var notes: Array[String] = []
 
-# Sync identity: a stable 4-word code (e.g. "amber-meteor-vinyl-orbit") that
-# uniquely identifies this device on the LAN, plus the set of device codes we
-# have successfully paired with (trusted → no re-entry of words).
+# Sync identity is split by scope: the device code is global (it names *this
+# machine* on the LAN), while the vault phrase + trusted peers are per-vault,
+# keyed by the vault's non-secret id (which lives in the vault folder). A
+# phrase never leaves the device — peers only ever see a proof of it.
 var device_id := ""
-var trusted: Array[String] = []
 var sync_pin := ""  # legacy setting, no longer used for pairing
+## Device-local per-vault identities: vault_id ->
+## {secret, trusted, paired_peers, paired_vault_id}.
+var sync_vaults: Dictionary = {}
+## Live view of the ACTIVE vault's identity (mirrors sync_vaults[vault_id]).
 var vault_secret := ""
 var vault_id := ""
 var paired_vault_id := ""
 var paired_peers: Dictionary = {} # device_id -> {name, vault_id, ip}
+var trusted: Array[String] = []
+## A pre-per-vault global vault id, reused once so the migration keeps the
+## user's existing pairing with the vault that was open.
+var _legacy_vault_id := ""
 
 func _ready() -> void:
 	_load_settings()
@@ -91,10 +105,10 @@ func _ready() -> void:
 	DirAccess.make_dir_recursive_absolute(vault_abs())
 	if device_id == "":
 		device_id = SyncService.gen_device_code()
-	if vault_secret == "":
-		vault_secret = SyncService.gen_vault_secret()
-	if vault_id == "":
-		vault_id = "%s-%s" % [Time.get_unix_time_from_system(), randi()]
+	# The vault's non-secret id lives in the folder; the phrase + peers are
+	# device-local and looked up by that id.
+	ensure_vault_id()
+	_load_vault_identity()
 	_drop_self_trust()  # a device can never be its own peer
 	_save_settings()
 
@@ -121,10 +135,13 @@ func _apply_dev_isolation() -> void:
 	current_rel = ""
 	order.clear()
 	collapsed_folders.clear()
+	sync_vaults.clear()
+	vault_secret = ""
+	vault_id = ""
+	_legacy_vault_id = ""
 	trusted.clear()
 	paired_peers.clear()
 	paired_vault_id = ""
-	vault_id = "dev-" + (device_id if device_id != "" else "session")
 	print("[dev] isolated session — vault=%s (real vault untouched)" % vault_abs())
 
 ## Repair legacy settings that recorded this device's own id as a paired peer
@@ -139,6 +156,7 @@ func _drop_self_trust() -> void:
 		changed = true
 	if changed:
 		print("[Sync] removed self entry from trusted peers (device paired with itself)")
+		_save_vault_identity()
 
 # ------------------------------------------------------------ palette
 
@@ -196,14 +214,135 @@ func vault_abs() -> String:
 	return ProjectSettings.globalize_path(vault_dir)
 
 ## Desktop: open any folder as the vault (Git/Dropbox friendly). Persists.
+## Sync identity is re-bound here: the outgoing vault's phrase/peers are saved
+## under its id, then the incoming folder's identity is adopted.
 func set_vault_dir(path: String) -> bool:
 	if not DirAccess.dir_exists_absolute(path):
 		return false
+	_save_vault_identity()          # persist the outgoing vault first
 	vault_dir = path
 	current_file = ""
+	current_rel = ""
+	ensure_vault_id()               # read (or mint) the new folder's id
+	_load_vault_identity()          # adopt this vault's phrase + peers
 	_save_settings()
 	scan_notes()
 	return true
+
+# ------------------------------------------------------ vault sync identity
+
+## True when the active vault has any paired peer (drives auto-sync + UI).
+func is_vault_paired() -> bool:
+	return not trusted.is_empty() or not paired_peers.is_empty()
+
+## Read the vault's non-secret id from the vault folder ("" when none yet).
+func load_vault_id() -> void:
+	vault_id = ""
+	var f := FileAccess.open(vault_abs() + "/" + VAULT_ID_FILE, FileAccess.READ)
+	if f == null:
+		return
+	var data = JSON.parse_string(f.get_as_text())
+	f.close()
+	if typeof(data) == TYPE_DICTIONARY:
+		vault_id = str(data.get("vault_id", ""))
+
+## Persist the vault's id into the vault folder (non-secret; never synced).
+func save_vault_id() -> void:
+	if vault_id == "":
+		return
+	var f := FileAccess.open(vault_abs() + "/" + VAULT_ID_FILE, FileAccess.WRITE)
+	if f == null:
+		return
+	f.store_string(JSON.stringify({"vault_id": vault_id}, "  "))
+	f.close()
+
+## Read the vault id, minting and persisting one if the folder has none.
+func ensure_vault_id() -> void:
+	load_vault_id()
+	# The migrated global id only ever applies to the boot vault — consume it now
+	# so a later vault switch can never reuse it.
+	var legacy := _legacy_vault_id
+	_legacy_vault_id = ""
+	if vault_id == "":
+		if dev_session:
+			vault_id = "dev-" + (device_id if device_id != "" else "session")
+		elif legacy != "":
+			vault_id = legacy   # migrated global id becomes this vault's id
+		else:
+			vault_id = "%s-%s" % [Time.get_unix_time_from_system(), randi()]
+		save_vault_id()
+	elif legacy != "" and legacy != vault_id and sync_vaults.has(legacy):
+		# Interrupted upgrade: the folder already carries an id, so keep the
+		# migrated pairing by moving the record onto that id.
+		sync_vaults[vault_id] = sync_vaults[legacy]
+		sync_vaults.erase(legacy)
+
+## Adopt a peer's vault id (explicit pairing with an existing vault), so the
+## local folder and the device-local phrase store agree on the identity.
+func adopt_vault_id(new_id: String) -> void:
+	if new_id == "" or new_id == vault_id:
+		return
+	vault_id = new_id
+	save_vault_id()
+
+## Load the active vault's phrase + trusted peers from the device-local store,
+## minting a fresh phrase when this device has never seen the vault.
+func _load_vault_identity() -> void:
+	trusted.clear()
+	paired_peers.clear()
+	paired_vault_id = ""
+	vault_secret = ""
+	if vault_id == "":
+		return
+	var rec = sync_vaults.get(vault_id, {})
+	if typeof(rec) != TYPE_DICTIONARY or rec.is_empty():
+		vault_secret = SyncService.gen_vault_secret()  # never leaves the device
+		_save_vault_identity()
+		return
+	vault_secret = str(rec.get("secret", ""))
+	if vault_secret == "":
+		vault_secret = SyncService.gen_vault_secret()
+	for t in rec.get("trusted", []):
+		trusted.append(String(t))
+	var pp = rec.get("paired_peers", {})
+	if typeof(pp) == TYPE_DICTIONARY:
+		paired_peers = pp
+	paired_vault_id = str(rec.get("paired_vault_id", ""))
+	if paired_vault_id == "" and not paired_peers.is_empty():
+		paired_vault_id = vault_id
+
+## Write the active vault's live identity back into the device-local store.
+func _save_vault_identity() -> void:
+	if vault_id == "":
+		return
+	sync_vaults[vault_id] = {
+		"secret": vault_secret,
+		"trusted": trusted.duplicate(),
+		"paired_peers": paired_peers.duplicate(true),
+		"paired_vault_id": paired_vault_id,
+	}
+	_save_settings()
+
+## Stop syncing the active vault: drop every peer but KEEP the phrase, so
+## re-pairing later is a single entry. Other members are unaffected.
+func unpair_vault() -> void:
+	trusted.clear()
+	paired_peers.clear()
+	paired_vault_id = ""
+	_save_vault_identity()
+	sync_identity_changed.emit()
+
+## Fork the active vault: mint a new phrase AND a new id, so this copy becomes
+## its own independent vault. Existing members keep the old phrase/id.
+func reset_vault_words() -> void:
+	vault_secret = SyncService.gen_vault_secret()
+	vault_id = "%s-%s" % [Time.get_unix_time_from_system(), randi()]
+	trusted.clear()
+	paired_peers.clear()
+	paired_vault_id = ""
+	save_vault_id()
+	_save_vault_identity()
+	sync_identity_changed.emit()
 
 var titles := {}  # relative path -> front-matter title ("" = use filename)
 var tags := {}    # relative path -> Array[String] from front-matter "tags:"
@@ -542,13 +681,26 @@ func _load_settings() -> void:
 	vault_dir = cf.get_value("vault", "dir", VAULT_DIR)
 	device_id = cf.get_value("sync", "device_id", "")
 	sync_pin = cf.get_value("sync", "pin", "")
-	vault_secret = cf.get_value("sync", "vault_secret", "")
-	vault_id = cf.get_value("sync", "vault_id", "")
-	paired_vault_id = cf.get_value("sync", "paired_vault_id", "")
-	paired_peers = cf.get_value("sync", "paired_peers", {})
-	trusted.clear()
-	for t in cf.get_value("sync", "trusted", []):
-		trusted.append(String(t))
+	# Per-vault identities (device-local). Phrase + peers live here, keyed by
+	# the vault's in-folder id — never in one global settings slot.
+	var vaults = cf.get_value("sync", "vaults", {})
+	sync_vaults = vaults if typeof(vaults) == TYPE_DICTIONARY else {}
+	# One-time migration of the old single global identity onto the vault that
+	# was open; other vaults start unpaired.
+	var legacy_id := String(cf.get_value("sync", "vault_id", ""))
+	var legacy_secret := String(cf.get_value("sync", "vault_secret", ""))
+	if sync_vaults.is_empty() and legacy_id != "" and legacy_secret != "":
+		var legacy_trusted: Array = []
+		for t in cf.get_value("sync", "trusted", []):
+			legacy_trusted.append(String(t))
+		var legacy_peers = cf.get_value("sync", "paired_peers", {})
+		sync_vaults[legacy_id] = {
+			"secret": legacy_secret,
+			"trusted": legacy_trusted,
+			"paired_peers": legacy_peers if typeof(legacy_peers) == TYPE_DICTIONARY else {},
+			"paired_vault_id": String(cf.get_value("sync", "paired_vault_id", "")),
+		}
+		_legacy_vault_id = legacy_id
 
 func _save_settings() -> void:
 	# Smoke and ad-hoc harnesses must never overwrite the user's real settings
@@ -567,14 +719,10 @@ func _save_settings() -> void:
 	cf.set_value("vault", "dir", vault_dir)
 	cf.set_value("sync", "device_id", device_id)
 	cf.set_value("sync", "pin", sync_pin)
-	cf.set_value("sync", "vault_secret", vault_secret)
-	cf.set_value("sync", "vault_id", vault_id)
-	cf.set_value("sync", "paired_vault_id", paired_vault_id)
-	cf.set_value("sync", "paired_peers", paired_peers)
-	cf.set_value("sync", "trusted", trusted)
+	cf.set_value("sync", "vaults", sync_vaults)
 	cf.save(SETTINGS)
 
 func add_trusted(id: String) -> void:
 	if id != "" and not trusted.has(id):
 		trusted.append(id)
-		_save_settings()
+		_save_vault_identity()

@@ -13,6 +13,7 @@ var _send_thread: Thread
 var _send_result: Dictionary = {}
 var _send_running := false
 var _send_peer := ""
+var _reset_armed := false  # two-step confirm for the destructive reset-words
 
 @onready var _device_label: Label = %DeviceLabel
 @onready var _pin_label: Label = %PinLabel
@@ -23,12 +24,16 @@ var _send_peer := ""
 @onready var _log: RichTextLabel = %SyncLog
 @onready var _status_label: Label = %StatusLabel
 @onready var _close_btn: Button = %CloseButton
+@onready var _unpair_btn: Button = %UnpairBtn
+@onready var _reset_btn: Button = %ResetBtn
 
 func _ready() -> void:
 	visible = false
 	_discovery_btn.toggled.connect(_on_discovery_toggled)
 	_send_btn.pressed.connect(_on_send)
 	_close_btn.pressed.connect(func(): close_requested.emit())
+	_unpair_btn.pressed.connect(_on_unpair)
+	_reset_btn.pressed.connect(_on_reset)
 	# A scene instance is already in the tree, so main cannot inject `service`
 	# before _ready: bind_service() rebinds to the host's instance later. A
 	# standalone instantiation (tests) falls back to owning its own service.
@@ -58,17 +63,25 @@ func _attach_service() -> void:
 ## Called by the host every time the page is shown.
 func open() -> void:
 	var pal: Dictionary = GameManager.palette()
-	_pin_label.text = "Pairing words: " + GameManager.vault_secret
 	_pin_edit.text = ""
+	_refresh_identity()
+	_log.append_text("[color=%s]Sync lives with the vault. Share THIS vault's pairing words with the other device once; enter them there and pair. Trusted devices reconnect automatically. Open another vault to pair it separately.[/color]\n" % _css(pal.get("accent2", Color.GRAY)))
+	visible = true
+
+## Re-read the ACTIVE vault's identity so the page always reflects the vault
+## currently open (pairing is now bound to the vault, not the device).
+func _refresh_identity() -> void:
+	_pin_label.text = "Pairing words: " + GameManager.vault_secret
 	var paired_text := "Not paired"
 	if not GameManager.paired_peers.is_empty():
 		var names: Array[String] = []
 		for peer in GameManager.paired_peers.values():
 			names.append(str(peer.get("name", "paired device")))
 		paired_text = "Paired with: " + ", ".join(names)
-	_device_label.text = "Device: " + _service.device_name + "\nID: " + GameManager.device_id + "\nVault: " + GameManager.vault_id + "\n" + paired_text
-	_log.append_text("[color=%s]Share your pairing words with the other device once. Select its vault, enter its words there, and pair. Trusted devices reconnect automatically.[/color]\n" % _css(pal.get("accent2", Color.GRAY)))
-	visible = true
+	_device_label.text = "Device: %s\nID: %s\nVault: %s\n%s" % [_service.device_name, GameManager.device_id, GameManager.vault_id, paired_text]
+	_reset_armed = false
+	_reset_btn.text = "↺ Reset pairing words…"
+	_unpair_btn.disabled = not GameManager.is_vault_paired()
 
 func _css(c: Color) -> String:
 	return "#%02x%02x%02x" % [int(c.r * 255), int(c.g * 255), int(c.b * 255)]
@@ -88,6 +101,26 @@ func _on_discovery_toggled(pressed: bool) -> void:
 		_discovery_btn.text = "Start Discovery"
 		_peer_list.clear()
 		_log.append_text("Discovery stopped.\n")
+
+## Drop every peer of this vault but keep its words, so re-pairing is one entry.
+func _on_unpair() -> void:
+	GameManager.unpair_vault()
+	_refresh_identity()
+	_log.append_text("[color=orange]Unpaired. This vault keeps its pairing words, so you can pair again anytime.[/color]\n")
+
+## Fork: new words + a new vault id. This copy becomes its own independent
+## vault; other devices keep the old words and are unaffected.
+func _on_reset() -> void:
+	if not _reset_armed:
+		_reset_armed = true
+		_reset_btn.text = "⚠ Confirm: new words (forks this vault)"
+		return
+	_reset_armed = false
+	_reset_btn.text = "↺ Reset pairing words…"
+	GameManager.reset_vault_words()
+	_service.on_vault_changed()  # re-key sync to the new vault identity
+	_refresh_identity()
+	_log.append_text("[color=orange]New pairing words generated. This copy is now its own vault — other devices must pair with the new words; the old vault is unaffected.[/color]\n")
 
 func _refresh_peers() -> void:
 	var selected_ip := ""
@@ -148,9 +181,11 @@ func _process(_delta: float) -> void:
 	_send_running = false
 	_send_btn.disabled = false
 	if _send_result.get("ok", false):
+		var before_id := GameManager.vault_id
 		SyncService.accept_pair(_send_result, true)  # user drove this pairing
-		_pin_label.text = "Pairing words: " + GameManager.vault_secret
-		_device_label.text = "Device: %s\nID: %s\nVault: %s" % [_service.device_name, GameManager.device_id, GameManager.vault_id]
+		if GameManager.vault_id != before_id:
+			_service.on_vault_changed()  # joined an existing vault → re-key
+		_refresh_identity()
 		_pin_edit.clear()
 		var count := int(_send_result.get("count", 0))
 		_status_label.text = "Synced %d files with %s." % [count, _send_peer]

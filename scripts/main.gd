@@ -181,13 +181,14 @@ func _ready() -> void:
 	sync_service.name = "SyncService"
 	add_child(sync_service)
 	# Paired vaults reconnect automatically; the dialog is only configuration UI.
-	if not GameManager.trusted.is_empty() or not GameManager.paired_peers.is_empty() or GameManager.paired_vault_id != "":
+	if GameManager.is_vault_paired():
 		# Bind the UDP listener after the first frame — it is pure background
 		# work and must not delay the shell. The vault is already scanned by
 		# now, so discovery can never announce a stale vault.
 		_start_background_sync.call_deferred()
 	# Refresh only when the sync reports changed content/structure.
 	sync_service.sync_changed.connect(_on_sync_changed)
+	GameManager.sync_identity_changed.connect(_on_sync_identity_changed)
 	status_bar.set_sync_service(sync_service)
 	_boot_mark("sync-init")
 	if OS.get_environment("NEONNOTES_SMOKE") == "1":
@@ -1185,6 +1186,11 @@ func _on_vault_selected(path: String) -> void:
 	_flush_save()
 	if GameManager.set_vault_dir(path):
 		NoteCrud.purge_expired()  # trash belongs to the old vault's retention window
+		# Re-bind sync to the new vault's identity (phrase/peers/sync_state key)
+		# before anything can announce or push against a stale identity.
+		if sync_service:
+			sync_service.on_vault_changed()
+			status_bar.set_sync_service(sync_service)  # refresh the sync dot
 		# Settings is a live page; refresh its labels immediately after the
 		# vault switch instead of leaving the previous path cached on screen.
 		if page_mode == PAGE_SETTINGS:
@@ -1204,6 +1210,13 @@ func _on_sync() -> void:
 
 func _close_sync() -> void:
 	_close_page()
+
+## The active vault's sync identity changed in place (unpair / reset words).
+## The status dot must follow; "reset words" also forks the vault id, handled
+## by the sync page (it owns the service instance).
+func _on_sync_identity_changed() -> void:
+	if status_bar:
+		status_bar.set_sync_service(sync_service)
 
 # ------------------------------------------------------------ trash
 
