@@ -3,7 +3,6 @@ extends Control
 ## binds to it and builds data-driven content. v2.1: autosave, tree vault,
 ## mode toggle, export menu, help showcase.
 
-const SmokeDriver := preload("res://scripts/dev/smoke_test.gd")
 const MONO_FONT := preload("res://assets/fonts/ShareTechMono-Regular.ttf")
 const SELECTION_OVERLAY_SCENE := preload("res://scenes/components/selection_overlay.tscn")
 
@@ -69,6 +68,10 @@ var slash_menu: SlashMenuComponent = preload("res://scenes/components/slash_menu
 @onready var tags_input: LineEdit = %TagsInput
 @onready var tags_add: Button = %TagsAdd
 var _note_tags: Array[String] = []
+
+## Boot timing: printed when `NEONNOTES_BOOT_DEBUG=1` (or always in a debug build).
+var _boot_t0 := 0
+var _boot_last := 0
 var _note_title := ""
 var _metadata_source := ""
 var _saved_body := ""
@@ -89,7 +92,10 @@ func _notification(what: int) -> void:
 		_flush_save()
 
 func _ready() -> void:
+	_boot_t0 = Time.get_ticks_msec()
+	_boot_last = _boot_t0
 	_build_dynamic_ui()
+	_boot_mark("ui-build")
 	edit_search.text_changed.connect(_find_in_editor)
 	theme_component.name = "ThemeComponent"
 	theme_component.setup(%Bg, toolbar.note_title, %SidePanel as PanelContainer,
@@ -118,6 +124,7 @@ func _ready() -> void:
 			_show_settings()
 		elif page_mode == "":
 			_render_preview())
+	GameManager.metadata_ready.connect(_on_metadata_ready)
 	vault_tree.save_cb = _flush_save
 	vault_tree.flash_cb = _flash
 	vault_tree.moved_cb = func(old_paths: Array[String], new_paths: Array[String]):
@@ -140,6 +147,7 @@ func _ready() -> void:
 	PreviewBuilder.open_cb = _open_wikilink
 	PreviewBuilder.image_cb = _on_image_click
 	layout_component.ready()
+	_boot_mark("theme-layout")
 	# Landscape/portrait rotation changes LayoutComponent.ui_font_delta; chrome
 	# and content fonts must be re-applied for the new delta to take effect.
 	layout_component.mobile_changed.connect(_on_mobile_changed)
@@ -148,34 +156,43 @@ func _ready() -> void:
 	get_tree().root.content_scale_factor = ui_scale
 	if OS.get_environment("NEONNOTES_SMOKE") == "1":
 		_prepare_smoke_vault()
-	# Housekeeping: drop trash entries older than the retention window before
-	# the vault is scanned, so purged paths never linger.
-	NoteCrud.purge_expired()
-	# Load the selected vault and tree completely before starting networking.
-	# Sync must never announce or transfer against a stale/default vault.
-	GameManager.scan_notes()
+	# Housekeeping is deferred past the first frame: it stat()s the trash dir
+	# and is not needed to draw the shell.
+	_deferred_housekeeping.call_deferred()
+	# Load the selected vault's paths and tree before starting networking. Sync
+	# must never announce or transfer against a stale/default vault. Only paths
+	# are enumerated here — titles/tags/links are read afterwards in
+	# load_metadata_async() so the shell, tree and note appear immediately.
+	GameManager.scan_paths()
+	_boot_mark("vault-scan")
 	_refresh_list()
+	_boot_mark("tree-build")
 	layout_component.update_layout()
+	_boot_mark("layout")
 	_open_start_page.call_deferred()
+	GameManager.load_metadata_async()
 	sync_service = SyncService.new()
 	sync_service.name = "SyncService"
 	add_child(sync_service)
 	# Paired vaults reconnect automatically; the dialog is only configuration UI.
 	if not GameManager.trusted.is_empty() or not GameManager.paired_peers.is_empty() or GameManager.paired_vault_id != "":
-		# Auto-sync must run even when the UDP broadcast listener can't bind
-		# (e.g. another process holds the port, or a phone's UDP isn't reached).
-		# With stored peer IPs it can still sync directly over TCP.
-		sync_service.enable_auto_sync()
-		if not sync_service.start_discovery():
-			sync_service.sync_failed.emit("Could not start background discovery (auto-sync via stored peer IP still active)")
+		# Bind the UDP listener after the first frame — it is pure background
+		# work and must not delay the shell. The vault is already scanned by
+		# now, so discovery can never announce a stale vault.
+		_start_background_sync.call_deferred()
 	# Refresh only when the sync reports changed content/structure.
 	sync_service.sync_changed.connect(_on_sync_changed)
 	status_bar.set_sync_service(sync_service)
+	_boot_mark("sync-init")
 	if OS.get_environment("NEONNOTES_SMOKE") == "1":
 		_start_smoke.call_deferred()
 
 func _start_smoke() -> void:
-	var drv: Node = SmokeDriver.new(self)
+	# Loaded lazily so the dev-only `scripts/dev/` folder can be excluded from
+	# exported builds (see export_presets.cfg); this path only runs when
+	# NEONNOTES_SMOKE=1, which never happens in a shipped app.
+	var smoke_script: GDScript = load("res://scripts/dev/smoke_test.gd")
+	var drv: Node = smoke_script.new(self)
 	drv.name = "SmokeDriver"
 	add_child(drv)
 	drv._run_smoke()
@@ -185,6 +202,16 @@ func _open_start_page() -> void:
 		_on_note_selected(GameManager.last_opened_rel)
 	else:
 		_on_note_selected("_homepage.md")
+	_boot_mark("first-note")
+
+func _on_metadata_ready() -> void:
+	# Titles/tags/links are now complete: refresh the tree text (filenames were
+	# shown until now) and any open derived view.
+	_boot_mark("metadata")
+	_refresh_list()
+	if vault_tree.backlinks_panel.visible:
+		_refresh_backlinks()
+
 
 func _refresh_list() -> void:
 	var selected := GameManager.current_rel
@@ -415,56 +442,18 @@ func _on_code_edit_tap(_ev: InputEventScreenTouch) -> void:
 
 ## Fallback word select when SelectionOverlay is unavailable (non-Android touch).
 func select_word_at(line: int, col: int) -> void:
+	if line >= code_edit.get_line_count() or col < 0:
+		return
 	var text_line := code_edit.get_line(line)
-	if line >= code_edit.get_line_count() or col < 0 or col >= text_line.length():
+	if col >= text_line.length() or not TextUtils.is_word_char(text_line[col]):
 		return
-	if not _is_word_char(text_line[col]):
+	var bounds := TextUtils.word_bounds(text_line, col)
+	if bounds.x < 0:
 		return
-	var s := col
-	var e := col + 1
-	while s > 0 and _is_word_char(text_line[s - 1]):
-		s -= 1
-	while e < text_line.length() and _is_word_char(text_line[e]):
-		e += 1
 	# Same rule as SelectionOverlay: select() is a no-op while selecting_enabled is false.
 	code_edit.selecting_enabled = true
-	code_edit.select(line, s, line, e)
+	code_edit.select(line, bounds.x, line, bounds.y)
 	_show_selection_menu()
-
-func _is_word_char(ch: String) -> bool:
-	if ch.length() != 1:
-		return false
-	var code := ch.unicode_at(0)
-	if ch == "_":
-		return true
-	if code >= 48 and code <= 57:
-		return true
-	if (code >= 65 and code <= 90) or (code >= 97 and code <= 122):
-		return true
-	return false
-
-func _scroll_tapped_caret(local_pos: Vector2) -> void:
-	if not code_edit.visible:
-		return
-	# Convert the touch point to the exact line/column CodeEdit hit, rather
-	# than assuming the current caret is already the tapped location.
-	# Godot 4: get_line_column_at_pos → Vector2i(column, line).
-	var caret_pos: Vector2i = code_edit.get_line_column_at_pos(Vector2i(local_pos))
-	code_edit.set_caret_line(caret_pos.y)
-	code_edit.set_caret_column(caret_pos.x)
-	code_edit.adjust_viewport_to_caret(0)
-	_schedule_tapped_caret_scroll(12)
-
-func _schedule_tapped_caret_scroll(frames: int) -> void:
-	if not code_edit.visible:
-		return
-	# Wait for CodeEdit's default mouse handling and the Android IME resize,
-	# then explicitly keep the resolved caret visible across layout frames.
-	for _i in range(frames):
-		await get_tree().process_frame
-		if not code_edit.visible:
-			return
-		code_edit.adjust_viewport_to_caret(0)
 
 ## Cut/Copy/Paste popup actions. After the menu closes we keep the selection
 ## (IME backspace deletes it); we only drop the handles so the next scroll
@@ -597,11 +586,13 @@ func _on_note_selected(fname: String) -> void:
 	GameManager._save_settings()
 	print("[MAIN-DBG] _on_note_selected fname=", fname)
 	var source := GameManager.read_note(fname)
+	_boot_mark("note-read")
 	_metadata_source = source
 	_note_tags = GameManager._parse_note_meta(source).get("tags", [])
 	_note_title = NoteMetadata.field(source, "title", fname.get_file().trim_suffix(".md"))
 	_set_title_form(_note_title)
 	code_edit.text = NoteMetadata.body(source)
+	_boot_mark("note-highlight")
 	_remember_saved_form()
 	_refresh_note_tag_chips()
 	help_mode = false
@@ -925,10 +916,13 @@ func _render_preview(preserve_scroll := false) -> void:
 	var doc := MarkdownParser.parse(NoteMetadata.preview(code_edit.text, _note_title))
 	# per-note theme: front-matter  theme: <Palette>
 	PreviewBuilder.pal_override = GameManager.PALETTES.get(str(doc.get("meta", {}).get("theme", "")), {})
-	PreviewBuilder.build(doc, content_body)
+	# Progressive build: a large note streams in over several frames instead of
+	# blocking this one (~1.9 s for a 2k-line note on a phone before).
+	await PreviewBuilder.build_async(self, doc, content_body)
 	# Fresh renders (mode switch/new note) drop to the top; a sync re-render keeps
 	# the reader's scroll offset instead of jumping them.
-	content_host.scroll_vertical = prev_scroll
+	if is_instance_valid(content_host):
+		content_host.scroll_vertical = prev_scroll
 
 func _close_settings() -> void:
 	_close_page()
@@ -1240,6 +1234,35 @@ func _export_dest(ext: String) -> String:
 	var d := GameManager.vault_abs() + "/" + GameManager.EXPORTS_SUBDIR
 	DirAccess.make_dir_recursive_absolute(d)
 	return d.path_join(filename)
+
+func _boot_mark(label: String) -> void:
+	# Printed in debug builds, with NEONNOTES_BOOT_DEBUG=1, or when the marker
+	# file user://boot_debug exists — the last one lets a *release* build be
+	# profiled on-device: `adb shell run-as com.neonnotes.app touch files/boot_debug`.
+	if not OS.is_debug_build() and OS.get_environment("NEONNOTES_BOOT_DEBUG") != "1" \
+			and not FileAccess.file_exists("user://boot_debug"):
+		return
+	var now := Time.get_ticks_msec()
+	print("[boot] %-14s +%4dms  total %4dms" % [label, now - _boot_last, now - _boot_t0])
+	_boot_last = now
+
+
+func _deferred_housekeeping() -> void:
+	# Drop trash entries older than the retention window. Deferred so the
+	# stat() sweep never delays the first rendered frame.
+	NoteCrud.purge_expired()
+	_boot_mark("housekeeping")
+
+
+func _start_background_sync() -> void:
+	# Auto-sync must run even when the UDP broadcast listener can't bind
+	# (e.g. another process holds the port, or a phone's UDP isn't reached).
+	# With stored peer IPs it can still sync directly over TCP.
+	sync_service.enable_auto_sync()
+	if not sync_service.start_discovery():
+		sync_service.sync_failed.emit("Could not start background discovery (auto-sync via stored peer IP still active)")
+	_boot_mark("sync-discovery")
+
 
 func _flash(msg: String) -> void:
 	status_bar.flash(msg)

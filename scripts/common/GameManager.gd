@@ -2,6 +2,9 @@ extends Node
 ## Global app state: vault location, color palettes, current note (NeonNotes v2).
 
 signal palette_changed
+## Emitted when the background metadata pass (load_metadata_async) has filled
+## titles/tags/links for the whole vault. Backlinks/graph/search can then refresh.
+signal metadata_ready
 
 const VAULT_DIR := "user://vault"
 const SETTINGS := "user://settings.cfg"
@@ -144,7 +147,21 @@ func save_order() -> void:
 	f.store_string(JSON.stringify({"order": order, "collapsed": collapsed_folders}, "  "))
 	f.close()
 
+## Full scan: enumerate paths, then read every note for title/tags/links.
 func scan_notes() -> void:
+	scan_paths()
+	_index_note_metadata()
+	links_ready = true
+
+
+## Fast boot path: enumerate note paths only (dir walk + folder-note creation +
+## order). No file content is read, so the tree can render from names
+## immediately; titles/tags/links follow via load_metadata_async().
+## NOTE: parallel reads are counter-productive here — a WorkerThreadPool scan
+## measured 2.4 s vs 0.84 s serial for 905 notes on a phone (FileAccess
+## contention), so the reads stay on one thread.
+func scan_paths() -> void:
+	_scan_generation += 1
 	notes.clear()
 	titles.clear()
 	tags.clear()
@@ -152,15 +169,59 @@ func scan_notes() -> void:
 	_scan_dir("")
 	_ensure_folder_notes()
 	notes.sort()
-	for n in notes:
-		# One read per note yields title + tags + outbound links; the previous
-		# code opened every note twice (once for the title, once for the tags).
-		var meta := _read_note_meta(n)
-		titles[n] = meta["title"]
-		tags[n] = meta["tags"]
-		links[n] = meta["links"]
-	links_ready = true
+	links_ready = false
 	load_order()
+
+
+func _index_note_metadata() -> void:
+	var vault := vault_abs()
+	for n in notes:
+		_apply_note_meta(n, _read_note_meta_abs(vault.path_join(n)))
+
+
+## Batched, frame-yielding metadata pass used after the shell and tree are up.
+## Aborts if the vault is rescanned meanwhile (generation bump).
+const METADATA_BATCH := 12
+var _scan_generation := 0
+var _meta_scanning := false
+
+func load_metadata_async() -> void:
+	if _meta_scanning:
+		return
+	_meta_scanning = true
+	var gen := _scan_generation
+	var names := notes.duplicate()
+	var vault := vault_abs()
+	var i := 0
+	while i < names.size():
+		if gen != _scan_generation or not is_inside_tree():
+			_meta_scanning = false
+			return
+		var end := mini(i + METADATA_BATCH, names.size())
+		for k in range(i, end):
+			var n: String = names[k]
+			if notes.has(n):
+				_apply_note_meta(n, _read_note_meta_abs(vault.path_join(n)))
+		i = end
+		await get_tree().process_frame
+	links_ready = true
+	_meta_scanning = false
+	metadata_ready.emit()
+
+
+func _apply_note_meta(name: String, meta: Dictionary) -> void:
+	titles[name] = meta["title"]
+	tags[name] = meta["tags"]
+	links[name] = meta["links"]
+
+
+func _read_note_meta_abs(path: String) -> Dictionary:
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return {"title": "", "tags": [] as Array[String], "links": [] as Array[String]}
+	var text := f.get_as_text()
+	f.close()
+	return _parse_note_meta(text)
 
 ## Remap the in-memory index after files moved on disk, without re-reading the
 ## vault. Only paths change on a move — titles/tags travel with their files —
@@ -220,12 +281,7 @@ func all_tags() -> Array[String]:
 ## outbound [[wiki-link]] target. Feeds the in-memory link index so backlinks,
 ## the graph view and post-move link rewriting never re-read the whole vault.
 func _read_note_meta(fname: String) -> Dictionary:
-	var f := FileAccess.open(vault_abs() + "/" + fname, FileAccess.READ)
-	if f == null:
-		return {"title": "", "tags": [] as Array[String], "links": [] as Array[String]}
-	var text := f.get_as_text()
-	f.close()
-	return _parse_note_meta(text)
+	return _read_note_meta_abs(vault_abs() + "/" + fname)
 
 ## The same extraction from text already in memory — write_note() uses it so
 ## saving a note refreshes its index entry for free.
