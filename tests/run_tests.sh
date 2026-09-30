@@ -34,6 +34,9 @@ run_godot_test() {
 run_godot_test "UNIT RESULT: OK" --headless --path . --script tests/unit_tests.gd
 run_godot_test "SEARCH WORKER RESULT: OK" --headless --path . tests/TestSearchWorker.tscn
 run_godot_test "ALL DRAG TESTS PASSED SUCCESSFULLY!" --headless --path . tests/TestVaultTreeDrag.tscn
+# Trash: recoverable deletes, dot-hidden, sync-excluded, collision restore, purge.
+# Runs before the known-failing mobile-touch test so `set -e` cannot skip it.
+run_godot_test "TRASH RESULT: OK" --headless --path . tests/TestTrash.tscn
 run_godot_test "MOBILE TREE TOUCH RESULT: OK" --headless --path . tests/ReproTreeTap.tscn
 # Sync delete/move propagation over loopback (real frame protocol + tombstones).
 run_godot_test "SYNC DELETE/MOVE RESULT: OK" --headless --path . tests/TestSyncDeleteMove.tscn

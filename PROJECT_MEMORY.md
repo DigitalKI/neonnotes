@@ -5,7 +5,7 @@
 > decisions, gotchas) — history lives in git, `git log` is the changelog.
 > Size budget ~250 lines: compact in-session if exceeded.
 
-_Last updated: 2026-09-29 · Godot 4.7 · renderer: gl_compatibility_
+_Last updated: 2026-09-30 · Godot 4.7 · renderer: gl_compatibility_
 
 ---
 
@@ -31,6 +31,16 @@ _Last updated: 2026-09-29 · Godot 4.7 · renderer: gl_compatibility_
   title and tag controls; the full frontmatter block is kept out of the visible
   Markdown source. Saves preserve unknown fields and refresh `updated`; new
   notes initialize both timestamps. Autosave debounced 0.5 s after typing; transitions flush immediately.
+- **Trash (2026-09-30):** deletes are recoverable — `NoteCrud.move_to_trash()`
+  relocates the whole target (note, or folder subtree + companion note + media)
+  into `vault/.trash/<id>/` and records `{rel, at, kind, label, paths}` in
+  `vault/.trash/index.json`. The dot-dir is invisible to `scan_notes()`, the
+  tree, search and graph, and is **never synced** (`_valid_sync_path` rejects
+  it); the delete still propagates to peers as a tombstone. The **TrashPage**
+  (scene page in `%Content`, opened from ⋮ → "🗑 Open Trash…", id 32) restores
+  (auto-renaming on collision, then rescans + `note_restored()` to clear the
+  tombstone) or purges. `NoteCrud.purge_expired()` drops items older than
+  `TRASH_RETENTION_DAYS` (30) on launch and vault switch.
 - Vault tree with folder-as-note merge, drag & drop (notes + folders), custom
   ordering in `vault/.neonnotes.json`, wiki-link rewriting on move, tag chips.
   Search debounces typing (0.35 s), copies only path/title metadata on the UI
@@ -98,8 +108,12 @@ _Last updated: 2026-09-29 · Godot 4.7 · renderer: gl_compatibility_
   (selected note → same folder, right after it; selected folder → first child;
   nothing selected → vault root, appended) via
   `VaultTreeComponent.order_new_note()` writing `vault/.neonnotes.json`.
-- Tests: `./tests/run_tests.sh` (unit/tree-drag/mobile-tree-touch/sync/smoke),
-  graded by per-test `RESULT: OK` markers; `NEONNOTES_SMOKE=1` smoke path.
+- Tests: `./tests/run_tests.sh`
+  (unit/tree-drag/mobile-tree-touch/sync/trash/smoke), graded by per-test
+  `RESULT: OK` markers; `NEONNOTES_SMOKE=1` smoke path. `run_tests.sh` uses
+  `set -e`, so the known mobile-tree-touch failure aborts the run before
+  sync/smoke (trash was moved ahead of it so it still runs) — run sync/smoke
+  individually.
 
 ## 3. Direction & next steps
 
@@ -169,6 +183,12 @@ _These OVERRIDE the skill's defaults for this project._
 ## 5. Architecture & decisions (ADR)
 
 - **Plain .md vault, no DB** — portability/lock-in avoidance (2026-09).
+- **Recoverable deletes: local-only Trash** (2026-09-30) — a delete *moves* the
+  target (folder subtree included) into `vault/.trash/` with a 30-day retention
+  window instead of unlinking it. The Trash is device-local and excluded from
+  sync; the deletion itself still propagates as a tombstone. A restore
+  re-creates the files, rescans, and clears the tombstone so peers accept them.
+  Rationale: an undo path without adding a second vault or another autoload.
 - **Front-matter title peek, not full parse** — tree refresh stays cheap.
 - **`gl_compatibility` renderer** — uniform across Linux/Windows/Android.
 - **CRT shader tuned subtle (not noisy)** — "flat so reading isn't distorted";
@@ -218,7 +238,8 @@ _These OVERRIDE the skill's defaults for this project._
 | `res://scripts/markdown/wiki_links.gd` | Link extract/resolve/backlinks/graph |
 | `res://scripts/common/path_remap.gd` | Static move/remap helpers (unit-tested) |
 | `res://scripts/common/media_import.gd` | Static media library + image import helpers (magic-byte decode, SAF URIs, dest naming) |
-| `res://scripts/common/note_crud.gd` | Static vault CRUD helpers (rm_dir, erase_note_meta, scrub_order, compute_delete_set) |
+| `res://scripts/common/note_crud.gd` | Static vault CRUD helpers (rm_dir, erase_note_meta, scrub_order, compute_delete_set, trash move/restore/purge) |
+| `res://scripts/components/trash_page.gd` | Trash page: lists/restores/purges trashed items (scene `trash_page.tscn`) |
 | `res://scripts/render/graph_model.gd` | Dependency-free graph semantics (levels/edges) |
 | `res://scripts/render/` | PreviewBuilder, ChartView, GraphView, FX |
 | `res://scripts/sync/sync_service.gd` | LAN discovery/handshake/streaming transfer |
@@ -260,6 +281,13 @@ _These OVERRIDE the skill's defaults for this project._
   `write_note()` must call `scan_notes()` after, or moves can miss links.
 - **`.neonnotes.json` (dot-prefixed) and `exports/` must survive scan
   changes** (order file skipped by dot rule; exports excluded by name).
+- **Trash stays hidden and unsynced**: `vault/.trash/` must never appear in
+  `scan_notes()`/the tree/search/graph and must stay rejected by
+  `SyncService._valid_sync_path`. A delete still fires
+  `sync_service.note_deleted()` per affected path (tombstone), and a restore
+  must fire `note_restored()` for **every** restored path — otherwise LWW
+  re-deletes it on the next sync. Never hard-delete a node without an explicit
+  "forever"/"empty" action.
 - **Ports 47770/47771 are fixed**; don't drift without updating Help copy.
 - **Escape sentinels U+E000–U+E003 are private-use chars** — never emit them
   from markdown transforms.

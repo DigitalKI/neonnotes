@@ -179,6 +179,8 @@ tags: project, reference
 
 Folders without a companion Markdown file receive a folder note automatically. A folder and a same-named note appear as one merged tree item. The tree supports moving, reordering, and deleting notes or folders. Exports are kept separately under `vault/exports/` and are not shown as notes.
 
+Deleting a note or folder moves it to the Trash instead of erasing it; a folder takes its whole subtree (children, companion note, and embedded media) with it. Open **⋮ → 🗑 Open Trash** to restore an item or delete it permanently. Trashed items are kept for **30 days** and then removed automatically. The Trash is device-local: it is never synchronized, though deleting an item still propagates as a normal delete to paired devices.
+
 ## 12. Sync
 
 Open **⇄ Sync** to pair devices on the same local network. Discovery shows each vault ID. On the device receiving the pairing, read its generated eight-word pairing phrase; enter that phrase on the device initiating pairing. After successful pairing, the device adopts the receiving vault’s identity and phrase; paired devices reconnect without entering it again. Keep the phrase private: it authenticates pairing using a nonce-based proof without sending the phrase itself, but LAN transfers are not yet encrypted.

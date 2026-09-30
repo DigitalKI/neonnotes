@@ -506,6 +506,10 @@ func _handle_message(conn: StreamPeerTCP, msg: Dictionary, st: Dictionary, peer_
 # ---------------- Stream receive (bounded memory) ----------------
 
 static func _valid_sync_path(name: String) -> bool:
+	# The Trash is device-local (trash never syncs); deletes still propagate as
+	# tombstones, so a peer is never sent recoverable copies of deleted files.
+	if name == NoteCrud.TRASH_DIR or name.begins_with(NoteCrud.TRASH_DIR + "/"):
+		return false
 	return name != "" and not name.begins_with("/") and not name.contains("\\") and not name.contains("..") and name.get_base_dir() != GameManager.EXPORTS_SUBDIR
 
 static func _secret_proof(secret: String, nonce: String) -> String:

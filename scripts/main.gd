@@ -47,10 +47,12 @@ const PAGE_SYNC := "sync"
 const PAGE_NEW_NOTE := "new_note"
 const PAGE_VAULT := "vault"
 const PAGE_MEDIA := "media"
+const PAGE_TRASH := "trash"
 
 var sidebar: PanelContainer
 @onready var new_dialog: NewNoteDialog = %NewNoteDialog
 @onready var vault_picker: VaultPicker = %VaultPicker
+@onready var trash_page: TrashPage = %TrashPage
 var help_mode := false
 var source_mode := false
 var autosave_timer := Timer.new()
@@ -146,6 +148,9 @@ func _ready() -> void:
 	get_tree().root.content_scale_factor = ui_scale
 	if OS.get_environment("NEONNOTES_SMOKE") == "1":
 		_prepare_smoke_vault()
+	# Housekeeping: drop trash entries older than the retention window before
+	# the vault is scanned, so purged paths never linger.
+	NoteCrud.purge_expired()
 	# Load the selected vault and tree completely before starting networking.
 	# Sync must never announce or transfer against a stale/default vault.
 	GameManager.scan_notes()
@@ -357,6 +362,10 @@ func _build_dynamic_ui() -> void:
 	sync_page.bind_service(sync_service)
 	new_dialog.close_requested.connect(_close_page)
 	vault_picker.close_requested.connect(_close_page)
+	trash_page.close_requested.connect(_close_page)
+	trash_page.restore_requested.connect(_on_trash_restore)
+	trash_page.purge_requested.connect(_on_trash_purge)
+	trash_page.empty_requested.connect(_on_trash_empty)
 
 # ------------------------------------------------------------ mobile selection handles
 
@@ -712,9 +721,9 @@ func delete_node(rel: String = "", keep_children: bool = false, confirm: bool = 
 func _confirm_delete_parent(rel: String) -> void:
 	var dlg := AcceptDialog.new()
 	dlg.title = "Delete Folder"
-	dlg.dialog_text = "\"%s\" contains child items.\n\nHow do you want to delete it?" % rel
+	dlg.dialog_text = "\"%s\" contains child items.\n\nHow do you want to delete it?\nDeleted items go to the Trash for %d days." % [rel, NoteCrud.TRASH_RETENTION_DAYS]
 	dlg.ok_button_text = "Cancel"
-	dlg.add_button("🗑 Delete All", false, "del_all")
+	dlg.add_button("🗑 Trash All", false, "del_all")
 	dlg.add_button("Delete Node Only", false, "del_one")
 	DialogTheme.apply(dlg)  # confirmations match the palette like every page
 	add_child(dlg)
@@ -731,8 +740,8 @@ func _confirm_delete_leaf(rel: String) -> void:
 	_flush_save()
 	var dlg := ConfirmationDialog.new()
 	dlg.title = "Delete"
-	dlg.dialog_text = "Delete \"%s\" permanently?\n\nThis cannot be undone." % rel
-	dlg.ok_button_text = "🗑 Delete"
+	dlg.dialog_text = "Move \"%s\" to the Trash?\n\nYou can restore it for %d days." % [rel, NoteCrud.TRASH_RETENTION_DAYS]
+	dlg.ok_button_text = "🗑 Move to Trash"
 	dlg.get_cancel_button().text = "Cancel"
 	DialogTheme.apply(dlg)
 	add_child(dlg)
@@ -769,7 +778,9 @@ func _perform_delete(rel: String, keep_children: bool = false) -> void:
 
 		var comp_note := folder_rel + ".md"
 		if FileAccess.file_exists(vault.path_join(comp_note)):
-			DirAccess.remove_absolute(vault.path_join(comp_note))
+			# The folder node itself (companion note) is deleted; its children
+			# were moved up above. Recoverable, so it goes to the Trash too.
+			NoteCrud.move_to_trash(comp_note, [comp_note])
 			NoteCrud.erase_note_meta(comp_note)
 			if GameManager.current_rel == comp_note:
 				GameManager.current_file = ""
@@ -785,16 +796,11 @@ func _perform_delete(rel: String, keep_children: bool = false) -> void:
 		_flash("Deleted %s — children moved to %s" % [folder_rel.get_file(), parent_dir if parent_dir != "" else "vault root"])
 		return
 
-	# Delete all (node / folder / note / branch)
+	# Delete all (node / folder / note / branch): the whole subtree moves into
+	# the Trash and can be restored for TRASH_RETENTION_DAYS. Compute the set
+	# BEFORE moving it — it is read from the on-disk notes index.
 	var affected := NoteCrud.compute_delete_set(rel)
-
-	if DirAccess.dir_exists_absolute(vault.path_join(folder_rel)):
-		NoteCrud.rm_dir(folder_rel)
-
-	for f in affected:
-		var abs_f := vault.path_join(f)
-		if FileAccess.file_exists(abs_f):
-			DirAccess.remove_absolute(abs_f)
+	NoteCrud.move_to_trash(rel, affected)
 
 	var deleted_current := false
 	var deleted_note := GameManager.current_rel
@@ -833,7 +839,7 @@ func _perform_delete(rel: String, keep_children: bool = false) -> void:
 		if next_note != "" and GameManager.notes.has(next_note):
 			vault_tree.select_note(next_note)
 
-	_flash("🗑 Deleted " + rel)
+	_flash("🗑 Moved to Trash: " + rel)
 
 # ------------------------------------------------- mode toggle / help
 
@@ -942,7 +948,7 @@ func _show_settings() -> void:
 ## Every page is a scene instance inside %Content, so all of them are sized
 ## like an open note. Sharing one helper keeps the hide/show rules identical.
 func _pages() -> Array[Control]:
-	return [settings_page, sync_page, new_dialog, vault_picker, media_dialog]
+	return [settings_page, sync_page, new_dialog, vault_picker, media_dialog, trash_page]
 
 func _open_page(mode: String, page: Control) -> void:
 	_flush_save()
@@ -1145,6 +1151,7 @@ func _on_vault_selected(path: String) -> void:
 		_close_page()
 	_flush_save()
 	if GameManager.set_vault_dir(path):
+		NoteCrud.purge_expired()  # trash belongs to the old vault's retention window
 		# Settings is a live page; refresh its labels immediately after the
 		# vault switch instead of leaving the previous path cached on screen.
 		if page_mode == PAGE_SETTINGS:
@@ -1164,6 +1171,52 @@ func _on_sync() -> void:
 
 func _close_sync() -> void:
 	_close_page()
+
+# ------------------------------------------------------------ trash
+
+## Open the Trash page, purging expired items first so the list is honest.
+## A restore recreates files the delete flow tombstoned, so it rescans and
+## clears those tombstones — the same contract as a folder moved back.
+func _open_trash() -> void:
+	NoteCrud.purge_expired()
+	_open_page(PAGE_TRASH, trash_page)
+	trash_page.begin()
+
+func _on_trash_restore(id: String) -> void:
+	var res := NoteCrud.restore_from_trash(id)
+	if not res.get("ok", false):
+		status_bar.flash("✗ Could not restore item")
+		trash_page.refresh()
+		return
+	GameManager.scan_notes()
+	if sync_service:
+		for p in res.get("paths", []):
+			sync_service.note_restored(str(p))
+		sync_service.note_saved()
+	_refresh_list()
+	trash_page.refresh()
+	_flash("↩ Restored " + str(res.get("rel", "")))
+
+func _on_trash_purge(id: String) -> void:
+	NoteCrud.purge_from_trash(id)
+	trash_page.refresh()
+	_flash("🗑 Deleted permanently")
+
+func _on_trash_empty() -> void:
+	var dlg := ConfirmationDialog.new()
+	dlg.title = "Empty Trash"
+	dlg.dialog_text = "Permanently delete every trashed item?\n\nThis cannot be undone."
+	dlg.ok_button_text = "🗑 Empty Trash"
+	dlg.get_cancel_button().text = "Cancel"
+	DialogTheme.apply(dlg)
+	add_child(dlg)
+	dlg.confirmed.connect(func():
+		NoteCrud.empty_trash()
+		trash_page.refresh()
+		_flash("🗑 Trash emptied")
+		dlg.queue_free())
+	dlg.canceled.connect(func(): dlg.queue_free())
+	dlg.popup_centered()
 
 # ------------------------------------------------------------ exporting
 
@@ -1200,6 +1253,8 @@ func _on_more_action(id: int) -> void:
 		MoreMenuComponent.ID_DELETE_NOTE:
 			if not vault_tree.side_tree.get_selected() == vault_tree.side_tree.get_root():
 				_delete_current_note()
+		MoreMenuComponent.ID_TRASH:
+			_open_trash()
 		MoreMenuComponent.ID_HELP:
 			_show_help()
 		MoreMenuComponent.ID_BACKLINKS:
