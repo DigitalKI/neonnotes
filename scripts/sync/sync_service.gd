@@ -66,6 +66,11 @@ func _ready() -> void:
 # ---------------- Discovery ----------------
 
 func start_discovery() -> bool:
+	# Hard gate: an ephemeral test/dev session (suppress_settings_save) must not
+	# join the LAN. It shares the real vault id/secret, so announcing or listening
+	# would let a fixture vault sync test notes to the user's real peers.
+	if GameManager.suppress_settings_save:
+		return false
 	stop_discovery()
 	# Keep discovery alive even when this dialog is closed; Main owns this node.
 	set_process(true)
@@ -1034,8 +1039,8 @@ func _exit_tree() -> void:
 		_sync_thread = null
 
 func enable_auto_sync() -> void:
-	if _shutting_down:
-		return
+	if _shutting_down or GameManager.suppress_settings_save:
+		return  # ephemeral test/dev session — never push to real peers
 	if _auto_timer:
 		return
 	_auto_timer = Timer.new()
