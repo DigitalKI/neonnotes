@@ -11,6 +11,65 @@ extends SyntaxHighlighter
 
 var colors: Dictionary = {}
 
+## Per-line language of the fenced block open ABOVE that line ("" = plain).
+## Rebuilt once per text revision; see _fence_lang_at().
+var _fence_langs: PackedStringArray = PackedStringArray()
+var _fence_dirty := true
+var _fence_wired := false
+
+
+## Register a single invalidation hook on the editor the first time we are
+## asked to highlight. The alternative — rescanning the document inside every
+## per-line callback — is O(N²) over the note and dominated first-open time
+## (multi-second on Android for a large note).
+func _ensure_fence_wired() -> void:
+	if _fence_wired:
+		return
+	var te := get_text_edit()
+	if te == null:
+		return
+	te.text_changed.connect(_mark_fence_dirty)
+	_fence_wired = true
+
+
+func _mark_fence_dirty() -> void:
+	_fence_dirty = true
+
+
+func _fence_lang_at(line: int) -> String:
+	_ensure_fence_wired()
+	if _fence_dirty:
+		_rebuild_fence_langs()
+	if line < 0 or line >= _fence_langs.size():
+		return ""
+	return _fence_langs[line]
+
+
+## One O(N) pass building the fence state for every line. A line's state comes
+## from the lines above it, which is exactly what the old above-scan computed.
+func _rebuild_fence_langs() -> void:
+	_fence_dirty = false
+	var te := get_text_edit()
+	if te == null:
+		_fence_langs = PackedStringArray()
+		return
+	var lines := te.text.split("\n")
+	var cache := PackedStringArray()
+	cache.resize(lines.size())
+	var in_fence := false
+	var lang := ""
+	for i in lines.size():
+		cache[i] = lang if in_fence else ""
+		var t := lines[i].strip_edges()
+		if in_fence:
+			if t.begins_with("```"):
+				in_fence = false
+				lang = ""
+		elif t.begins_with("```"):
+			in_fence = true
+			lang = t.substr(3).strip_edges().to_lower()
+	_fence_langs = cache
+
 func _c(key: String, fallback: Color) -> Color:
 	return colors.get(key, fallback)
 
@@ -30,19 +89,10 @@ func _get_line_syntax_highlighting(line: int) -> Dictionary:
 	var s := text.strip_edges()
 
 	# ---- fenced-block state: which fence is open above this line? ------------
-	var lang := ""
-	var in_fence := false
-	if line > 0:
-		var above: PackedStringArray = te.text.split("\n")
-		for li in mini(line, above.size()):
-			var t := above[li].strip_edges()
-			if in_fence:
-				if t.begins_with("```"):
-					in_fence = false
-					lang = ""
-			elif t.begins_with("```"):
-				in_fence = true
-				lang = t.substr(3).strip_edges().to_lower()
+	# Cached per text revision (O(N) once) instead of rescanning the whole note
+	# inside every line's callback (O(N²)).
+	var lang := _fence_lang_at(line)
+	var in_fence := lang != ""
 	# current line itself opens/closes a fence → tint the whole fence line
 	if s.begins_with("```"):
 		out[0] = {"color": accent2, "length": text.length() - text.lstrip(" ").length()}
