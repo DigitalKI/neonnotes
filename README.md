@@ -16,12 +16,21 @@ Your notes are **plain `.md` files** on disk. No proprietary database, no lock-i
 - Full markdown editing with syntax highlighting
 - Live preview
 - Tables (read-only, because let's be honest about scope)
+- YAML front matter for `title`, `tags` and timestamps — edited through a header panel, never by hand-typing YAML
+- Full-text search that matches on a worker thread, so the UI never stutters
+- Tags, tag chips and custom note ordering
+
+### 🗑️ Trash (recoverable deletes)
+Deleting a note or folder no longer nukes it. The whole target (including the
+folder subtree and its media) moves into a local **Trash**, restorable from
+**⋮ → Open Trash…**, and auto-purged after 30 days. Trash is device-local and
+never synced — peers still see the deletion, so sync stays consistent.
 
 ### 🔗 Wiki Links
-`[[Link your thoughts together]]` and build a knowledge graph. There's a graph view, too — your notes, as constellations.
+`[[Link your thoughts together]]` and build a knowledge graph — wiki-links with labels, backlinks, Obsidian-style callouts, and a radial graph view with animated, directional link light. Your notes, as constellations.
 
 ### 📊 Charts & Exports
-Embed live charts in your notes with ` ```chart ` blocks. Export notes as **PNG** or animated **GIF** (hand-rolled GIF encoder included, because we could).
+Embed live charts in your notes with ` ```chart ` blocks. Export notes as **PNG**, animated **GIF** (hand-rolled GIF encoder included, because we could), or **HTML**, with optional CRT FX — then share via the OS or copy to the clipboard.
 
 ### 📡 LAN Sync (new in v2!)
 Pair two devices over your local network:
@@ -48,8 +57,8 @@ godot --path .
 ./tests/run_tests.sh
 ```
 
-The check runs focused parser/HTML tests and the full headless smoke test.
-Smoke data is isolated in a disposable
+The check runs the focused unit, search-worker, tree-drag, trash and sync tests
+plus the full headless smoke test. Smoke data is isolated in a disposable
 `user://neonnotes-smoke` vault; set `NEONNOTES_SMOKE_VAULT` to override it.
 
 For AI-assisted development, see [`AGENTS.md`](AGENTS.md) and
@@ -61,6 +70,17 @@ Then hit **F5** in the Godot editor and bask in the glow.
 
 ---
 
+## 🗺️ Roadmap
+
+Current direction: make the **graph the center of the app** rather than a toggle
+— node digests ("what's inside"), tag and content filters, explicit folder
+expansion, and creating links directly from the graph — then the **Vault Map**
+curation layers. Sync hardening (content hashes, conflict detection,
+cryptographic pairing, encrypted transport) runs alongside. Decisions and status
+live in [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md).
+
+---
+
 ## 🛠️ Under the Hood
 
 | Piece | Where |
@@ -68,6 +88,8 @@ Then hit **F5** in the Godot editor and bask in the glow.
 | Markdown parser & highlighter | `scripts/markdown/` |
 | Charts, graphs, previews | `scripts/render/` |
 | LAN sync service | `scripts/sync/` |
+| Vault CRUD, trash, media import | `scripts/common/` |
+| Scene-authored UI components | `scripts/components/` |
 | CRT / glitch / flicker shaders | `shaders/` |
 | The brain | `scripts/common/GameManager.gd` (autoload) |
 
