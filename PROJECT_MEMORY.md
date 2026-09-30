@@ -104,6 +104,19 @@ _Last updated: 2026-09-30 · Godot 4.7 · renderer: gl_compatibility_
   tree context menu is authored as `%TreeMenu` in `side_panel.tscn`. Backlink
   rows, tag chips and drag previews remain intentionally code-built
   (data-driven).
+- **UI font customization (2026-09-30):** Settings ▸ **Font** switches the
+  body/label/editor face between `Share Tech Mono` (default) and `VT323`
+  (`assets/fonts/VT323-Regular.ttf`, OFL, CRT terminal — matches the scanline
+  identity); Settings ▸ **Font size** (12–28, default 16) scales the whole
+  shell. State lives in `GameManager` (`FONTS`, `font_name`, `font_size`,
+  `font_delta()`, `font_changed`), persisted as `ui/font` + `ui/font_size`.
+  `ThemeComponent` assigns a runtime `Theme` (`default_font` +
+  `default_font_size`) to the window root and rescales every authored
+  `font_size` override captured at setup; `LayoutComponent.ui_font_delta` is now
+  `landscape_shrink − GameManager.font_delta()` (signed) so the preview body,
+  headings, charts, editor and toolbar buttons all follow one scale. Orbitron
+  remains the display face for the title/headings. PNG/GIF exports inherit the
+  window theme; OS `FileDialog`s are re-themed by `DialogTheme`.
 - New-note placement: the note is ordered **directly below the selected row**
   (selected note → same folder, right after it; selected folder → first child;
   nothing selected → vault root, appended) via
