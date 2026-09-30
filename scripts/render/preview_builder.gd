@@ -16,12 +16,48 @@ static func _col(key: String) -> Color:
 	return GameManager.color(key)
 
 static func build(doc: Dictionary, into: VBoxContainer) -> void:
+	_prepare(doc, into)
+	for block in doc.get("blocks", []):
+		_add_block(block, into)
+	into.add_child(Control.new())
+
+
+## Number of blocks added between frame yields in build_async(). Small enough
+## that the first screenful appears immediately, large enough to stay cheap.
+const BUILD_BATCH := 40
+## Bumped by every build_async() call; an in-flight build aborts when a newer
+## call supersedes it (e.g. rapid mode toggles).
+static var _generation := 0
+
+
+## Progressive variant used for the on-screen preview. Produces the same tree as
+## build() but yields a frame every BUILD_BATCH blocks, so a large note streams
+## in instead of freezing the UI for seconds (measured ~1.9 s for a 2k-line note
+## on a phone). Exporters keep the synchronous build().
+static func build_async(host: Control, doc: Dictionary, into: VBoxContainer) -> void:
+	_generation += 1
+	var gen := _generation
+	var tree := host.get_tree()
+	_prepare(doc, into)
+	var n := 0
+	for block in doc.get("blocks", []):
+		if gen != _generation or not is_instance_valid(into):
+			return
+		_add_block(block, into)
+		n += 1
+		if tree != null and n % BUILD_BATCH == 0:
+			await tree.process_frame
+	if gen != _generation or not is_instance_valid(into):
+		return
+	into.add_child(Control.new())
+
+
+## Clear the container and add the title header. Shared by both build paths.
+static func _prepare(doc: Dictionary, into: VBoxContainer) -> void:
 	for child in into.get_children():
 		child.queue_free()
 	var accent := _col("accent")
-	var accent2 := _col("accent2")
 	var text_c := _col("text")
-
 	var title: String = doc.get("meta", {}).get("title", "")
 	var tsize := (32 - LayoutComponent.ui_font_delta) if ChartView.compact else 40
 	if title != "":
@@ -29,40 +65,45 @@ static func build(doc: Dictionary, into: VBoxContainer) -> void:
 			% [tsize, _hex(accent), _inline(escape(title))], text_c))
 		into.add_child(_rule(accent))
 
+
+## Add a single parsed block. Colours/sizes are re-derived here (dictionary
+## lookups) so both build paths stay in lock-step without a shared context.
+static func _add_block(block: Dictionary, into: VBoxContainer) -> void:
+	var accent := _col("accent")
+	var accent2 := _col("accent2")
+	var text_c := _col("text")
 	var compact: bool = ChartView.compact
 	var d := LayoutComponent.ui_font_delta
 	var sizes := ([38, 30, 24, 20] if not compact else [32, 27, 22, 19])
 	if d > 0:
 		for i in sizes.size():
 			sizes[i] -= d
-	for block in doc.get("blocks", []):
-		match block["type"]:
-			"heading":
-				var lvl: int = clampi(block["level"] - 1, 0, 3)
-				var col: Color = [accent, accent2, _col("accent3"), _col("accent4")][lvl]
-				into.add_child(_rich("[font_size=%d][b][outline_color=#%s][outline_size=2][color=#%s]%s[/color][/outline_size][/outline_color][/b][/font_size]"
-					% [sizes[lvl], _hex(col, 0.35), _hex(col), _inline(escape(block["text"]))], text_c))
-			"para":
-				into.add_child(_rich(_inline(escape(block["text"])), text_c))
-			"quote":
-				# multi-line quote: one RichTextLabel per physical line so each
-				# wraps independently and all of them share the quote styling.
-				into.add_child(_quote_block(str(block.get("text", "")), accent, accent2, text_c))
-			"callout":
-				into.add_child(_callout_block(block, text_c))
-			"hr":
-				into.add_child(_rule(accent2))
-			"list":
-				into.add_child(_list_block(block, accent, text_c))
-			"code":
-				into.add_child(_code_block(str(block["text"]), accent2, text_c))
-			"table":
-				into.add_child(_table(block["rows"], text_c))
-			"chart":
-				into.add_child(_chart(block))
-			"image":
-				into.add_child(_image_block(block))
-	into.add_child(Control.new())
+	match block["type"]:
+		"heading":
+			var lvl: int = clampi(block["level"] - 1, 0, 3)
+			var col: Color = [accent, accent2, _col("accent3"), _col("accent4")][lvl]
+			into.add_child(_rich("[font_size=%d][b][outline_color=#%s][outline_size=2][color=#%s]%s[/color][/outline_size][/outline_color][/b][/font_size]"
+				% [sizes[lvl], _hex(col, 0.35), _hex(col), _inline(escape(block["text"]))], text_c))
+		"para":
+			into.add_child(_rich(_inline(escape(block["text"])), text_c))
+		"quote":
+			# multi-line quote: one RichTextLabel per physical line so each
+			# wraps independently and all of them share the quote styling.
+			into.add_child(_quote_block(str(block.get("text", "")), accent, accent2, text_c))
+		"callout":
+			into.add_child(_callout_block(block, text_c))
+		"hr":
+			into.add_child(_rule(accent2))
+		"list":
+			into.add_child(_list_block(block, accent, text_c))
+		"code":
+			into.add_child(_code_block(str(block["text"]), accent2, text_c))
+		"table":
+			into.add_child(_table(block["rows"], text_c))
+		"chart":
+			into.add_child(_chart(block))
+		"image":
+			into.add_child(_image_block(block))
 
 ## Escape BBCode brackets in note text (single pass — sequential replace()
 ## would re-escape the tokens themselves).
@@ -156,7 +197,8 @@ static func _rich(bb: String, default_col: Color) -> RichTextLabel:
 	rt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	rt.add_theme_color_override("default_color", default_col)
 	# Attach the emoji fallback so 🚀🎉✨ etc. render in both the on-screen
-	# preview and PNG/GIF exports.
+	# preview and PNG/GIF exports. (Theme *overrides* do not propagate to child
+	# controls, so this must stay per-label rather than on the container.)
 	var ef := _font_with_emoji()
 	if ef != null:
 		rt.add_theme_font_override("normal_font", ef)
@@ -164,8 +206,13 @@ static func _rich(bb: String, default_col: Color) -> RichTextLabel:
 		rt.add_theme_font_override("italics_font", ef)
 		rt.add_theme_font_override("bold_italics_font", ef)
 	rt.text = bb
-	rt.install_effect(GlitchFx.new())
-	rt.install_effect(FlickerFx.new())
+	# Install the text effects only on labels that actually use them: every
+	# installed effect is walked on each of that label's redraws, and a large
+	# preview can hold thousands of labels.
+	if bb.contains("[glitch]"):
+		rt.install_effect(GlitchFx.new())
+	if bb.contains("[flicker]"):
+		rt.install_effect(FlickerFx.new())
 	if open_cb.is_valid():
 		rt.meta_clicked.connect(func(meta: Variant):
 			var value := str(meta)
