@@ -542,3 +542,8 @@ _These OVERRIDE the skill's defaults for this project._
   `project.godot`).
 - Palette colors in `GameManager.PALETTES` are the source of truth.
 - Sharing format is plain `.md` (user pref); export menu: PNG/GIF/HTML + copy.
+- `README.md` rewritten 2026-09-30 as the user-facing overview (features,
+  Markdown reference, vault layout, settings, Android build, dev notes,
+  roadmap). `docs/help.md` stays the in-app guide. **There is no `LICENSE` file
+  in the repo** — the README now says so explicitly; decide/add a license if
+  that changes.
