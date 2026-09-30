@@ -152,6 +152,76 @@ _Last updated: 2026-09-30 · Godot 4.7 · renderer: gl_compatibility_
   machine (null viewport texture / mismatched tree taps), independently of sync.
   The smoke debounce check was fixed 2026-09-29 (0.5 s) and smoke now passes;
   the tree-touch failure remains the only known suite failure.
+- **Perf watch (2026-09-30 audit):** `GameManager.scan_notes()` re-reads the
+  whole vault on the main thread (launch, vault switch, post-move, several sync
+  paths) — the main remaining freeze risk on big vaults; the roadmap targets an
+  incremental/worker scan. `GraphView._process` `queue_redraw()`s the whole map
+  every frame while visible (throttle if label cost shows up on mobile). HTML
+  export parses + writes on the main thread.
+- **Export hygiene (2026-09-30):** `tests/*`, `scenes/dev/*` and `scripts/dev/*`
+  are in `exclude_filter`; `SmokeDriver` is loaded lazily in `_start_smoke()`
+  so `scripts/dev/` is droppable from exports.
+- **Boot profiling (2026-09-30):** main.gd `_boot_mark()` prints
+  `[boot] <phase> +Nms total Nms` in any debug build (or with
+  `NEONNOTES_BOOT_DEBUG=1`): `ui-build → theme-layout → vault-scan →
+  tree-build → layout → sync-init → housekeeping → note-read → note-highlight
+  → first-note → sync-discovery`. Trash purge and UDP discovery are now deferred
+  past the first frame. `scripts/dev/bench_scan.gd` (`godot --headless --path .
+  --script scripts/dev/bench_scan.gd`) times `scan_notes()`: desktop baseline
+  **~17 ms / 200 notes, ~84 ms / 1000 notes** full-file vs **~3 ms / ~12 ms**
+  reading only each file's front-matter head — the head-read split is the next
+  scan optimization. Debug preset's `command_line/extra_args`
+  (`--remote-debug …`) was cleared; it was a startup stall on the debug APK.
+- **Boot win (2026-09-30): highlighter was O(N²).**
+  `NeonHighlighter._get_line_syntax_highlighting()` used to `split("\n")` the
+  whole note and rescan from line 0 for *every* line. On a Pixel the first note
+  open (which sets `code_edit.text`, highlighting all lines) cost **2.6 s of a
+  4.2 s boot**. It now builds the fence-state array once per text revision
+  (`_rebuild_fence_langs`, invalidated via `text_changed`) — linear. Measured
+  with `scripts/dev/bench_highlight.gd`: 2064 lines **605 ms → 79 ms (7.7×)**
+  and the gap grows with note size. Phone boot snapshot before the fix:
+  `vault-scan 888 ms, tree-build 391 ms, layout 195 ms, first-note 2614 ms`.
+  Remaining targets: head-only scan + deferred link indexing, progressive
+  tree build.
+- **Boot win #2 (2026-09-30): progressive preview build.** Phone marks showed
+  `note-read 2ms + note-highlight 315ms` but `first-note 2188ms`: the default
+  boot mode is *preview*, so `_set_mode()` → `_render_preview()` built ~1700
+  preview nodes on one frame. `MarkdownParser.parse()` is only ~7ms
+  (`scripts/dev/bench_parse.gd`); the cost is RichTextLabel construction/shaping.
+  `PreviewBuilder.build_async(host, doc, into)` now yields every 40 blocks (a
+  newer call cancels via `_generation`), so the first screenful is immediate and
+  the rest streams. Text effects (`GlitchFx`/`FlickerFx`) are installed only on
+  labels whose text uses them. Exporters keep the synchronous `build()`.
+- **Boot on-device (2026-09-30, SM-A165M, debug APK): 4 158 ms → 1 390 ms** to
+  the first note (3×). Changes: the highlighter fix, plus splitting the scan —
+  `scan_paths()` (dir walk only, ~57 ms) runs at boot, the tree renders from
+  filenames, and `load_metadata_async()` reads every note afterwards in 12-note
+  batches (`metadata_ready` → `_refresh_list`). **Parallel reads are a
+  regression on Android**: a WorkerThreadPool scan took 2 450 ms vs 837 ms
+  serial for 905 notes, so metadata stays single-threaded. Still open: ~3 300 ms
+  elapses *before* `_ready` (engine + `Main.tscn` init, debug template) — a
+  release build should cut it, but the release preset has no keystore so it
+  can't be exported/signed here. `_boot_mark` profiles release builds when
+  `user://boot_debug` exists.
+- **Android test loop + preset gotcha:** `godot --headless --path .
+  --export-debug "Android" build/NeonNotes-debug.apk`, `adb install -r …`, then
+  `adb logcat | grep '\[boot\]'`. `export_presets.cfg` is **editor-owned**: a
+  headless export while the editor is open makes the editor rewrite it and drop
+  CLI edits (keystore fields, `exclude_filter`) — change presets in the editor
+  UI. The release preset currently has `permissions/internet=false`, so **LAN
+  sync would fail in a release build**; set it true there too.
+- **Release vs debug boot (measured 2026-09-30):** process-start → `_ready` is
+  ~3 300 ms on the debug template but ~1 600–2 000 ms on release, so **wall-clock
+  to the first note is ~2.9 s release vs ~4.7 s debug** (was ~7.5 s before this
+  work). A just-installed APK pays an extra ~2.4 s first-launch dex/ART cost —
+  measure the second launch. A release keystore exists at
+  `/home/toshiwo/Projects/Godot/.android-tools/release.keystore` but its
+  **password is unknown**; for a one-off release measurement it was signed with
+  the debug keystore (`apksigner sign --ks debug.keystore --ks-key-alias
+  androiddebugkey`) after a failed Godot export left an unsigned APK.
+- **Fixed 2026-09-30:** `selection_overlay.tscn`'s Cut/Copy/Paste buttons lacked
+  `unique_name_in_owner`, so `%CutBtn`/`%CopyBtn`/`%PasteBtn` were null on Android
+  (boot errors + a dead action bar).
 
 ## 4. Coding patterns & conventions (project-specific)
 
@@ -225,7 +295,11 @@ _These OVERRIDE the skill's defaults for this project._
 - **Help is `res://docs/help.md`**, not an in-code const (ships via export
   include_filter `*.md`).
 - **godot-mcp/godot_ai addons are AI tooling drivers** — keep installed; the
-  `McpRuntime` autoload in project.godot is required for runtime eval.
+  `McpRuntime` autoload in project.godot is required for runtime eval. The
+  autoload is (re)written by the plugin on enable, so it need not be committed
+  (`EngineDebugger.is_active()` makes it a no-op in exported builds). Don't
+  blanket-exclude `addons/` from an export while that autoload is present — the
+  script would be missing at startup.
 
 ## 6. Key files & responsibilities
 
@@ -237,6 +311,7 @@ _These OVERRIDE the skill's defaults for this project._
 | `res://scripts/markdown/markdown_parser.gd` | Unified parser (blocks + inline spans) |
 | `res://scripts/markdown/wiki_links.gd` | Link extract/resolve/backlinks/graph |
 | `res://scripts/common/path_remap.gd` | Static move/remap helpers (unit-tested) |
+| `res://scripts/common/text_utils.gd` | Shared `is_word_char` / `word_bounds` used by editor + selection overlay |
 | `res://scripts/common/media_import.gd` | Static media library + image import helpers (magic-byte decode, SAF URIs, dest naming) |
 | `res://scripts/common/note_crud.gd` | Static vault CRUD helpers (rm_dir, erase_note_meta, scrub_order, compute_delete_set, trash move/restore/purge) |
 | `res://scripts/components/trash_page.gd` | Trash page: lists/restores/purges trashed items (scene `trash_page.tscn`) |
