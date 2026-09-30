@@ -31,16 +31,19 @@ mouse_filter = 0
 theme_override_constants/separation = 6
 
 [node name="CutBtn" type="Button" parent="ActionBar"]
+unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 text = "Cut"
 
 [node name="CopyBtn" type="Button" parent="ActionBar"]
+unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 text = "Copy"
 
 [node name="PasteBtn" type="Button" parent="ActionBar"]
+unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 text = "Paste"
