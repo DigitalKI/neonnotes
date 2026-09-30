@@ -44,9 +44,6 @@ func _ready() -> void:
 func get_active_popup() -> PopupMenu:
 	return popup
 
-func build_menu(_menu: PopupMenu = null) -> void:
-	# Items are serialized in export_menu.tscn.
-	pass
 
 
 

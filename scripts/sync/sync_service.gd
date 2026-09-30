@@ -873,42 +873,6 @@ func collect_manifest(ts: Dictionary, vault: String, note_list: Array, mtimes: D
 		entries[".neonnotes-tombstones.json"] = {"modified": 0, "size": tomb_text.hash()}
 	return entries
 
-## Legacy helper: read the whole vault for transfer. New sync uses
-## collect_manifest() and reads only requested payloads. Runs on the worker
-## thread so all disk I/O never blocks the UI; all inputs are snapshots taken on
-## the main thread (ts, mtimes, vault path, note list) so the worker never
-## touches the GameManager node from another thread.
-##
-## `mtimes` is the logical-mtime snapshot: for a file we merely received, the
-## original sender's timestamp is reused instead of the local disk mtime (which
-## receipt would have bumped to "now"). That keeps last-writer-wins and the
-## tombstone guard stable across round-trips.
-func collect_notes(ts: Dictionary, vault: String, note_list: Array, mtimes: Dictionary = {}) -> Dictionary:
-	var files := {}
-	var times := {}
-	# Transfer markdown and embedded media, but never generated exports.
-	var paths: Array[String] = []
-	for fname in note_list:
-		paths.append(String(fname))
-	if FileAccess.file_exists(vault.path_join(".neonnotes.json")):
-		paths.append(".neonnotes.json")
-	_collect_media(vault.path_join("media"), vault, paths)
-	for name in paths:
-		var path := vault.path_join(name)
-		var f := FileAccess.open(path, FileAccess.READ)
-		if f:
-			if not name.ends_with(".md") and not name.ends_with(".json") and f.get_length() == 0:
-				f.close()
-				continue
-			files[name] = f.get_as_text() if name.ends_with(".md") or name.ends_with(".json") else f.get_buffer(f.get_length())
-			times[name] = _file_logical_time(path, name, mtimes)
-			f.close()
-	if not ts.is_empty():
-		files[".neonnotes-tombstones.json"] = JSON.stringify(ts)
-		times[".neonnotes-tombstones.json"] = Time.get_unix_time_from_system()
-	_sync_log("OUT collected notes=%d files=%d media=%d tombstones=%d" % [note_list.size(), files.size(), files.size() - note_list.size(), ts.size()])
-	return {"files": files, "times": times}
-
 func _collect_media(dir_path: String, vault: String, paths: Array[String]) -> void:
 	if not DirAccess.dir_exists_absolute(dir_path):
 		return

@@ -121,39 +121,15 @@ func select_word_at_caret() -> void:
 	if text.is_empty() or col < 0:
 		hide_overlay()
 		return
-	# If caret sits past EOL or on a non-word char, try the char before.
-	var probe := mini(col, text.length() - 1)
-	if probe < 0:
+	# Shared rule: a caret just past a word (typically end-of-line) snaps back.
+	var bounds := TextUtils.word_bounds(text, col, true)
+	if bounds.x < 0:
 		hide_overlay()
 		return
-	if not _is_word_char(text[probe]) and col > 0 and _is_word_char(text[col - 1]):
-		probe = col - 1
-	if not _is_word_char(text[probe]):
-		hide_overlay()
-		return
-	var s := probe
-	var e := probe + 1
-	while s > 0 and _is_word_char(text[s - 1]):
-		s -= 1
-	while e < text.length() and _is_word_char(text[e]):
-		e += 1
 	# selecting_enabled must be true or TextEdit.select() returns without setting
 	# a selection (then show_for_selection bails on has_selection()).
-	_apply_selection(line, s, line, e)
+	_apply_selection(line, bounds.x, line, bounds.y)
 	show_for_selection()
-
-
-func _is_word_char(ch: String) -> bool:
-	if ch.length() != 1:
-		return false
-	var code := ch.unicode_at(0)
-	if ch == "_":
-		return true
-	if code >= 48 and code <= 57:
-		return true
-	if (code >= 65 and code <= 90) or (code >= 97 and code <= 122):
-		return true
-	return false
 
 
 func _on_editor_layout_changed() -> void:

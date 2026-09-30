@@ -235,9 +235,6 @@ func _reset_tree_touch_state() -> void:
 	_press_item = null
 	_press_item_toggle = false
 
-## Populate the palette selector (source of truth: GameManager.PALETTES).
-func build_palette() -> void:
-	pass
 
 ## Active tag filter ("" = show all). Set by the tag chips above the tree.
 var active_tag := ""
