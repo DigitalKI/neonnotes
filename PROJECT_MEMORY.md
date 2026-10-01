@@ -168,6 +168,19 @@ _Last updated: 2026-09-30 · Godot 4.7 · renderer: gl_compatibility_
   (`_ITALIC_SKEW`); all four variants also carry the emoji fallbacks. Replacing
   all four slots with a single plain variation rendered `[i]` and `[b][i]` as
   regular upright text (fixed by rebuilding the four per-slot variants).
+- **Icon/emoji fallback for exports (2026-09-30):** the callout icons, quote
+  marks and bullets the preview draws (🗒 ℹ 💡 ⚠ ✖ ✔ ❝ ▸) plus every emoji are
+  glyphs the bundled UI faces lack. They resolve through platform fallbacks now
+  attached to the base UI font itself in `GameManager.font()`, via
+  `GameManager.fallback_fonts()` — two `SystemFont` chain entries (emoji, then
+  symbols; `SystemFont.font_names` selects a *single* face, so they must be
+  separate). `PreviewBuilder._font_variants_for_ui()` reuses the same list on
+  its per-label variants. This matters because the PNG/GIF exporter only
+  inherits the window theme (`Exporter._render` does `group.theme = root.theme`),
+  not the preview labels' per-label overrides, so a fallback that lived only on
+  those overrides silently vanished from exports while the on-screen preview
+  kept its icons. Regression guard: `unit_tests.gd _check_icon_font_fallback`
+  and the smoke theme-font checks.
 - New-note placement: the note is ordered **directly below the selected row**
   (selected note → same folder, right after it; selected folder → first child;
   nothing selected → vault root, appended) via
@@ -314,25 +327,31 @@ _Last updated: 2026-09-30 · Godot 4.7 · renderer: gl_compatibility_
   regression on Android**: a WorkerThreadPool scan took 2 450 ms vs 837 ms
   serial for 905 notes, so metadata stays single-threaded. Still open: ~3 300 ms
   elapses *before* `_ready` (engine + `Main.tscn` init, debug template) — a
-  release build should cut it, but the release preset has no keystore so it
-  can't be exported/signed here. `_boot_mark` profiles release builds when
-  `user://boot_debug` exists.
+  release build should cut it; the release preset now signs with the dev
+  keystore (see the signing note below). `_boot_mark` profiles release builds
+  when `user://boot_debug` exists.
 - **Android test loop + preset gotcha:** `godot --headless --path .
   --export-debug "Android" build/NeonNotes-debug.apk`, `adb install -r …`, then
   `adb logcat | grep '\[boot\]'`. `export_presets.cfg` is **editor-owned**: a
   headless export while the editor is open makes the editor rewrite it and drop
   CLI edits (keystore fields, `exclude_filter`) — change presets in the editor
   UI. The release preset currently has `permissions/internet=false`, so **LAN
-  sync would fail in a release build**; set it true there too.
+  sync would fail in a release build**; set it true there too. Release export:
+  `godot --headless --path . --export-release "Android (Release)"
+  build/NeonNotes-release.apk` (signs with the dev keystore, below).
 - **Release vs debug boot (measured 2026-09-30):** process-start → `_ready` is
   ~3 300 ms on the debug template but ~1 600–2 000 ms on release, so **wall-clock
   to the first note is ~2.9 s release vs ~4.7 s debug** (was ~7.5 s before this
   work). A just-installed APK pays an extra ~2.4 s first-launch dex/ART cost —
-  measure the second launch. A release keystore exists at
-  `/home/toshiwo/Projects/Godot/.android-tools/release.keystore` but its
-  **password is unknown**; for a one-off release measurement it was signed with
-  the debug keystore (`apksigner sign --ks debug.keystore --ks-key-alias
-  androiddebugkey`) after a failed Godot export left an unsigned APK.
+  measure the second launch. **Release signing (2026-09-30):** the project
+  `release.keystore` (`/home/toshiwo/Projects/Godot/.android-tools/`) has an
+  unknown password, so the release preset signs with the **dev keystore**
+  instead: `.godot/export_credentials.cfg` `[preset.1.options]` sets
+  `keystore/release = ~/.local/share/godot/keystores/debug.keystore`, alias
+  `androiddebugkey`, pass `android`. Exported APKs carry the debug cert
+  (`CN=Android Debug`), so a release build installs over a debug one. That file
+  is editor-owned and gitignored — if the editor rewrites it, re-apply (or set
+  it in the Export dialog).
 - **Fixed 2026-09-30:** `selection_overlay.tscn`'s Cut/Copy/Paste buttons lacked
   `unique_name_in_owner`, so `%CutBtn`/`%CopyBtn`/`%PasteBtn` were null on Android
   (boot errors + a dead action bar).
@@ -408,6 +427,11 @@ _These OVERRIDE the skill's defaults for this project._
   the receiver's phrase; routine auto-sync never repoints local identity.
 - **Help is `res://docs/help.md`**, not an in-code const (ships via export
   include_filter `*.md`).
+- **Licensing: MIT** (2026-09-30) — free, forkable, attribution kept via the
+  MIT copyright notice; open-core friendly (author can license future features
+  separately). `addons/godot-mcp/` stays MIT © 2026 LuoHan; bundled fonts
+  (Orbitron/ShareTechMono/VT323) are SIL OFL but ship without their OFL
+  notices in-repo — include them if fonts are redistributed.
 - **godot-mcp/godot_ai addons are AI tooling drivers** — keep installed; the
   `McpRuntime` autoload in project.godot is required for runtime eval. The
   autoload is (re)written by the plugin on enable, so it need not be committed

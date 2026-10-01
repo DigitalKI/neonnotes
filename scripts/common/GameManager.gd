@@ -179,12 +179,38 @@ func set_export_crt(on: bool) -> void:
 
 # ------------------------------------------------------------ fonts
 
-## Resolved font resource for the active font family (cached per path).
+## Platform fallback faces for glyphs the bundled UI font does not carry:
+## emoji plus the symbol marks the preview draws for callout icons, quotes and
+## list bullets (❝ ▸ ✔ ✖ …). `SystemFont.font_names` selects a SINGLE face, so
+## emoji and symbols need separate entries in the fallback chain. Resolved once
+## and shared so preview labels, chart labels, the window theme AND the export
+## SubViewport (which only inherits the theme) all resolve the same glyphs.
+var _fallback_fonts: Array[Font] = []
+
+func fallback_fonts() -> Array[Font]:
+	if _fallback_fonts.is_empty():
+		for names in [
+			PackedStringArray(["Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji"]),
+			# Symbol faces that carry ❝ ▸ ✔ ✖ (plus general punctuation). Order
+			# matters: SystemFont picks the FIRST installed name, so the
+			# widest-coverage faces come first.
+			PackedStringArray(["DejaVu Sans", "FreeSans", "Apple Symbols", "Segoe UI Symbol", "Noto Sans Symbols 2", "Noto Sans Symbols", "Symbola"]),
+		]:
+			var sf := SystemFont.new()
+			sf.font_names = names
+			_fallback_fonts.append(sf)
+	return _fallback_fonts
+
+## Resolved font resource for the active font family (cached per path). The
+## platform fallbacks are attached to the resource itself so every consumer
+## inherits them — not only the preview labels that carry explicit overrides.
 func font() -> Font:
 	var path: String = FONTS.get(font_name, FONTS[DEFAULT_FONT])
 	if _font_cache.has(path):
 		return _font_cache[path]
 	var f: Font = load(path)
+	if f != null:
+		f.fallbacks = fallback_fonts()
 	_font_cache[path] = f
 	return f
 

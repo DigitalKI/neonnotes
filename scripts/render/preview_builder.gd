@@ -174,23 +174,18 @@ static func _inline(s: String) -> String:
 const _BOLD_EMBOLDEN := 1.2
 const _ITALIC_SKEW := 0.2
 
-## Platform emoji faces, resolved once and shared by every variant.
-static var _emoji_fallback: Font = null
-
 ## The four RichTextLabel font slots, one per text flag (normal/bold/italic/
-## bold-italic), all backed by the selected UI face plus the emoji fallback.
-## Rebuilt only when the user picks a different UI font.
+## bold-italic), all backed by the selected UI face plus the shared platform
+## fallback. Rebuilt only when the user picks a different UI font.
 static var _font_variants: Dictionary = {}
 static var _font_variants_name := ""
 
-static func _emoji_system_font() -> Font:
-	if _emoji_fallback == null:
-		var emoji := SystemFont.new()
-		emoji.font_names = PackedStringArray(["Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol"])
-		_emoji_fallback = emoji
-	return _emoji_fallback
+## Shared with GameManager so preview labels, the window theme and the PNG/GIF
+## export SubViewport (which only inherits the theme) resolve the same faces.
+static func _fallback_fonts() -> Array[Font]:
+	return GameManager.fallback_fonts()
 
-static func _make_variant(embolden: float, skew: float, emoji: Font) -> FontVariation:
+static func _make_variant(embolden: float, skew: float, fallbacks: Array[Font]) -> FontVariation:
 	var fv := FontVariation.new()
 	# base_font must be the selected face; a null base resolves to the project
 	# default, which would pin previews to Share Tech Mono and ignore the setting.
@@ -198,18 +193,18 @@ static func _make_variant(embolden: float, skew: float, emoji: Font) -> FontVari
 	fv.variation_embolden = embolden
 	if not is_zero_approx(skew):
 		fv.variation_transform = Transform2D(Vector2(1.0, skew), Vector2(0.0, 1.0), Vector2.ZERO)
-	fv.fallbacks = [emoji]
+	fv.fallbacks = fallbacks
 	return fv
 
 static func _font_variants_for_ui() -> Dictionary:
 	var want := GameManager.font_name
 	if _font_variants.is_empty() or _font_variants_name != want:
-		var emoji := _emoji_system_font()
+		var fallbacks := _fallback_fonts()
 		_font_variants = {
-			"normal_font": _make_variant(0.0, 0.0, emoji),
-			"bold_font": _make_variant(_BOLD_EMBOLDEN, 0.0, emoji),
-			"italics_font": _make_variant(0.0, _ITALIC_SKEW, emoji),
-			"bold_italics_font": _make_variant(_BOLD_EMBOLDEN, _ITALIC_SKEW, emoji),
+			"normal_font": _make_variant(0.0, 0.0, fallbacks),
+			"bold_font": _make_variant(_BOLD_EMBOLDEN, 0.0, fallbacks),
+			"italics_font": _make_variant(0.0, _ITALIC_SKEW, fallbacks),
+			"bold_italics_font": _make_variant(_BOLD_EMBOLDEN, _ITALIC_SKEW, fallbacks),
 		}
 		_font_variants_name = want
 	return _font_variants

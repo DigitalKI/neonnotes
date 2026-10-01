@@ -17,6 +17,7 @@ func _init() -> void:
 	_check_media_import()
 	_check_dev_session_detection()
 	_check_font_settings()
+	_check_icon_font_fallback()
 	_check_tag_suggest()
 	print("UNIT RESULT: %s (%d failures)" % ["FAIL" if failures > 0 else "OK", failures])
 	quit(failures)
@@ -96,6 +97,19 @@ func _check_font_settings() -> void:
 		var path: String = GameManagerScript.FONTS[font_name]
 		_check(ResourceLoader.exists(path), "font file present: " + font_name)
 		_check(load(path) is Font, "font loads: " + font_name)
+
+func _check_icon_font_fallback() -> void:
+	# Preview icons, quote marks and bullets are glyphs the bundled UI face
+	# lacks. They must resolve through platform fallbacks attached to the base
+	# font itself: the PNG/GIF exporter only inherits the window theme, not the
+	# per-label preview overrides, so a fallback that lives only on those
+	# overrides silently disappears from exports.
+	var gm = GameManagerScript.new()
+	var f: Font = gm.font()
+	_check(not f.fallbacks.is_empty(), "base UI font carries platform fallbacks")
+	_check(gm.fallback_fonts().size() >= 2,
+		"emoji and symbol faces are separate fallback-chain entries")
+	gm.free()
 
 func _check_markdown_spans() -> void:
 	# Flat, source-ordered span stream drives BOTH the highlighter (edit) and

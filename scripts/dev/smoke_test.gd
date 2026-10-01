@@ -247,6 +247,14 @@ func _run_smoke() -> void:
 	GameManager.set_font("VT323")
 	fails += _check(GameManager.font_name == "VT323" and win_theme.default_font == GameManager.font(),
 		"font family switch reaches the window theme")
+	# The PNG/GIF exporter only inherits the window theme, not the per-label
+	# preview overrides, so the theme's default font must itself carry the
+	# platform icon/emoji fallbacks. Without them exports lose emoji and the
+	# callout/bullet symbol marks (❝ ▸ ✔ ✖) on setups without OS fallback.
+	fails += _check(not win_theme.default_font.fallbacks.is_empty(),
+		"window-theme font carries icon/emoji fallbacks (inherited by exports)")
+	fails += _check(win_theme.default_font.has_char(0x1F5D2) and win_theme.default_font.has_char(0x25B8),
+		"callout icon + list bullet resolve through the theme font")
 	# Preview must keep bold/italic synthesis while carrying the emoji fallback.
 	# Overriding all four RichTextLabel font slots with one plain FontVariation
 	# rendered [i]/[b][i] as regular upright text; the variants must track the

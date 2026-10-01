@@ -143,6 +143,14 @@ rewrite the file and can drop CLI edits. Change presets in the editor UI. Note
 that the **release preset currently has `permissions/internet=false`**, so a
 release build will fail at LAN sync — set it to `true` there as well.
 
+The release build signs with the **dev keystore** (the project release
+keystore's password is unknown), configured in the editor-owned, gitignored
+`.godot/export_credentials.cfg`:
+
+```bash
+godot --headless --path . --export-release "Android (Release)" build/NeonNotes-release.apk
+```
+
 ---
 
 ## ✍️ Markdown reference
@@ -303,9 +311,20 @@ suggested renaming everything to `manager2_final_FINAL.gd`.
 
 ## 📄 License
 
-There is **no `LICENSE` file in this repository yet**, so no license is
-currently granted for reuse or redistribution. If you want to use NeonNotes in
-your own project, open an issue to ask about licensing.
+**MIT License** — free, forkable, and you keep the credit.
+
+NeonNotes is released under the [MIT License](LICENSE), Copyright © 2026
+toshiwo. You're free to use, copy, modify, merge, publish, and redistribute it
+— including in commercial projects — as long as the original copyright notice
+is retained. See [`LICENSE`](LICENSE) for the full text.
+
+Third-party pieces keep their own licenses: the bundled `godot-mcp` addon is
+MIT © 2026 LuoHan, and the included fonts (Orbitron, Share Tech Mono, VT323)
+are under the SIL Open Font License.
+
+The license covers the current codebase only and doesn't restrict the original
+author from offering additional features under a separate (e.g. paid or
+proprietary) license later.
 
 ---
 
