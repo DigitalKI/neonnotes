@@ -311,20 +311,22 @@ suggested renaming everything to `manager2_final_FINAL.gd`.
 
 ## 📄 License
 
-**MIT License** — free, forkable, and you keep the credit.
+**AGPL-3.0** — free, forkable, and copyleft-protected.
 
-NeonNotes is released under the [MIT License](LICENSE), Copyright © 2026
-toshiwo. You're free to use, copy, modify, merge, publish, and redistribute it
-— including in commercial projects — as long as the original copyright notice
-is retained. See [`LICENSE`](LICENSE) for the full text.
+NeonNotes is released under the [GNU Affero General Public License v3.0
+(AGPL-3.0)](LICENSE), Copyright © 2026 toshiwo. You're free to use, study,
+modify, and redistribute it, and forks are welcome — but derivative works (and
+anyone offering a modified version as a network service) must release their
+source under AGPL-3.0 too, and keep the original copyright notice. See
+[`LICENSE`](LICENSE) for the full text.
 
 Third-party pieces keep their own licenses: the bundled `godot-mcp` addon is
 MIT © 2026 LuoHan, and the included fonts (Orbitron, Share Tech Mono, VT323)
 are under the SIL Open Font License.
 
-The license covers the current codebase only and doesn't restrict the original
-author from offering additional features under a separate (e.g. paid or
-proprietary) license later.
+The license covers the client app only — it doesn't restrict the original
+author from offering additional hosted services (cloud, CMS integrations, AI
+backends) or a separate commercial license for those features.
 
 ---
 

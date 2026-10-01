@@ -427,11 +427,15 @@ _These OVERRIDE the skill's defaults for this project._
   the receiver's phrase; routine auto-sync never repoints local identity.
 - **Help is `res://docs/help.md`**, not an in-code const (ships via export
   include_filter `*.md`).
-- **Licensing: MIT** (2026-09-30) — free, forkable, attribution kept via the
-  MIT copyright notice; open-core friendly (author can license future features
-  separately). `addons/godot-mcp/` stays MIT © 2026 LuoHan; bundled fonts
-  (Orbitron/ShareTechMono/VT323) are SIL OFL but ship without their OFL
-  notices in-repo — include them if fonts are redistributed.
+- **Licensing: AGPL-3.0** (2026-10-01, switched from MIT) — free and forkable,
+  but copyleft: derivatives and network-service providers of modified versions
+  must release their source. Chosen because planned monetization is
+  service-based (cloud, CMS integrations, cloud AI) — AGPL stops closed
+  competitor forks/services while never restricting the author's own paid
+  services or a future dual/commercial license. `addons/godot-mcp/` stays MIT
+  © 2026 LuoHan; bundled fonts (Orbitron/ShareTechMono/VT323) are SIL OFL but
+  ship without their OFL notices in-repo — include them if fonts are
+  redistributed.
 - **godot-mcp/godot_ai addons are AI tooling drivers** — keep installed; the
   `McpRuntime` autoload in project.godot is required for runtime eval. The
   autoload is (re)written by the plugin on enable, so it need not be committed
