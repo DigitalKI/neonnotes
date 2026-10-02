@@ -6,6 +6,17 @@ extends SyntaxHighlighter
 ##   * block context -> MarkdownParser.parse()["lines"] + line_markers()
 ## so edit mode and view mode agree on what is emphasis, code, a link, a
 ## heading, a table, a fence, a quote or an effect. No block rules live here.
+##
+## Emission note: CodeEdit reads the returned dictionary as COLUMN-KEYED
+## segments — a colour runs from its key until the NEXT key (or end of line);
+## a value's `length` is bookkeeping, not a rendered end. So every tint here is
+## painted into a per-column buffer and then emitted as runs with an explicit
+## end boundary that resets to the body colour. Without that boundary a colour
+## bleeds past the construct that owns it (e.g. a list's `-` colouring the whole
+## item, or a `**strong**` span colouring the plain text after it).
+
+## Sentinel: "no tint here" (CodeEdit's font_color applies).
+const UNSET := Color(0, 0, 0, 0)
 
 var colors: Dictionary = {}
 
@@ -67,7 +78,11 @@ func _mark_lines_dirty() -> void:
 ## Block context for one line: {"kind": MarkdownParser.BlockLine, "lang": String}.
 func _line_ctx(line: int) -> Dictionary:
 	_ensure_lines_wired()
-	if _lines_dirty:
+	# `text_changed` covers typing; a programmatic `text =` (opening a note)
+	# may only dispatch it a frame later, so also rebuild when the line count
+	# no longer matches the cached parse (cheap O(1) guard).
+	var te := get_text_edit()
+	if te != null and (_lines_dirty or te.get_line_count() != _lines.size()):
 		_rebuild_lines()
 	if line < 0 or line >= _lines.size():
 		return {"kind": MarkdownParser.BlockLine.PLAIN, "lang": ""}
@@ -104,127 +119,103 @@ func _mark_color(mtype: int) -> Color:
 	return Color.WHITE
 
 
+## Paint a column run [s, e) into the buffer (clamped to the line).
+func _paint_span(buf: Array, s: int, e: int, c: Color) -> void:
+	var n := buf.size()
+	for i in range(maxi(0, s), mini(n, e)):
+		buf[i] = c
+
+
+## Topmost layer: tint every occurrence of the active find query. Painted after
+## the markdown layers so it wins, with the covering span's colour reappearing
+## automatically once the run ends (the buffer handles the boundary).
+func _paint_search(buf: Array, line: int, text: String) -> void:
+	if search_query == "" or text == "":
+		return
+	var needle := search_query.to_lower()
+	var nl := needle.length()
+	if nl == 0:
+		return
+	var hay := text.to_lower()
+	var idx := hay.find(needle)
+	while idx >= 0:
+		var c := _c("search_current", Color(1.0, 0.18, 0.65)) \
+			if (line == search_current.x and idx == search_current.y) \
+			else _c("search", Color(1.0, 0.72, 0.0))
+		_paint_span(buf, idx, idx + nl, c)
+		idx = hay.find(needle, idx + nl)
+
+
 func _get_line_syntax_highlighting(line: int) -> Dictionary:
 	var out: Dictionary = {}
 	var te := get_text_edit()
 	if te == null:
 		return out
 	var text: String = te.get_line(line)
+	var n := text.length()
+	if n == 0:
+		return out
 	var SP := MarkdownParser.SpanType
+	var BM := MarkdownParser.BlockMark
 	var BL := MarkdownParser.BlockLine
 
+	# Heading levels mirror the preview's accent ramp (see PreviewBuilder).
+	var accent := _c("accent", Color("ff2ea6"))
 	var accent2 := _c("accent2", Color("00e5ff"))
 	var accent3 := _c("accent3", Color("ffb400"))
 	var accent4 := _c("accent4", Color("8b5cf6"))
 	var dim := _c("dim", Color("7780a8"))
+
+	var buf: Array = []
+	buf.resize(n)
+	buf.fill(UNSET)
 
 	var ctx := _line_ctx(line)
 	var kind := int(ctx.get("kind", BL.PLAIN))
 
 	# ---- block-level markers, straight from the shared parser ----------------
 	for m in MarkdownParser.line_markers(kind, text):
-		var col := _mark_color(int(m["type"]))
-		if col != Color.WHITE:
-			out[int(m["start"])] = {"color": col, "length": int(m["length"])}
+		var c := _mark_color(int(m["type"]))
+		if int(m["type"]) == BM.HEADING_TEXT:
+			var lvl := clampi(int(m.get("level", 1)) - 1, 0, 3)
+			c = [accent, accent2, accent3, accent4][lvl]
+		if c != Color.WHITE:
+			_paint_span(buf, int(m["start"]), int(m["start"]) + int(m["length"]), c)
 
 	# ---- inline constructs via the shared parser ------------------------------
 	# Fenced content (``` code/chart, including the fence lines) carries no
 	# inline formatting, so the block tint above rules there.
 	var fenced := kind == BL.FENCE or kind == BL.CODE or kind == BL.CHART
 	if not fenced:
-		var inline_spans := MarkdownParser.compute_inline(text)
-		for sp in inline_spans:
-			var col := Color.WHITE
+		for sp in MarkdownParser.compute_inline(text):
+			var c := Color.WHITE
 			match int(sp["type"]):
-				SP.CODE_SPAN: col = accent2
-				SP.STRONG: col = _c("heading", Color("ff2ea6"))
-				SP.BOLD_ITALIC: col = _c("heading", Color("ff2ea6"))
-				SP.EMPHASIS: col = dim
-				SP.STRIKE: col = dim
-				SP.HIGHLIGHT: col = accent3
-				SP.GLITCH: col = accent4
-				SP.FLICKER: col = accent3
-				SP.WIKILINK: col = accent2
-				SP.EXTERNAL_LINK: col = accent2
-				SP.ESCAPE: col = dim
-			if col != Color.WHITE:
-				var st: int = sp["start"]
-				var ln: int = sp["length"]
-				# Inline semantic ranges take precedence over the block ranges
-				# created above. Without this assignment, a block marker at the
-				# same offset would hide the effect colour.
-				out[st] = {"color": col, "length": ln}
+				SP.CODE_SPAN: c = accent2
+				SP.STRONG: c = accent
+				SP.BOLD_ITALIC: c = accent
+				SP.EMPHASIS: c = dim
+				SP.STRIKE: c = dim
+				SP.HIGHLIGHT: c = accent3
+				SP.GLITCH: c = accent4
+				SP.FLICKER: c = accent3
+				SP.WIKILINK: c = accent2
+				SP.EXTERNAL_LINK: c = accent2
+				SP.ESCAPE: c = dim
+			if c != Color.WHITE:
+				_paint_span(buf, int(sp["start"]), int(sp["start"]) + int(sp["length"]), c)
+
 	# Search matches paint last so they win over the syntax tint underneath.
-	_paint_search(line, text, out)
-	return _sorted(out)
+	_paint_search(buf, line, text)
 
-
-## Tint every occurrence of the active find query on this line. Called after
-## the markdown spans so the highlight always sits on top.
-func _paint_search(line: int, text: String, out: Dictionary) -> void:
-	if search_query == "" or text == "":
-		return
-	var needle := search_query.to_lower()
-	var n := needle.length()
-	if n == 0:
-		return
-	var hay := text.to_lower()
-	var idx := hay.find(needle)
-	while idx >= 0:
-		_paint_search_range(out, idx, n, line == search_current.x and idx == search_current.y)
-		idx = hay.find(needle, idx + n)
-
-
-## Splice one match range into the syntax dictionary. The editor reads the dict
-## as "from this column, for `length` characters", and a range without a
-## `color` inherits the previous one — so a shorter overlay would otherwise
-## truncate the tint of the span it sits in. When the covering span reaches past
-## the match, its color is restored from the match's end.
-##
-## NOTE: this build's CodeEdit only honours `color` in a syntax range —
-## `background_color`, `bold`, `italic` and `strikethrough` are silently
-## ignored (verified), so the highlight is a font-color change, not a block.
-func _paint_search_range(out: Dictionary, start: int, length: int, is_current: bool) -> void:
-	# Find the span covering the match (the last range starting at or before it).
-	var cover_key := -1
-	var cover_end := -1
-	var cover_color: Color = _c("text", Color("d9e1ff"))
-	for k in out:
-		var kk := int(k)
-		if kk > start:
+	# ---- emit contiguous runs as column-keyed ranges with explicit ends ------
+	# A run of UNSET after a tinted run emits the body colour, truncating the
+	# tint at the construct's edge (see the class docs).
+	var normal := _c("text", Color("d9e1ff"))
+	var prev: Color = UNSET
+	for i in n:
+		var cur: Color = buf[i]
+		if cur == prev:
 			continue
-		var e: Dictionary = out[k]
-		var e_len: int = int(e.get("length", 0))
-		if e_len <= 0 or kk + e_len > start:
-			cover_key = kk
-			cover_end = -1 if e_len <= 0 else kk + e_len
-			cover_color = e.get("color", cover_color)
-	# CodeEdit consumes ranges in key order and mishandles overlaps, so the
-	# covering span is cut short at the match instead of being painted over.
-	if cover_key >= 0 and cover_key < start:
-		var cut: Dictionary = (out[cover_key] as Dictionary).duplicate()
-		cut["length"] = start - cover_key
-		out[cover_key] = cut
-	out[start] = {
-		"length": length,
-		"color": _c("search_current", Color(1.0, 0.18, 0.65)) if is_current \
-			else _c("search", Color(1.0, 0.72, 0.0)),
-	}
-	# Restore the covering span's colour for the remainder of the search range.
-	if cover_end > start + length:
-		out[start + length] = {
-			"length": cover_end - (start + length),
-			"color": cover_color,
-		}
-
-
-## Rebuild the range dictionary with keys in ascending column order.
-## CodeEdit walks the ranges in key order, so out-of-order keys (table rows emit
-## their pipe ranges before the inline spans) silently drop later ranges.
-func _sorted(out: Dictionary) -> Dictionary:
-	var keys := out.keys()
-	keys.sort_custom(func(a, b): return int(a) < int(b))
-	var res := {}
-	for k in keys:
-		res[k] = out[k]
-	return res
+		out[i] = {"color": normal if cur == UNSET else cur}
+		prev = cur
+	return out

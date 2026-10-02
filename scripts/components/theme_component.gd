@@ -82,7 +82,7 @@ func apply() -> void:
 		hl = NeonHighlighter.new()
 	hl.colors = {
 		"heading": c["accent"], "accent": c["accent"], "accent2": c["accent2"],
-		"accent3": c["accent3"], "code": c["accent2"], "text": c["text"],
+		"accent3": c["accent3"], "accent4": c["accent4"], "code": c["accent2"], "text": c["text"],
 		"dim": Color(c["text"].r, c["text"].g, c["text"].b, 0.5),
 		# CodeEdit syntax highlighting only honours a range's `color`, so the
 		# find highlight is a font colour: all matches gold, the active one pink

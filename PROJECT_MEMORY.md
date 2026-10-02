@@ -138,6 +138,16 @@ _Last updated: 2026-10-01 · Godot 4.7 · renderer: gl_compatibility_
   text in both. Fenced code preview uses a full-width padded panel
   (language-specific token highlighting not implemented); wiki-links `[[Note]]`/`[[Note|label]]`, backlinks,
   Obsidian callouts, `==highlight==`, `%%glitch%%`, `++flicker++` escapes.
+  **Editor colour emission (2026-10-01):** CodeEdit reads the syntax dict as
+  **column-keyed segments** — a colour runs from its key to the *next* key (or
+  EOL); a value's `length` is not a rendered end. So `_get_line_syntax_highlighting`
+  paints each line into a per-column buffer, then emits runs with an explicit
+  body-colour boundary at every construct's end. Without it a list's `-` colours
+  the whole item and a `**strong**` span colours the plain text that follows.
+  Heading text is tinted with the preview's level accent (`accent`/`accent2`/
+  `accent3`/`accent4`, now also in `ThemeComponent`'s colour dict). The line
+  cache also rebuilds when `get_line_count()` drifts from the cached parse, so a
+  programmatic `text =` (opening a note) can't render stale block context.
 - Knowledge graph: radial vault map with flowing (animated, directional)
   link light, folder-spine hierarchy, level semantics, seeded-by-`GraphModel`
   (renderer-agnostic; user wants a "neon city" redesign eventually).

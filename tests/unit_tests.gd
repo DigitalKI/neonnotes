@@ -13,6 +13,7 @@ func _init() -> void:
 	_check_markdown_spans()
 	_check_markdown_blocks()
 	_check_markdown_line_model()
+	_check_highlighter_ranges()
 	_check_html_exporter()
 	_check_move_path_remap()
 	_check_graph_model()
@@ -370,6 +371,41 @@ func _check_markdown_line_model() -> void:
 	_check(li["lines"][0]["kind"] == BL.LIST and li["lines"][1]["kind"] == BL.LIST, "list items classified")
 	var lm: Variant = _mark_of(MarkdownParser.line_markers(li["lines"][0]["kind"], "- one"), BM.LIST_MARK)
 	_check(lm != null and lm["start"] == 0 and lm["length"] == 2, "list marker spans the bullet")
+
+
+## The highlighter emits column-keyed colour runs; CodeEdit paints each key's
+## colour until the NEXT key, so a tint must never outlive its construct. These
+## structural checks lock the explicit end boundaries (the smoke test checks
+## actual recolour values against the live palette).
+func _check_highlighter_ranges() -> void:
+	# A fresh editor per case: a programmatic `text =` does not dispatch
+	# `text_changed` without a frame loop, so reusing one editor would read a
+	# stale cached parse.
+	# list item: only the bullet is tinted, the item body is not
+	var r := _hl_ranges("- item")
+	_check(r.has(0) and r.has(2) and not r.has(3),
+		"highlighter tints only the list bullet (boundary at the bullet's end)")
+	# a trailing plain run after a strong span must not inherit its colour
+	var r2 := _hl_ranges("a **b** c")
+	_check(r2.has(2) and r2.has(7) and not r2.has(8),
+		"a span's colour does not bleed past its end")
+	# plain text emits no ranges at all (CodeEdit's font_color covers it)
+	_check(_hl_ranges("just words").is_empty(), "plain text emits no syntax ranges")
+	# heading: marker and text carry the level accent
+	var r3 := _hl_ranges("# Title")
+	_check(r3.has(0) and r3.has(2), "heading tints the marker and its text")
+
+
+## Syntax ranges for line 0 of `text`, via a throwaway CodeEdit + highlighter.
+func _hl_ranges(text: String) -> Dictionary:
+	var ce := CodeEdit.new()
+	root.add_child(ce)
+	var hl := NeonHighlighter.new()
+	ce.syntax_highlighter = hl
+	ce.text = text
+	var r: Dictionary = hl.call("_get_line_syntax_highlighting", 0)
+	ce.free()
+	return r
 
 
 ## First block-marker span of the given kind, or null.

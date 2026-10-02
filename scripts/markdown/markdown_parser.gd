@@ -21,7 +21,7 @@ enum BlockLine { PLAIN, FRONT_MATTER, FENCE, CODE, CHART, TABLE_DELIM, TABLE_ROW
 ## Block-marker span kinds emitted by line_markers(); the highlighter maps each
 ## to a palette colour. Offsets are into the *raw* source line.
 enum BlockMark { FENCE, CODE_TEXT, CHART_KEY, TABLE_PIPE, TABLE_DELIM, QUOTE_MARK,
-	QUOTE_TEXT, HEADING_MARK, LIST_MARK }
+	QUOTE_TEXT, HEADING_MARK, HEADING_TEXT, LIST_MARK }
 
 ## Break a single source line into non-overlapping inline spans, in source
 ## order. Semantic spans carry: { type, start, length, content_start,
@@ -325,6 +325,14 @@ static func line_markers(kind: int, text: String) -> Array[Dictionary]:
 				hs += 1
 			if hs > 0:
 				spans.append({"type": BlockMark.HEADING_MARK, "start": off, "length": hs})
+				# The preview colours the whole heading in its level accent, so
+				# the editor tints the heading text too (level 1..4).
+				var ts := off + hs
+				if ts < text.length() and text[ts] == " ":
+					ts += 1
+				if ts < text.length():
+					spans.append({"type": BlockMark.HEADING_TEXT, "start": ts,
+						"length": text.length() - ts, "level": hs})
 		BlockLine.LIST:
 			var m := _list_re().search(text.strip_edges())
 			if m != null:
