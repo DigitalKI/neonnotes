@@ -175,10 +175,11 @@ func _get_line_syntax_highlighting(line: int) -> Dictionary:
 
 	# ---- block-level markers, straight from the shared parser ----------------
 	for m in MarkdownParser.line_markers(kind, text):
-		var c := _mark_color(int(m["type"]))
-		if int(m["type"]) == BM.HEADING_TEXT:
-			var lvl := clampi(int(m.get("level", 1)) - 1, 0, 3)
-			c = [accent, accent2, accent3, accent4][lvl]
+		var mt := int(m["type"])
+		var c := _mark_color(mt)
+		if mt == BM.HEADING_MARK and m.has("level"):
+			# Whole-line heading colour, matching the preview's accent ramp.
+			c = [accent, accent2, accent3, accent4][clampi(int(m["level"]) - 1, 0, 3)]
 		if c != Color.WHITE:
 			_paint_span(buf, int(m["start"]), int(m["start"]) + int(m["length"]), c)
 

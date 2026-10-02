@@ -351,7 +351,8 @@ func _check_markdown_line_model() -> void:
 	_check(hd["lines"][0]["kind"] == BL.HEADING and hd["lines"][1]["kind"] == BL.PLAIN,
 		"heading requires the space the preview requires")
 	var hm: Variant = _mark_of(MarkdownParser.line_markers(hd["lines"][0]["kind"], "# Title"), BM.HEADING_MARK)
-	_check(hm != null and hm["start"] == 0 and hm["length"] == 1, "heading marker spans the hashes")
+	_check(hm != null and hm["start"] == 0 and hm["length"] == "# Title".length(),
+		"a heading is one run over the whole line")
 
 	# table: header row + delimiter; a pipe line with no delimiter is a paragraph
 	var tb := MarkdownParser.parse("| a | b |\n|---|---|\n| 1 | 2 |")
@@ -391,19 +392,23 @@ func _check_highlighter_ranges() -> void:
 		"a span's colour does not bleed past its end")
 	# plain text emits no ranges at all (CodeEdit's font_color covers it)
 	_check(_hl_ranges("just words").is_empty(), "plain text emits no syntax ranges")
-	# heading: marker and text carry the level accent
-	var r3 := _hl_ranges("# Title")
-	_check(r3.has(0) and r3.has(2), "heading tints the marker and its text")
+	# heading: one accent for the whole line (a heading is not delimited)
+	var r3 := _hl_ranges("## Method Descriptions")
+	_check(r3.has(0) and not r3.has(1) and not r3.has(3),
+		"a heading is one colour for the whole line")
+	# table delimiter row is a single grey run (all of it, not just its indent)
+	var r4 := _hl_ranges("| a | b |\n|---|---|\n| 1 | 2 |", 1)
+	_check(r4.has(0) and not r4.has(1), "the table delimiter row is one grey run")
 
 
-## Syntax ranges for line 0 of `text`, via a throwaway CodeEdit + highlighter.
-func _hl_ranges(text: String) -> Dictionary:
+## Syntax ranges for `line` of `text`, via a throwaway CodeEdit + highlighter.
+func _hl_ranges(text: String, line: int = 0) -> Dictionary:
 	var ce := CodeEdit.new()
 	root.add_child(ce)
 	var hl := NeonHighlighter.new()
 	ce.syntax_highlighter = hl
 	ce.text = text
-	var r: Dictionary = hl.call("_get_line_syntax_highlighting", 0)
+	var r: Dictionary = hl.call("_get_line_syntax_highlighting", line)
 	ce.free()
 	return r
 

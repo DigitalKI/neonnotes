@@ -144,10 +144,14 @@ _Last updated: 2026-10-01 · Godot 4.7 · renderer: gl_compatibility_
   paints each line into a per-column buffer, then emits runs with an explicit
   body-colour boundary at every construct's end. Without it a list's `-` colours
   the whole item and a `**strong**` span colours the plain text that follows.
-  Heading text is tinted with the preview's level accent (`accent`/`accent2`/
-  `accent3`/`accent4`, now also in `ThemeComponent`'s colour dict). The line
-  cache also rebuilds when `get_line_count()` drifts from the cached parse, so a
-  programmatic `text =` (opening a note) can't render stale block context.
+  A **heading is one run over the whole line** in its level accent
+  (`accent`/`accent2`/`accent3`/`accent4`, now also in `ThemeComponent`'s colour
+  dict) — it is not a delimited span, so the marker, gap and text share one
+  colour (inline spans still override on top). A **table delimiter row
+  (`|---|---|`) is one grey run** over the whole line, since it is pure
+  formatting syntax. The line cache also rebuilds when `get_line_count()`
+  drifts from the cached parse, so a programmatic `text =` (opening a note)
+  can't render stale block context.
 - Knowledge graph: radial vault map with flowing (animated, directional)
   link light, folder-spine hierarchy, level semantics, seeded-by-`GraphModel`
   (renderer-agnostic; user wants a "neon city" redesign eventually).
