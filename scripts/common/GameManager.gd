@@ -207,17 +207,29 @@ func crt_export_allowed() -> bool:
 var _fallback_fonts: Array[Font] = []
 
 func fallback_fonts() -> Array[Font]:
-	if _fallback_fonts.is_empty():
-		for names in [
-			PackedStringArray(["Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji"]),
-			# Symbol faces that carry ❝ ▸ ✔ ✖ (plus general punctuation). Order
-			# matters: SystemFont picks the FIRST installed name, so the
-			# widest-coverage faces come first.
-			PackedStringArray(["DejaVu Sans", "FreeSans", "Apple Symbols", "Segoe UI Symbol", "Noto Sans Symbols 2", "Noto Sans Symbols", "Symbola"]),
-		]:
-			var sf := SystemFont.new()
-			sf.font_names = names
-			_fallback_fonts.append(sf)
+	if not _fallback_fonts.is_empty():
+		return _fallback_fonts
+	# Colour emoji FIRST, loaded as a real face file. A named SystemFont can be
+	# substituted by a monochrome face on some systems/exported builds, which is
+	# what turned emoji black-and-white; loading the colour font by path keeps
+	# its colour bitmaps (CBDT/COLR).
+	for family in ["Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji"]:
+		var path := OS.get_system_font_path(family, 400, 100, false)
+		if path == "":
+			continue
+		var face := FontFile.new()
+		if face.load_dynamic_font(path) == OK:
+			_fallback_fonts.append(face)
+			break
+	# Named fallback for platforms where the path lookup is unavailable.
+	var emoji := SystemFont.new()
+	emoji.font_names = PackedStringArray(["Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji"])
+	_fallback_fonts.append(emoji)
+	# Symbol faces that carry ❝ ▸ ✔ ✖ (plus general punctuation). Order matters:
+	# SystemFont picks the FIRST installed name, so widest coverage comes first.
+	var symbols := SystemFont.new()
+	symbols.font_names = PackedStringArray(["DejaVu Sans", "FreeSans", "Apple Symbols", "Segoe UI Symbol", "Noto Sans Symbols 2", "Noto Sans Symbols", "Symbola"])
+	_fallback_fonts.append(symbols)
 	return _fallback_fonts
 
 ## Resolved font resource for the active font family (cached per path). The
