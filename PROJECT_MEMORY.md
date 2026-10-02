@@ -152,6 +152,12 @@ _Last updated: 2026-10-01 · Godot 4.7 · renderer: gl_compatibility_
   formatting syntax. The line cache also rebuilds when `get_line_count()`
   drifts from the cached parse, so a programmatic `text =` (opening a note)
   can't render stale block context.
+  **List boundaries (2026-10-01):** a run of list lines closes when the marker
+  *kind* changes — an unordered `-`/`*`/`+` run and an ordered `1.`/`1)` run are
+  separate blocks even with no blank line between them. Without this, a numbered
+  list typed directly under a bullet list was absorbed into it and rendered with
+  bullets (and the reverse left a `0.` bullet). The first marker's kind picks
+  the list's `ordered` flag; only ordered lists record `numbers`.
 - Knowledge graph: radial vault map with flowing (animated, directional)
   link light, folder-spine hierarchy, level semantics, seeded-by-`GraphModel`
   (renderer-agnostic; user wants a "neon city" redesign eventually).

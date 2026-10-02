@@ -372,6 +372,20 @@ func _check_markdown_line_model() -> void:
 	_check(li["lines"][0]["kind"] == BL.LIST and li["lines"][1]["kind"] == BL.LIST, "list items classified")
 	var lm: Variant = _mark_of(MarkdownParser.line_markers(li["lines"][0]["kind"], "- one"), BM.LIST_MARK)
 	_check(lm != null and lm["start"] == 0 and lm["length"] == 2, "list marker spans the bullet")
+	# An unordered marker run must NOT absorb a following numbered run (and vice
+	# versa): they are separate lists, so the numbers survive instead of becoming
+	# bullets. The blank-line-separated case was always split; these need no blank.
+	var mixed := MarkdownParser.parse("- one\n2. two\n3. three")
+	var mixed_lists: Array = mixed["blocks"].filter(func(b): return b.get("type", "") == "list")
+	_check(mixed_lists.size() == 2 and not mixed_lists[0]["ordered"] and mixed_lists[1]["ordered"],
+		"a numbered list after a bullet list is its own ordered list")
+	_check(mixed_lists.size() == 2 and mixed_lists[1]["numbers"] == [2, 3],
+		"the ordered list keeps the numbers the user wrote")
+	var reversed := MarkdownParser.parse("1. one\n- two")
+	var rev_lists: Array = reversed["blocks"].filter(func(b): return b.get("type", "") == "list")
+	_check(rev_lists.size() == 2 and rev_lists[1]["ordered"] == false
+		and not rev_lists[0]["numbers"].has(0),
+		"a bullet list after a numbered list is its own unordered list")
 
 
 ## The highlighter emits column-keyed colour runs; CodeEdit paints each key's

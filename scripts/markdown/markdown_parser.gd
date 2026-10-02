@@ -478,9 +478,13 @@ static func parse(text: String) -> Dictionary:
 		var list_match := _list_re()
 		var m := list_match.search(t)
 		if m:
-			flush.call(); var ordered := t[0].is_valid_int(); var items: Array[String] = []; var numbers: Array[int] = []
+			flush.call(); var ordered := m.get_string(1) != ""; var items: Array[String] = []; var numbers: Array[int] = []
 			while i < lines.size():
 				var mm := list_match.search(lines[i].strip_edges()); if mm == null: break
+				# A switch between ordered (`1.`) and unordered (`-`) markers closes
+				# the list and starts a new one; absorbing it would render the
+				# numbered items as bullets (and vice versa) and leave a `0.` bullet.
+				if (mm.get_string(1) != "") != ordered: break
 				set_line.call(i, BlockLine.LIST, "")
 				items.append(mm.get_string(2)); i += 1
 				if ordered: numbers.append(int(mm.get_string(1)))
