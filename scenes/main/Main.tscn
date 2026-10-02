@@ -71,12 +71,6 @@ unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="EditSearch" type="LineEdit" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=1676676697]
-unique_name_in_owner = true
-visible = false
-layout_mode = 2
-placeholder_text = "Find in document…"
-
 [node name="ContentHost" type="ScrollContainer" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=1622826570]
 unique_name_in_owner = true
 layout_mode = 2
@@ -163,6 +157,35 @@ placeholder_text = "Add or pick a tag…"
 unique_name_in_owner = true
 layout_mode = 2
 text = "+ ADD"
+
+[node name="SearchRow" type="HBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn" unique_id=471409606]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="EditSearch" type="LineEdit" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/SearchRow" unique_id=1676676697]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Find in document…"
+
+[node name="SearchPrev" type="Button" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/SearchRow" unique_id=728062493]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(34, 0)
+layout_mode = 2
+tooltip_text = "Previous match"
+focus_mode = 0
+theme_override_font_sizes/font_size = 14
+text = "▲"
+
+[node name="SearchNext" type="Button" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/SearchRow" unique_id=1120225212]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(34, 0)
+layout_mode = 2
+tooltip_text = "Next match"
+focus_mode = 0
+theme_override_font_sizes/font_size = 14
+text = "▼"
 
 [node name="SourceEditor" type="CodeEdit" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn" unique_id=1315287311]
 unique_name_in_owner = true

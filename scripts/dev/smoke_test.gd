@@ -143,7 +143,57 @@ func _run_smoke() -> void:
 	# mode toggle
 	m._toggle_mode()
 	fails += _check(m.code_edit.visible and not m.content_host.visible, "mode toggle → source")
+	# in-document find (edit mode): highlight every match + arrow navigation
+	m.code_edit.text = "alpha beta alpha\nAlpha gamma\nalpha"
+	m._find_in_editor("alpha")
+	fails += _check(m._search_matches.size() == 4, "find bar collects all matches (got %d)" % m._search_matches.size())
+	fails += _check(m.search_row.visible and not m.search_prev.disabled and not m.search_next.disabled,
+		"search row + step arrows available in edit mode")
+	var hl: NeonHighlighter = m.code_edit.syntax_highlighter
+	fails += _check(hl != null and hl.search_query == "alpha", "query reaches the highlighter")
+	var ranges: Dictionary = hl._get_line_syntax_highlighting(0)
+	fails += _check(ranges.has(0) and ranges[0].get("color") == hl.colors["search_current"],
+		"active match is recoloured")
+	fails += _check(ranges.has(11) and ranges[11].get("color") == hl.colors["search"], "later match on the line is recoloured")
+	fails += _check(ranges.get(1, {}).get("color") == null, "non-match text is not recoloured")
+	fails += _check(hl.colors["search"] != hl.colors["search_current"],
+		"active match and other matches use distinct colours")
+	m._search_step(1)
+	fails += _check(m._search_index == 1 and m.code_edit.get_caret_line() == 0 \
+		and m.code_edit.get_caret_column() == 11, "down arrow steps to next match")
+	m._search_step(-1)
+	m._search_step(-1)
+	fails += _check(m._search_index == 3, "up arrow wraps to the last match")
+	m._search_step(1)
+	fails += _check(m._search_index == 0, "down arrow wraps back to the first match")
+	# a match inside a syntax span keeps the span's tint after the match
+	m.code_edit.text = "`alpha beta`"
+	m._find_in_editor("alpha")
+	var span_ranges: Dictionary = hl._get_line_syntax_highlighting(0)
+	fails += _check(span_ranges.has(1) and span_ranges[1].get("color") == hl.colors["search_current"],
+		"match inside a code span is recoloured")
+	fails += _check(span_ranges.get(6, {}).get("color") == hl.colors["code"],
+		"code-span tint is restored after the match")
+	# table rows emit their pipe ranges before the inline spans; the match must
+	# still win and the ranges must come out in ascending column order, or
+	# CodeEdit drops the recolour (a match inside a table's `code` cell).
+	m.code_edit.text = "| `#api` | 1078 |\n| plain #api text | 1 |"
+	m._find_in_editor("#api")
+	var table_row: Dictionary = hl._get_line_syntax_highlighting(0)
+	fails += _check(table_row.has(3) and table_row[3].get("color") == hl.colors["search_current"],
+		"match inside a table's inline code is recoloured")
+	fails += _check(_ascending(table_row.keys()) and _ascending(hl._get_line_syntax_highlighting(1).keys()),
+		"highlighter ranges are emitted in ascending column order")
+	m._find_in_editor("")
+	fails += _check(m._search_matches.is_empty() and m.search_prev.disabled, "clearing the query removes the highlight")
+	fails += _check(hl.search_query == "" and hl._get_line_syntax_highlighting(0).get(1, {}).get("color") == null,
+		"highlighter drops the search tint when the query is cleared")
+	# exiting the editor (edit → preview) resets the find bar
+	m._find_in_editor("#api")
+	fails += _check(not m._search_matches.is_empty(), "query active before leaving edit mode")
 	m._toggle_mode()
+	fails += _check(m.edit_search.text == "" and m._search_matches.is_empty() and not m.search_row.visible,
+		"leaving edit mode resets the search box")
 	fails += _check(m.content_host.visible and not m.code_edit.visible, "mode toggle → preview")
 	# help page
 	m._show_help()
@@ -287,6 +337,15 @@ func _run_smoke() -> void:
 	GameManager.set_font_size(GameManager.BASE_FONT_SIZE)
 	print("SMOKE RESULT: %s (%d fails)" % ["FAIL" if fails > 0 else "OK", fails])
 	m.get_tree().quit(1 if fails > 0 else 0)
+
+## True when the int-like keys are already in ascending order.
+func _ascending(keys: Array) -> bool:
+	var lo := -1
+	for k in keys:
+		if int(k) < lo:
+			return false
+		lo = int(k)
+	return true
 
 func _check(ok: bool, label: String) -> int:
 	print(("  ✓ " if ok else "  ✗ ") + label)

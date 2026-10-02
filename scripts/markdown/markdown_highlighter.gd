@@ -9,6 +9,36 @@ extends SyntaxHighlighter
 
 var colors: Dictionary = {}
 
+## In-document find state (set via set_search()). While `search_query` is
+## non-empty every occurrence on every line is recoloured, and the occurrence
+## at `search_current` (line, column) gets a distinct "active" colour. The
+## editor's find bar drives navigation; the highlighter only paints.
+var search_query := ""
+var search_current := Vector2i(-1, -1)
+
+
+## Push a new find query / active match and force the editor to re-highlight.
+## Passing "" clears the highlight. Idempotent: an unchanged request does
+## nothing.
+##
+## NOTE: `clear_highlighting_cache()` / `update_cache()` / `queue_redraw()` do
+## NOT make CodeEdit re-run highlighting in this build (verified with a pixel
+## probe). Re-assigning the highlighter is the one call that does — and the
+## setter early-returns for an identical instance, so it must be dropped to null
+## first. That re-highlights the visible lines only, so it is cheap enough for
+## the find bar to call on every keystroke.
+func set_search(query: String, current_line: int = -1, current_col: int = -1) -> void:
+	var next := Vector2i(current_line, current_col)
+	if search_query == query and search_current == next:
+		return
+	search_query = query
+	search_current = next
+	var te := get_text_edit()
+	if te != null:
+		te.syntax_highlighter = null
+		te.syntax_highlighter = self
+
+
 ## Per-line block classification for the whole document, rebuilt once per text
 ## revision. `MarkdownParser.parse()` produces both the preview blocks and this
 ## line model in one walk, so the editor can never disagree with the view.
@@ -124,7 +154,68 @@ func _get_line_syntax_highlighting(line: int) -> Dictionary:
 				# created above. Without this assignment, a block marker at the
 				# same offset would hide the effect colour.
 				out[st] = {"color": col, "length": ln}
+	# Search matches paint last so they win over the syntax tint underneath.
+	_paint_search(line, text, out)
 	return _sorted(out)
+
+
+## Tint every occurrence of the active find query on this line. Called after
+## the markdown spans so the highlight always sits on top.
+func _paint_search(line: int, text: String, out: Dictionary) -> void:
+	if search_query == "" or text == "":
+		return
+	var needle := search_query.to_lower()
+	var n := needle.length()
+	if n == 0:
+		return
+	var hay := text.to_lower()
+	var idx := hay.find(needle)
+	while idx >= 0:
+		_paint_search_range(out, idx, n, line == search_current.x and idx == search_current.y)
+		idx = hay.find(needle, idx + n)
+
+
+## Splice one match range into the syntax dictionary. The editor reads the dict
+## as "from this column, for `length` characters", and a range without a
+## `color` inherits the previous one — so a shorter overlay would otherwise
+## truncate the tint of the span it sits in. When the covering span reaches past
+## the match, its color is restored from the match's end.
+##
+## NOTE: this build's CodeEdit only honours `color` in a syntax range —
+## `background_color`, `bold`, `italic` and `strikethrough` are silently
+## ignored (verified), so the highlight is a font-color change, not a block.
+func _paint_search_range(out: Dictionary, start: int, length: int, is_current: bool) -> void:
+	# Find the span covering the match (the last range starting at or before it).
+	var cover_key := -1
+	var cover_end := -1
+	var cover_color: Color = _c("text", Color("d9e1ff"))
+	for k in out:
+		var kk := int(k)
+		if kk > start:
+			continue
+		var e: Dictionary = out[k]
+		var e_len: int = int(e.get("length", 0))
+		if e_len <= 0 or kk + e_len > start:
+			cover_key = kk
+			cover_end = -1 if e_len <= 0 else kk + e_len
+			cover_color = e.get("color", cover_color)
+	# CodeEdit consumes ranges in key order and mishandles overlaps, so the
+	# covering span is cut short at the match instead of being painted over.
+	if cover_key >= 0 and cover_key < start:
+		var cut: Dictionary = (out[cover_key] as Dictionary).duplicate()
+		cut["length"] = start - cover_key
+		out[cover_key] = cut
+	out[start] = {
+		"length": length,
+		"color": _c("search_current", Color(1.0, 0.18, 0.65)) if is_current \
+			else _c("search", Color(1.0, 0.72, 0.0)),
+	}
+	# Restore the covering span's colour for the remainder of the search range.
+	if cover_end > start + length:
+		out[start + length] = {
+			"length": cover_end - (start + length),
+			"color": cover_color,
+		}
 
 
 ## Rebuild the range dictionary with keys in ascending column order.

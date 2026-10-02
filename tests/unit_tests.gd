@@ -4,6 +4,7 @@ const NoteMetadataHelper := preload("res://scripts/common/note_metadata.gd")
 const DevSession := preload("res://scripts/common/dev_session.gd")
 const GameManagerScript := preload("res://scripts/common/GameManager.gd")
 const TagMatchScript := preload("res://scripts/common/tag_match.gd")
+const TextSearchScript := preload("res://scripts/common/text_search.gd")
 
 var failures := 0
 
@@ -20,6 +21,7 @@ func _init() -> void:
 	_check_font_settings()
 	_check_icon_font_fallback()
 	_check_tag_suggest()
+	_check_text_search()
 	print("UNIT RESULT: %s (%d failures)" % ["FAIL" if failures > 0 else "OK", failures])
 	quit(failures)
 
@@ -306,6 +308,18 @@ func _check_tag_suggest() -> void:
 	_check(TagMatchScript.score("jw", "j-w") >= 0, "near-duplicate tag surfaces (jw / j-w)")
 	_check(TagMatchScript.score("coding", "code") >= 0, "near-duplicate tag surfaces (coding / code)")
 	_check(TagMatchScript.score("home", "work") < 0, "unrelated tag does not surface")
+
+## In-document find positions: case-insensitive, non-overlapping, per line.
+func _check_text_search() -> void:
+	var hits := TextSearchScript.find_all("Hello world\nhello there", "hello")
+	_check(hits.size() == 2, "find_all is case-insensitive across lines")
+	_check(hits[0] == Vector2i(0, 0) and hits[1] == Vector2i(1, 0), "find_all reports line/column")
+	var mid := TextSearchScript.find_all("a foo b Foo c", "foo")
+	_check(mid.size() == 2 and mid[0] == Vector2i(0, 2) and mid[1] == Vector2i(0, 8),
+		"find_all column offsets and mixed case")
+	_check(TextSearchScript.find_all("aaaa", "aa").size() == 2, "find_all is non-overlapping")
+	_check(TextSearchScript.find_all("text", "").is_empty(), "empty query finds nothing")
+	_check(TextSearchScript.find_all("text", "zzz").is_empty(), "absent query finds nothing")
 
 ## Block-level line model: NeonHighlighter consumes parse()["lines"] +
 ## line_markers() instead of re-deriving block rules, so block classification is

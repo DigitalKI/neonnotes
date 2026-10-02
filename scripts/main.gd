@@ -5,6 +5,7 @@ extends Control
 
 const MONO_FONT := preload("res://assets/fonts/ShareTechMono-Regular.ttf")
 const SELECTION_OVERLAY_SCENE := preload("res://scenes/components/selection_overlay.tscn")
+const TextSearch := preload("res://scripts/common/text_search.gd")
 
 const NOTE_TEMPLATE := """---
 title: "%s"
@@ -30,7 +31,10 @@ func _load_help_doc() -> String:
 @onready var status_bar: StatusBarComponent = %StatusBar
 @onready var note_title: Label = toolbar.note_title
 @onready var content_host: ScrollContainer = %ContentHost
+@onready var search_row: HBoxContainer = %SearchRow
 @onready var edit_search: LineEdit = %EditSearch
+@onready var search_prev: Button = %SearchPrev
+@onready var search_next: Button = %SearchNext
 @onready var content_body: VBoxContainer = %ContentBody
 @onready var edit_padding: MarginContainer = %EditPadding
 @onready var settings_page: MarginContainer = %SettingsPage
@@ -54,6 +58,11 @@ var sidebar: PanelContainer
 @onready var trash_page: TrashPage = %TrashPage
 var help_mode := false
 var source_mode := false
+## In-document find (edit mode): every match is painted by the highlighter,
+## the arrows step through `_search_matches` and the current one is selected.
+var _search_query := ""
+var _search_matches: Array[Vector2i] = []
+var _search_index := -1
 var autosave_timer := Timer.new()
 var sync_service: SyncService
 var help_folder := "Help"  # sidebar folder items get this metadata
@@ -99,6 +108,10 @@ func _ready() -> void:
 	_build_dynamic_ui()
 	_boot_mark("ui-build")
 	edit_search.text_changed.connect(_find_in_editor)
+	edit_search.text_submitted.connect(func(_t: String): _search_step(1))
+	search_prev.pressed.connect(_search_step.bind(-1))
+	search_next.pressed.connect(_search_step.bind(1))
+	_update_search_controls()
 	theme_component.name = "ThemeComponent"
 	theme_component.setup(%Bg, toolbar.note_title, %SidePanel as PanelContainer,
 			%Content as PanelContainer, toolbar, code_edit, self)
@@ -503,6 +516,9 @@ func _on_text_changed() -> void:
 	help_mode = false
 	autosave_timer.start()  # restart after each character/paste
 	slash_menu.check()
+	# Keep the highlight/counter honest while the note is edited with a query up.
+	if _search_query != "":
+		_recount_search_matches()
 
 # ------------------------------------------------- slash menu (v3)
 
@@ -619,6 +635,7 @@ func _on_note_selected(fname: String) -> void:
 		_close_page()
 	# Continue opening the selected note after leaving a page.
 	_flush_save()  # flush previous note first — never lose changes
+	_clear_search()  # a new note starts with an empty find bar
 	GameManager.current_file = GameManager.vault_abs() + "/" + fname
 	GameManager.current_rel = fname
 	GameManager.last_opened_rel = fname
@@ -878,7 +895,7 @@ func _set_mode() -> void:
 		return  # a page owns the screen until it closes
 	_close_tag_suggest()
 	code_edit.visible = source_mode
-	edit_search.visible = source_mode
+	search_row.visible = source_mode
 	edit_padding.visible = source_mode
 	tags_panel.visible = source_mode and not help_mode and GameManager.current_rel != ""
 	title_panel.visible = tags_panel.visible
@@ -894,24 +911,101 @@ func _set_mode() -> void:
 			selection_overlay.hide_overlay()
 		_render_preview()
 
+## Find bar: a new query highlights every match and jumps to the first one.
+## (Clearing the field removes the highlight and disables the step arrows.)
 func _find_in_editor(query: String) -> void:
-	if query == "" or not source_mode:
+	_search_query = query
+	_search_matches = TextSearch.find_all(code_edit.text, query)
+	_search_index = 0 if not _search_matches.is_empty() else -1
+	_refresh_search_highlight()
+	_update_search_controls()
+	if source_mode and _search_index >= 0:
+		_focus_search_match()
+
+## Recompute matches without changing which one is active — used when the note
+## text itself changes while a query is live (typing, paste, sync refresh).
+func _recount_search_matches() -> void:
+	if _search_query == "":
 		return
-	var pos := code_edit.text.to_lower().find(query.to_lower())
-	if pos < 0:
+	var current: Vector2i = Vector2i(-1, -1)
+	if _search_index >= 0 and _search_index < _search_matches.size():
+		current = _search_matches[_search_index]
+	_search_matches = TextSearch.find_all(code_edit.text, _search_query)
+	_search_index = _search_matches.find(current)
+	if _search_index < 0:
+		_search_index = 0 if not _search_matches.is_empty() else -1
+	_refresh_search_highlight()
+	_update_search_controls()
+
+## Drop the find bar and its highlight (new note, help page, leaving edit mode).
+func _clear_search() -> void:
+	_search_query = ""
+	_search_matches.clear()
+	_search_index = -1
+	if edit_search.text != "":
+		edit_search.set_block_signals(true)
+		edit_search.text = ""
+		edit_search.set_block_signals(false)
+	_refresh_search_highlight()
+	_update_search_controls()
+
+## Step to the previous (-1) or next (+1) match, wrapping around. Pressing
+## Enter in the field also calls this with +1 (standard "find next").
+func _search_step(delta: int) -> void:
+	if _search_query == "" or not source_mode:
 		return
-	var before := code_edit.text.substr(0, pos)
-	var line := before.count("\n")
-	var column := pos - (before.rfind("\n") + 1)
-	code_edit.select(line, column, line, column + query.length())
-	code_edit.set_caret_line(line)
-	code_edit.set_caret_column(column)
-	code_edit.adjust_viewport_to_caret(4)
+	if _search_matches.is_empty():
+		_recount_search_matches()
+		if _search_matches.is_empty():
+			return
+	_search_index = wrapi(_search_index + delta, 0, _search_matches.size())
+	_refresh_search_highlight()
+	_update_search_controls()
+	_focus_search_match()
+
+## Select + reveal the active match so the editor scrolls it into view.
+func _focus_search_match() -> void:
+	if _search_index < 0 or _search_index >= _search_matches.size():
+		return
+	var m: Vector2i = _search_matches[_search_index]
+	var length := _search_query.length()
+	code_edit.select(m.x, m.y, m.x, m.y + length)
+	code_edit.set_caret_line(m.x)
+	code_edit.set_caret_column(m.y)
+	code_edit.adjust_viewport_to_caret()
+
+## Hand the query + active match to the syntax highlighter, which paints every
+## occurrence (see NeonHighlighter.set_search()).
+func _refresh_search_highlight() -> void:
+	var hl: NeonHighlighter = code_edit.syntax_highlighter as NeonHighlighter
+	if hl == null:
+		return
+	var line := -1
+	var col := -1
+	if _search_index >= 0 and _search_index < _search_matches.size():
+		line = _search_matches[_search_index].x
+		col = _search_matches[_search_index].y
+	hl.set_search(_search_query, line, col)
+
+## Arrows are only usable when there is at least one match; the field's tooltip
+## doubles as the match counter.
+func _update_search_controls() -> void:
+	var has_matches := not _search_matches.is_empty()
+	search_prev.disabled = not has_matches
+	search_next.disabled = not has_matches
+	if _search_query == "":
+		edit_search.tooltip_text = "Find in document…"
+	elif _search_index >= 0:
+		edit_search.tooltip_text = "%d / %d matches" % [_search_index + 1, _search_matches.size()]
+	else:
+		edit_search.tooltip_text = "No matches"
 
 func _toggle_mode() -> void:
 	autosave_timer.stop()
 	_flush_save()  # leaving edit mode: persist now
 	source_mode = not source_mode
+	if not source_mode:
+		_clear_search()  # exiting the editor resets the find bar
 	graph_view.visible = false
 	_set_mode()
 
@@ -919,6 +1013,7 @@ func _show_help() -> void:
 	if page_mode != "":
 		return  # a page owns the screen until it closes
 	_flush_save()
+	_clear_search()
 	# Help behaves like opening a note: it replaces any page and, on mobile,
 	# collapses the tree drawer so the help content is full-screen.
 	if page_mode != "":

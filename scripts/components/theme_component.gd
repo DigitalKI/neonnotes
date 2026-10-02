@@ -74,12 +74,25 @@ func apply() -> void:
 	code_edit.add_theme_color_override("font_color", c["text"])
 	code_edit.add_theme_color_override("background_color", Color(c["bg"].r, c["bg"].g, c["bg"].b, 0.7))
 	code_edit.add_theme_color_override("current_line_color", Color(c["panel"].r, c["panel"].g, c["panel"].b, 0.9))
-	var hl := NeonHighlighter.new()
+	# Reuse the existing highlighter when possible: it carries the live
+	# in-document find state (search_query / search_current), which a palette or
+	# font change must not wipe.
+	var hl: NeonHighlighter = code_edit.syntax_highlighter as NeonHighlighter
+	if hl == null:
+		hl = NeonHighlighter.new()
 	hl.colors = {
 		"heading": c["accent"], "accent": c["accent"], "accent2": c["accent2"],
 		"accent3": c["accent3"], "code": c["accent2"], "text": c["text"],
 		"dim": Color(c["text"].r, c["text"].g, c["text"].b, 0.5),
+		# CodeEdit syntax highlighting only honours a range's `color`, so the
+		# find highlight is a font colour: all matches gold, the active one pink
+		# (both full-opacity so they pop against the light body text).
+		"search": c["accent3"],
+		"search_current": c["accent"],
 	}
+	# Re-assigning forces CodeEdit to re-highlight; the setter ignores an
+	# identical instance, so clear it to null first (see NeonHighlighter.set_search).
+	code_edit.syntax_highlighter = null
 	code_edit.syntax_highlighter = hl
 
 
