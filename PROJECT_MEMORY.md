@@ -5,7 +5,7 @@
 > decisions, gotchas) — history lives in git, `git log` is the changelog.
 > Size budget ~250 lines: compact in-session if exceeded.
 
-_Last updated: 2026-09-30 · Godot 4.7 · renderer: gl_compatibility_
+_Last updated: 2026-10-01 · Godot 4.7 · renderer: gl_compatibility_
 
 ---
 
@@ -26,6 +26,24 @@ _Last updated: 2026-09-30 · Godot 4.7 · renderer: gl_compatibility_
 
 ## 2. Current state (present-tense facts — git is the changelog)
 
+- **CRT overlay / GPU cost (2026-10-01):** the UI overlay is a full-window
+  multiplicative scanline + RGB grille shader (`shaders/crt.gdshader`) that
+  does not sample `SCREEN_TEXTURE`; this avoids the expensive per-frame
+  screen/back-buffer copy under `gl_compatibility`. Curve/wobble were removed
+  because both require screen sampling. The `CRT FX on UI` settings toggle is
+  the master switch: when off, the overlay is hidden and CRT is omitted from
+  exports; the saved `Apply CRT FX on export` preference is preserved and only
+  enabled while the master is on. Initial GPU-busy probe (AMD 820M) showed
+  screen-sampling version at 16–21% versus 1–3% without the overlay. The new
+  multiplicative overlay was syntactically validated and visually A/B checked;
+  on the 8-bit LDR target its grille bright levels clamp at 1.0, so the result
+  is approximately 9% darker overall than the old version. The master toggle
+  and export gating are in place. `run_tests.sh` passes all tests before the
+  known mobile tree touch failure; drag, sync, per-vault sync and smoke pass
+  when run individually. GPU-busy measurement after shader replacement still
+  showed ~15–16% (close to old ~16–21%), so further optimization or a reliable
+  disabled-state measurement is still needed; do not claim this shader change
+  has yet reduced GPU usage.
 - Markdown editor + live preview; notes are plain `.md` with YAML front matter
   (`title:`, `theme:`, `tags:`, `created:`, `updated:`). The edit header owns
   title and tag controls; the full frontmatter block is kept out of the visible
@@ -72,9 +90,52 @@ _Last updated: 2026-09-30 · Godot 4.7 · renderer: gl_compatibility_
   thread, and reads/matches note bodies on a worker. Cancellation is polled
   once per frame (not a tight deferred loop); matches are published only on
   the UI thread after a generation check, and result rows render in batches.
-- Unified Markdown engine: `MarkdownParser` (CommonMark-style delimiter-stack
-  inline spans + block dicts) consumed by both `PreviewBuilder` and
-  `NeonHighlighter`; fenced code preview uses a full-width padded panel
+- **In-document find (edit mode) (2026-10-01):** the `EditSearch` field sits in
+  a `SearchRow` (`Main.tscn`) with two mini **▲ / ▼** buttons
+  (`FOCUS_NONE`, so tapping them keeps the keyboard/focus in the field). Every
+  match is highlighted, not just the first: `NeonHighlighter` gained
+  `search_query` / `search_current` + `set_search()`, recolours each occurrence
+  (all matches `accent3`, the active one `accent`) and splices the range into
+  the syntax dict so the span it sits in keeps its tint after the match.
+  **Gotcha 1 — colour only:** this build's `CodeEdit` honours only a syntax
+  range's `color`; `background_color`, `bold`, `italic` and `strikethrough` are
+  silently ignored (verified with a pixel probe), so the highlight is a
+  font-colour change, not a block. A range without an explicit `color` inherits
+  the previous one, hence the tail-restore. (`TextEdit.highlight_all_occurrences`
+  does draw a real background via `word_highlighted_color`, but it only matches
+  whole words, not arbitrary find substrings — so it is not used.)
+  **Gotcha 2 — invalidation:** `clear_highlighting_cache()`, `update_cache()`
+  and `queue_redraw()` do NOT make CodeEdit re-run highlighting;
+  `set_search()` and `ThemeComponent.apply()` must drop the highlighter to
+  `null` and re-assign it (the setter ignores an identical instance). The probe
+  only read correctly with the CRT overlay hidden — the shader shifts pixels.
+  **Gotcha 3 — range order:** table rows emit their pipe ranges before the
+  inline spans, so the dict's insertion order is not ascending and CodeEdit
+  walks ranges in key order — a range keyed behind an earlier one is silently
+  dropped (a match inside a table's `` `code` `` cell rendered no recolour).
+  `_paint_search_range` now truncates the covering span instead of overlapping
+  it, and `_sorted()` returns the dict in ascending column order (this also
+  fixes inline-code tint inside table rows generally).
+  `main.gd` owns the
+  match list (`TextSearch.find_all`, case-insensitive, non-overlapping,
+  `scripts/common/text_search.gd`), wraps with `wrapi`, selects+reveals the
+  active match, and holds `_search_query/_search_matches/_search_index`; the
+  theme reuses the highlighter instance so a palette/font change does not wipe
+  the highlight. Enter also steps forward; an empty query clears, and leaving
+  edit mode (edit → preview) resets the whole find bar. Note
+  `adjust_viewport_to_caret()` takes a caret *index* (the old
+  `_find_in_editor` passed `4`, an out-of-bounds error). Covered by unit
+  `_check_text_search` and the smoke find-bar block.
+- **Unified Markdown engine (2026-10-01) — inline AND block, one source of
+  truth.** `MarkdownParser.compute_inline()` (CommonMark delimiter-stack spans)
+  feeds both `PreviewBuilder` and `NeonHighlighter`; `parse()` walks the lines
+  once and emits `blocks` (view layout) **and** a per-line block model
+  (`lines`: a `BlockLine` kind + fence lang) plus `line_markers()` (block-level
+  spans: fence, code body, chart keys, table pipes/delimiter, quote, heading,
+  list). The highlighter consumes those directly and keeps **no block rules of
+  its own**, so edit mode tints exactly what the preview renders — e.g. a `|`
+  row without a `|---|` delimiter stays plain in both, and `#nospace` is body
+  text in both. Fenced code preview uses a full-width padded panel
   (language-specific token highlighting not implemented); wiki-links `[[Note]]`/`[[Note|label]]`, backlinks,
   Obsidian callouts, `==highlight==`, `%%glitch%%`, `++flicker++` escapes.
 - Knowledge graph: radial vault map with flowing (animated, directional)
@@ -174,7 +235,11 @@ _Last updated: 2026-09-30 · Godot 4.7 · renderer: gl_compatibility_
   attached to the base UI font itself in `GameManager.font()`, via
   `GameManager.fallback_fonts()` — two `SystemFont` chain entries (emoji, then
   symbols; `SystemFont.font_names` selects a *single* face, so they must be
-  separate). `PreviewBuilder._font_variants_for_ui()` reuses the same list on
+  separate). The emoji face is loaded as a real **colour** font file via
+  `OS.get_system_font_path()` + `FontFile.load_dynamic_font()` first (a named
+  `SystemFont` can be substituted by a monochrome face on some systems/exported
+  builds, which rendered emoji black-and-white); the named `SystemFont` stays
+  as a fallback for platforms where the path lookup fails. `PreviewBuilder._font_variants_for_ui()` reuses the same list on
   its per-label variants. This matters because the PNG/GIF exporter only
   inherits the window theme (`Exporter._render` does `group.theme = root.theme`),
   not the preview labels' per-label overrides, so a fallback that lived only on
@@ -253,8 +318,11 @@ _Last updated: 2026-09-30 · Godot 4.7 · renderer: gl_compatibility_
     Neon City is the eventual 3D skin over the same model. Do G1 before the
     visual redesign.
   - SelectionOverlay (Android handles + Cut/Copy/Paste bar) in progress — wire/test on device.
-  - Parser: block-level spans for headings/fences; per-block preview cache
-    keyed by content hash.
+  - Parser: per-block preview cache keyed by content hash. (Block/inline
+    unification of the editor + viewer is **done** — the highlighter consumes
+    `parse()["lines"]` + `line_markers()`, no block rules of its own.) Note the
+    highlighter now runs a full `parse()` per text revision (bench 2064 lines
+    ≈98 ms, 6× the old O(N²) rescan) — the cache is the next perf lever.
   - `GraphModel.MAX_NODES` (400) is a stop-gap; aggregation + MultiMesh
     renderer deferred until the visual redesign is decided.
   - MP4/social-video export deferred (no MP4 MovieWriter in this build; AVI
@@ -303,8 +371,9 @@ _Last updated: 2026-09-30 · Godot 4.7 · renderer: gl_compatibility_
   `NeonHighlighter._get_line_syntax_highlighting()` used to `split("\n")` the
   whole note and rescan from line 0 for *every* line. On a Pixel the first note
   open (which sets `code_edit.text`, highlighting all lines) cost **2.6 s of a
-  4.2 s boot**. It now builds the fence-state array once per text revision
-  (`_rebuild_fence_langs`, invalidated via `text_changed`) — linear. Measured
+  4.2 s boot**. It now parses the document once per text revision
+  (`_rebuild_lines` → `MarkdownParser.parse()["lines"]`, invalidated via
+  `text_changed`) — linear. Measured
   with `scripts/dev/bench_highlight.gd`: 2064 lines **605 ms → 79 ms (7.7×)**
   and the gap grows with note size. Phone boot snapshot before the fix:
   `vault-scan 888 ms, tree-build 391 ms, layout 195 ms, first-note 2614 ms`.
@@ -451,7 +520,8 @@ _These OVERRIDE the skill's defaults for this project._
 | `res://scripts/main.gd` | Main wiring: modes, autosave, sync, settings page, smoke test |
 | `res://scripts/common/GameManager.gd` | Autoload — global state, scan, palettes, settings, link index |
 | `res://scripts/common/dev_session.gd` | Static editor/MCP dev-session detection (isolates agent runs from the real vault) |
-| `res://scripts/markdown/markdown_parser.gd` | Unified parser (blocks + inline spans) |
+| `res://scripts/markdown/markdown_parser.gd` | Unified engine: blocks + inline spans + per-line block model (`lines`/`line_markers`) shared by editor & preview |
+| `res://scripts/markdown/markdown_highlighter.gd` | Editor tinting; consumes the parser's inline spans + block line model (no block rules of its own) |
 | `res://scripts/markdown/wiki_links.gd` | Link extract/resolve/backlinks/graph |
 | `res://scripts/common/path_remap.gd` | Static move/remap helpers (unit-tested) |
 | `res://scripts/common/text_utils.gd` | Shared `is_word_char` / `word_bounds` used by editor + selection overlay |
