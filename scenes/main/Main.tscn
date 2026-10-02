@@ -209,28 +209,28 @@ layout_mode = 2
 size_flags_vertical = 3
 script = ExtResource("4_graph")
 
-[node name="SyncPage" parent="Root/WorkspaceMargin/Workspace/Content" instance=ExtResource("14_sync_page")]
+[node name="SyncPage" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=300854830 instance=ExtResource("14_sync_page")]
 visible = false
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="NewNoteDialog" parent="Root/WorkspaceMargin/Workspace/Content" instance=ExtResource("10_new_note")]
+[node name="NewNoteDialog" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=1692825081 instance=ExtResource("10_new_note")]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="VaultPicker" parent="Root/WorkspaceMargin/Workspace/Content" instance=ExtResource("13_vault_picker")]
+[node name="VaultPicker" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=243889067 instance=ExtResource("13_vault_picker")]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="MediaDialog" parent="Root/WorkspaceMargin/Workspace/Content" instance=ExtResource("12_media")]
+[node name="MediaDialog" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=941479800 instance=ExtResource("12_media")]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="TrashPage" parent="Root/WorkspaceMargin/Workspace/Content" instance=ExtResource("15_trash")]
+[node name="TrashPage" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=995322747 instance=ExtResource("15_trash")]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
@@ -251,7 +251,3 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-
-
-
-
