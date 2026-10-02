@@ -400,6 +400,26 @@ func _check_highlighter_ranges() -> void:
 	var r4 := _hl_ranges("| a | b |\n|---|---|\n| 1 | 2 |", 1)
 	_check(r4.has(0) and not r4.has(1), "the table delimiter row is one grey run")
 
+	# heading colour == the preview's accent ramp (accent..accent4) for every
+	# level, so "#".."####" read identically in edit and preview modes.
+	var pal: Dictionary = GameManagerScript.PALETTES["Synthwave"]
+	var ce2 := CodeEdit.new()
+	root.add_child(ce2)
+	var hl2 := NeonHighlighter.new()
+	hl2.colors = {"heading": pal["accent"], "accent": pal["accent"],
+		"accent2": pal["accent2"], "accent3": pal["accent3"], "accent4": pal["accent4"],
+		"text": pal["text"]}
+	ce2.syntax_highlighter = hl2
+	var ramp := [pal["accent"], pal["accent2"], pal["accent3"], pal["accent4"]]
+	var ramp_ok := true
+	for lvl in [1, 2, 3, 4]:
+		ce2.text = "#".repeat(lvl) + " Popular classes"
+		var col: Color = (hl2.call("_get_line_syntax_highlighting", 0) as Dictionary).get(0, {}).get("color", Color.BLACK)
+		if col != ramp[lvl - 1]:
+			ramp_ok = false
+	_check(ramp_ok, "heading colour matches the preview accent ramp for every level")
+	ce2.free()
+
 
 ## Syntax ranges for `line` of `text`, via a throwaway CodeEdit + highlighter.
 func _hl_ranges(text: String, line: int = 0) -> Dictionary:
