@@ -11,6 +11,8 @@ signal metadata_ready
 ## Emitted when the active vault's sync identity changes in place (unpair or
 ## reset words) so the shell can refresh its sync indicator.
 signal sync_identity_changed
+## Emitted when the live CRT overlay master switch changes (see `crt_ui`).
+signal crt_ui_changed(enabled: bool)
 
 const VAULT_DIR := "user://vault"
 const SETTINGS := "user://settings.cfg"
@@ -67,6 +69,7 @@ var font_size := BASE_FONT_SIZE
 var _font_cache: Dictionary = {}
 var graph_levels := 2
 var export_crt := true  # apply CRT overlay to exported PNG/JPEG/GIF
+var crt_ui := true  # live CRT overlay on the UI — master switch for CRT FX
 var open_start_mode := "last"  # "last" or "homepage"
 var last_opened_rel := ""
 var vault_dir := VAULT_DIR
@@ -176,6 +179,22 @@ func set_palette(name: String) -> void:
 func set_export_crt(on: bool) -> void:
 	export_crt = on
 	_save_settings()
+
+## Toggle the live CRT overlay on the UI. This is the master switch for CRT FX:
+## when off the overlay is hidden AND exports skip it too (see
+## `crt_export_allowed`). The per-export choice in `export_crt` is preserved so
+## it comes back unchanged when the overlay is re-enabled.
+func set_crt_ui(on: bool) -> void:
+	if on == crt_ui:
+		return
+	crt_ui = on
+	crt_ui_changed.emit(on)
+	_save_settings()
+
+## True when exports should composite the CRT overlay: the UI overlay must be on
+## (master switch) and the export-only toggle must be on.
+func crt_export_allowed() -> bool:
+	return crt_ui and export_crt
 
 # ------------------------------------------------------------ fonts
 
@@ -693,6 +712,7 @@ func _load_settings() -> void:
 		return
 	palette_name = cf.get_value("ui", "palette", palette_name)
 	export_crt = bool(cf.get_value("export", "crt", export_crt))
+	crt_ui = bool(cf.get_value("ui", "crt_ui", crt_ui))
 	font_name = String(cf.get_value("ui", "font", font_name))
 	font_size = clampi(int(cf.get_value("ui", "font_size", font_size)), MIN_FONT_SIZE, MAX_FONT_SIZE)
 	graph_levels = clampi(int(cf.get_value("ui", "graph_levels", graph_levels)), 1, 10)
@@ -737,6 +757,7 @@ func _save_settings() -> void:
 	var cf := ConfigFile.new()
 	cf.set_value("ui", "palette", palette_name)
 	cf.set_value("export", "crt", export_crt)
+	cf.set_value("ui", "crt_ui", crt_ui)
 	cf.set_value("ui", "font", font_name)
 	cf.set_value("ui", "font_size", font_size)
 	cf.set_value("ui", "graph_levels", graph_levels)

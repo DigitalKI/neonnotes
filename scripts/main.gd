@@ -370,8 +370,15 @@ func _build_dynamic_ui() -> void:
 	export_component.flash_cb = _flash
 	export_component.get_code = func(): return code_edit.text
 	# Share the live CRT overlay material with the Exporter so exports that opt
-	# into CRT FX composite the exact same scanlines/grille/wobble/curve as the UI.
+	# into CRT FX composite the exact same scanline/grille look as the UI.
 	var crt_overlay := get_node_or_null("CrtOverlay")
+	if crt_overlay != null:
+		crt_overlay.visible = GameManager.crt_ui
+	# The Settings page's master switch hides/shows the overlay live; a hidden
+	# CanvasItem is not drawn, so its (now near-free) multiply pass stops too.
+	GameManager.crt_ui_changed.connect(func(on: bool):
+		var ov := get_node_or_null("CrtOverlay")
+		if ov != null: ov.visible = on)
 	Exporter.crt_material_cb = (
 		func() -> Variant:
 			var ov := get_node_or_null("CrtOverlay")

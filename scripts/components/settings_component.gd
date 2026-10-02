@@ -12,6 +12,7 @@ signal close_requested
 @onready var vault_button: Button = %VaultButton
 @onready var sync_button: Button = %SyncButton
 @onready var close_button: Button = %CloseButton
+@onready var crt_ui: CheckButton = %CrtUi
 @onready var crt_export: CheckButton = %CrtExport
 @onready var open_start: OptionButton = %OpenStart
 
@@ -22,6 +23,7 @@ func _ready() -> void:
 	vault_button.pressed.connect(func(): vault_cb.call() if vault_cb.is_valid() else null)
 	sync_button.pressed.connect(func(): sync_cb.call() if sync_cb.is_valid() else null)
 	close_button.pressed.connect(func(): close_requested.emit())
+	crt_ui.toggled.connect(_on_crt_ui_toggled)
 	crt_export.toggled.connect(_on_crt_export_toggled)
 	open_start.add_item("Last opened page")
 	open_start.add_item("Homepage")
@@ -46,8 +48,17 @@ func refresh() -> void:
 	style.select(maxi(0, GameManager.PALETTES.keys().find(GameManager.palette_name)))
 	font_opt.select(maxi(0, GameManager.FONTS.keys().find(GameManager.font_name)))
 	font_size.set_value_no_signal(GameManager.font_size)
-	crt_export.button_pressed = GameManager.export_crt
+	crt_ui.set_pressed_no_signal(GameManager.crt_ui)
+	_sync_crt_export_row()
 	open_start.select(0 if GameManager.open_start_mode == "last" else 1)
+
+## Reflect the master switch on the export row: with the UI overlay off, CRT FX
+## cannot be exported either, so the control is disabled and shown unchecked.
+## The stored per-export preference is left intact and restored on re-enable.
+func _sync_crt_export_row() -> void:
+	var ui_on := GameManager.crt_ui
+	crt_export.disabled = not ui_on
+	crt_export.set_pressed_no_signal(ui_on and GameManager.export_crt)
 
 func _on_open_start_selected(index: int) -> void:
 	GameManager.open_start_mode = "last" if index == 0 else "homepage"
@@ -58,5 +69,14 @@ func _on_graph_levels_changed(value: float) -> void:
 	GameManager._save_settings()
 
 
+func _on_crt_ui_toggled(pressed: bool) -> void:
+	GameManager.set_crt_ui(pressed)
+	_sync_crt_export_row()
+
+
 func _on_crt_export_toggled(pressed: bool) -> void:
+	# The export control is disabled while the master switch is off; ignore any
+	# toggle it might still emit so the stored preference is not clobbered.
+	if not GameManager.crt_ui:
+		return
 	GameManager.set_export_crt(pressed)

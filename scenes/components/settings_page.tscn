@@ -20,27 +20,35 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 20
 text = "⚙ SETTINGS"
 
-[node name="VaultPath" type="Label" parent="VerticalContainer" unique_id=735742386]
+[node name="HBoxContainer" type="HBoxContainer" parent="VerticalContainer" unique_id=399775322]
+layout_mode = 2
+
+[node name="VaultPath" type="Label" parent="VerticalContainer/HBoxContainer" unique_id=735742386]
 unique_name_in_owner = true
 layout_mode = 2
+size_flags_horizontal = 3
 text = "Vault:"
 autowrap_mode = 2
 
-[node name="VaultButton" type="Button" parent="VerticalContainer" unique_id=1085320143]
+[node name="VaultButton" type="Button" parent="VerticalContainer/HBoxContainer" unique_id=1085320143]
 unique_name_in_owner = true
 layout_mode = 2
-text = "📂 Select Vault"
+text = "📂 Select"
 
-[node name="SyncButton" type="Button" parent="VerticalContainer" unique_id=1843274916]
-unique_name_in_owner = true
+[node name="HBoxContainer2" type="HBoxContainer" parent="VerticalContainer" unique_id=1553503690]
 layout_mode = 2
-text = "⇄ Sync / Pair Devices"
 
-[node name="PairedDevices" type="Label" parent="VerticalContainer" unique_id=396453928]
+[node name="PairedDevices" type="Label" parent="VerticalContainer/HBoxContainer2" unique_id=396453928]
 unique_name_in_owner = true
 layout_mode = 2
+size_flags_horizontal = 3
 text = "Paired devices: None"
 autowrap_mode = 2
+
+[node name="SyncButton" type="Button" parent="VerticalContainer/HBoxContainer2" unique_id=1843274916]
+unique_name_in_owner = true
+layout_mode = 2
+text = "⇄ Pair"
 
 [node name="GraphLabel" type="Label" parent="VerticalContainer" unique_id=2012181544]
 layout_mode = 2
@@ -69,24 +77,35 @@ text = "Style"
 unique_name_in_owner = true
 layout_mode = 2
 
-[node name="FontLabel" type="Label" parent="VerticalContainer"]
+[node name="FontLabel" type="Label" parent="VerticalContainer" unique_id=994727623]
 layout_mode = 2
 text = "Font"
 
-[node name="Font" type="OptionButton" parent="VerticalContainer"]
+[node name="Font" type="OptionButton" parent="VerticalContainer" unique_id=106242022]
 unique_name_in_owner = true
 layout_mode = 2
 
-[node name="FontSizeLabel" type="Label" parent="VerticalContainer"]
+[node name="FontSizeLabel" type="Label" parent="VerticalContainer" unique_id=1698925856]
 layout_mode = 2
 text = "Font size"
 
-[node name="FontSize" type="SpinBox" parent="VerticalContainer"]
+[node name="FontSize" type="SpinBox" parent="VerticalContainer" unique_id=403001676]
 unique_name_in_owner = true
 layout_mode = 2
 min_value = 12.0
 max_value = 28.0
 value = 16.0
+
+[node name="CrtUi" type="CheckButton" parent="VerticalContainer" unique_id=2012189997]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Master switch for the live CRT overlay (scanlines + phosphor grille). Off = no overlay on screen AND no CRT FX in exports."
+text = "CRT FX on UI"
+
+[node name="CrtUiHint" type="Label" parent="VerticalContainer" unique_id=2012189998]
+layout_mode = 2
+text = "Live scanline/grille overlay. Turning it off also removes CRT FX from exports."
+autowrap_mode = 2
 
 [node name="CrtExportLabel" type="Label" parent="VerticalContainer" unique_id=2012189999]
 layout_mode = 2
@@ -95,7 +114,7 @@ text = "Exports"
 [node name="CrtExport" type="CheckButton" parent="VerticalContainer" unique_id=2012188888]
 unique_name_in_owner = true
 layout_mode = 2
-tooltip_text = "When enabled, exported PNG/JPEG/GIF images include the neon CRT overlay (scanlines, grille, curve, wobble). Persists between launches."
+tooltip_text = "When enabled, exported PNG/JPEG/GIF images include the neon CRT overlay (scanlines, grille). Only adjustable while CRT FX on UI is on. Persists between launches."
 text = "Apply CRT FX on export"
 
 [node name="CrtExportHint" type="Label" parent="VerticalContainer" unique_id=2012187777]

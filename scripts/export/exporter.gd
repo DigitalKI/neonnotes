@@ -159,10 +159,12 @@ static func _render(host: Control, width: float, doc: Dictionary, animated: bool
 	group.size = Vector2(logical_w, measured)
 	var px_w := int(ceil(logical_w * scale))
 	var px_h := int(ceil(measured * scale))
-	# Optional CRT overlay: reuse the live CrtOverlay material so scanlines,
-	# grille mask, curve and wobble match the app. Applied as a full-viewport
-	# ColorRect on the SubViewport backbuffer (same SCREEN_TEXTURE pass as UI).
-	if GameManager.export_crt:
+	# Optional CRT overlay: reuse the live CrtOverlay material so the scanline
+	# and grille pattern match the app. Applied as a full-viewport ColorRect on
+	# top of the SubViewport content (the same multiplicative overlay as the UI;
+	# no screen-texture read). Gated by the UI master switch, so turning the
+	# overlay off also removes it from exports.
+	if GameManager.crt_export_allowed():
 		_add_crt_overlay(viewport, px_w, px_h)
 	# The viewport is sized in physical pixels (already scaled by `scale`), but
 	# the background ColorRect sits OUTSIDE the scaled `group` node, so it must
@@ -207,10 +209,8 @@ static func _add_crt_overlay(viewport: SubViewport, px_w: int, px_h: int) -> Col
 		if sh != null and sh is Shader:
 			var sm := ShaderMaterial.new()
 			sm.shader = sh
-			sm.set_shader_parameter("curve", 0.011)
 			sm.set_shader_parameter("scanline_strength", 0.076)
 			sm.set_shader_parameter("mask_strength", 0.243)
-			sm.set_shader_parameter("wobble_strength", 0.155)
 			sm.set_shader_parameter("mask_type", 2)
 			mat = sm
 	overlay.material = mat

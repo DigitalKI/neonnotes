@@ -16,10 +16,8 @@
 
 [sub_resource type="ShaderMaterial" id="ShaderMat_crt"]
 shader = ExtResource("3_crt")
-shader_parameter/curve = 0.0110000005225
 shader_parameter/scanline_strength = 0.07600000361
 shader_parameter/mask_strength = 0.2430000115425
-shader_parameter/wobble_strength = 0.1550000073625
 shader_parameter/mask_type = 2
 
 [node name="App" type="Control" unique_id=1238224295]
