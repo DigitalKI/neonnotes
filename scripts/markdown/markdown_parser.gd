@@ -9,6 +9,20 @@ enum SpanType { TEXT, EMPHASIS, STRONG, BOLD_ITALIC, CODE_SPAN, STRIKE, HIGHLIGH
 
 const QUOTE_CONTINUATION_MAX := 200
 
+# ---- Shared block-level line model ---------------------------------------
+# parse() records, for every source line, which block construct it belongs to
+# (its "lines" key), produced in the SAME walk that builds the block list.
+# NeonHighlighter consumes that classification instead of re-deriving block
+# rules per line, so the editor tints exactly the constructs the preview
+# renders — one engine, no duplicated fence/table/quote/heading/list logic.
+enum BlockLine { PLAIN, FRONT_MATTER, FENCE, CODE, CHART, TABLE_DELIM, TABLE_ROW,
+	QUOTE, HEADING, LIST, HR, IMAGE }
+
+## Block-marker span kinds emitted by line_markers(); the highlighter maps each
+## to a palette colour. Offsets are into the *raw* source line.
+enum BlockMark { FENCE, CODE_TEXT, CHART_KEY, TABLE_PIPE, TABLE_DELIM, QUOTE_MARK,
+	QUOTE_TEXT, HEADING_MARK, LIST_MARK }
+
 ## Break a single source line into non-overlapping inline spans, in source
 ## order. Semantic spans carry: { type, start, length, content_start,
 ## content_length [, target] } where start/length cover the whole construct
@@ -246,6 +260,81 @@ static func _parse_callout(joined: String):
 		"text": body,
 	}
 
+## True when a line is a table's `|---|:--:|` delimiter row (also true for a
+## blank line, matching the historical inline check used by parse()).
+static func _is_table_delim(line: String) -> bool:
+	return line.strip_edges().replace("|", "").replace("-", "").replace(":", "").strip_edges() == ""
+
+static var _re_list: RegEx = null
+static var _re_image: RegEx = null
+
+static func _list_re() -> RegEx:
+	if _re_list == null:
+		_re_list = RegEx.create_from_string("^(?:[-*+]\\s+|(\\d+)[.)]\\s+)(.*)$")
+	return _re_list
+
+static func _image_re() -> RegEx:
+	if _re_image == null:
+		_re_image = RegEx.create_from_string("^!\\[([^\\]]*)\\]\\(([^)]*)\\)\\s*$")
+	return _re_image
+
+## Block-level marker spans for one source line, given its BlockLine kind from
+## parse()["lines"]. The highlighter colours these directly, so marker geometry
+## lives with the block rules instead of being re-derived in the editor.
+static func line_markers(kind: int, text: String) -> Array[Dictionary]:
+	var spans: Array[Dictionary] = []
+	match kind:
+		BlockLine.FENCE:
+			# tint the opening/closing backtick run (and its language suffix)
+			var idx := text.find("```")
+			if idx >= 0:
+				var run := 3
+				while idx + run < text.length() and text[idx + run] == "`":
+					run += 1
+				spans.append({"type": BlockMark.FENCE, "start": idx, "length": run})
+		BlockLine.CODE:
+			spans.append({"type": BlockMark.CODE_TEXT, "start": 0, "length": text.length()})
+		BlockLine.CHART:
+			var colon := text.find(":")
+			if colon > 0 and not text.strip_edges().begins_with("```"):
+				var key := text.substr(0, colon).strip_edges().to_lower()
+				if key in ["type", "title", "labels", "values"]:
+					spans.append({"type": BlockMark.CHART_KEY, "start": 0, "length": colon + 1})
+		BlockLine.TABLE_DELIM:
+			spans.append({"type": BlockMark.TABLE_DELIM, "start": 0,
+				"length": text.length() - text.lstrip(" ").length()})
+		BlockLine.TABLE_ROW:
+			var start := 0
+			while true:
+				var p := text.find("|", start)
+				if p == -1:
+					break
+				spans.append({"type": BlockMark.TABLE_PIPE, "start": p, "length": 1})
+				start = p + 1
+		BlockLine.QUOTE:
+			var qs := text.find(">")
+			if qs >= 0:
+				spans.append({"type": BlockMark.QUOTE_MARK, "start": qs, "length": 1})
+				if text.length() > qs + 1:
+					spans.append({"type": BlockMark.QUOTE_TEXT, "start": qs + 1,
+						"length": text.length() - qs - 1})
+		BlockLine.HEADING:
+			var off := text.length() - text.lstrip(" ").length()
+			var hs := 0
+			while off + hs < text.length() and text[off + hs] == "#":
+				hs += 1
+			if hs > 0:
+				spans.append({"type": BlockMark.HEADING_MARK, "start": off, "length": hs})
+		BlockLine.LIST:
+			var m := _list_re().search(text.strip_edges())
+			if m != null:
+				var off := text.length() - text.lstrip(" ").length()
+				# Marker runs to the item text; the parser's regex captures the
+				# rest in group 2, so subtract it to get the "- " / "1. " prefix.
+				var prefix_len := m.get_string().length() - m.get_string(2).length()
+				spans.append({"type": BlockMark.LIST_MARK, "start": off, "length": prefix_len})
+	return spans
+
 static func _scan_code_span(text: String, p: int) -> Dictionary:
 	var n := text.length()
 	var ticks := 1
@@ -262,6 +351,16 @@ static func parse(text: String) -> Dictionary:
 	var meta: Dictionary = {}
 	var blocks: Array[Dictionary] = []
 	var lines: PackedStringArray = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+	# One classification entry per source line, filled in the same walk that
+	# builds `blocks`; the highlighter reads it instead of re-deriving changes.
+	var lines_info: Array[Dictionary] = []
+	lines_info.resize(lines.size())
+	for li in lines.size():
+		lines_info[li] = {"kind": BlockLine.PLAIN, "lang": ""}
+	var set_line := func(idx: int, kind: int, lang: String) -> void:
+		if idx >= 0 and idx < lines_info.size():
+			lines_info[idx]["kind"] = kind
+			lines_info[idx]["lang"] = lang
 	var i := 0
 	if lines.size() > 0 and lines[0].strip_edges() == "---":
 		i = 1
@@ -274,6 +373,8 @@ static func parse(text: String) -> Dictionary:
 					value = value.substr(1, value.length() - 2).replace("\\\"", "\"").replace("\\\\", "\\")
 				meta[key] = value
 			i += 1
+		for li in range(0, mini(i, lines.size())):
+			lines_info[li]["kind"] = BlockLine.FRONT_MATTER
 		if i < lines.size(): i += 1
 	var para: Array[String] = []
 	var flush := func() -> void:
@@ -287,10 +388,17 @@ static func parse(text: String) -> Dictionary:
 			flush.call(); i += 1; continue
 		if t.begins_with("```"):
 			flush.call()
+			set_line.call(i, BlockLine.FENCE, "")
 			var lang := t.substr(3).strip_edges(); i += 1
 			var body: Array[String] = []
-			while i < lines.size() and lines[i].strip_edges() != "```": body.append(lines[i]); i += 1
-			if i < lines.size(): i += 1
+			var body_kind := BlockLine.CHART if lang.to_lower() == "chart" else BlockLine.CODE
+			while i < lines.size() and lines[i].strip_edges() != "```":
+				body.append(lines[i])
+				set_line.call(i, body_kind, lang)
+				i += 1
+			if i < lines.size():
+				set_line.call(i, BlockLine.FENCE, "")
+				i += 1
 			if lang.to_lower() == "chart":
 				var ct := "bar"; var title := ""; var labels: Array[String] = []; var values: Array[float] = []
 				for row in body:
@@ -310,12 +418,16 @@ static func parse(text: String) -> Dictionary:
 		if t.begins_with("#"):
 			var n := 0
 			while n < t.length() and t[n] == "#": n += 1
-			if n <= 4 and n < t.length() and t[n] == " ": flush.call(); blocks.append({"type":"heading", "level":n, "text":t.substr(n).strip_edges()}); i += 1; continue
-		if t == "---" or t == "***" or t == "___": flush.call(); blocks.append({"type":"hr"}); i += 1; continue
+			if n <= 4 and n < t.length() and t[n] == " ":
+				flush.call(); blocks.append({"type":"heading", "level":n, "text":t.substr(n).strip_edges()})
+				set_line.call(i, BlockLine.HEADING, ""); i += 1; continue
+		if t == "---" or t == "***" or t == "___":
+			flush.call(); blocks.append({"type":"hr"}); set_line.call(i, BlockLine.HR, ""); i += 1; continue
 		# image embed: ![alt](vault-relative path) on its own line; empty src = placeholder
-		var img_re := RegEx.new(); img_re.compile("^!\\[([^\\]]*)\\]\\(([^)]*)\\)\\s*$")
-		var im := img_re.search(t)
-		if im: flush.call(); blocks.append({"type":"image", "alt":im.get_string(1), "src":im.get_string(2).strip_edges()}); i += 1; continue
+		var im := _image_re().search(t)
+		if im:
+			flush.call(); blocks.append({"type":"image", "alt":im.get_string(1), "src":im.get_string(2).strip_edges()})
+			set_line.call(i, BlockLine.IMAGE, ""); i += 1; continue
 		if t.begins_with(">"):
 			flush.call()
 			# ---- multiline / nested block quote (+ Obsidian-style callout) ----
@@ -325,6 +437,7 @@ static func parse(text: String) -> Dictionary:
 			# decoupled below.
 			var qlines: Array[String] = []
 			while i < lines.size() and lines[i].strip_edges().begins_with(">"):
+				set_line.call(i, BlockLine.QUOTE, "")
 				var raw := lines[i]
 				var q := raw.strip_edges()
 				var depth := 0
@@ -340,13 +453,15 @@ static func parse(text: String) -> Dictionary:
 				blocks.append(callout)
 				continue
 			blocks.append({"type": "quote", "text": joined}); continue
-		if t.begins_with("|") and t.ends_with("|") and i + 1 < lines.size() and lines[i + 1].strip_edges().replace("|", "").replace("-", "").replace(":", "").strip_edges() == "":
+		if t.begins_with("|") and t.ends_with("|") and i + 1 < lines.size() and _is_table_delim(lines[i + 1]):
 			flush.call(); var rows: Array[PackedStringArray] = []
 			while i < lines.size() and lines[i].strip_edges().begins_with("|"):
+				set_line.call(i, BlockLine.TABLE_DELIM if _is_table_delim(lines[i]) else BlockLine.TABLE_ROW, "")
 				var cells := lines[i].strip_edges().trim_prefix("|").trim_suffix("|").split("|")
 				var packed := PackedStringArray(); for c in cells: packed.append(c.strip_edges())
 				rows.append(packed); i += 1
-				if i < lines.size() and lines[i].strip_edges().replace("|", "").replace("-", "").replace(":", "").strip_edges() == "":
+				if i < lines.size() and _is_table_delim(lines[i]):
+					set_line.call(i, BlockLine.TABLE_DELIM, "")
 					i += 1  # skip the |---|---| delimiter row; not a data row
 			if rows.size() == 1:
 				var only_delims := true
@@ -356,14 +471,16 @@ static func parse(text: String) -> Dictionary:
 				if only_delims:
 					continue  # lone delimiter line: no header, no table
 			blocks.append({"type":"table", "rows":rows}); continue
-		var list_match := RegEx.new(); list_match.compile("^(?:[-*+]\\s+|(\\d+)[.)]\\s+)(.*)$"); var m := list_match.search(t)
+		var list_match := _list_re()
+		var m := list_match.search(t)
 		if m:
 			flush.call(); var ordered := t[0].is_valid_int(); var items: Array[String] = []; var numbers: Array[int] = []
 			while i < lines.size():
 				var mm := list_match.search(lines[i].strip_edges()); if mm == null: break
+				set_line.call(i, BlockLine.LIST, "")
 				items.append(mm.get_string(2)); i += 1
 				if ordered: numbers.append(int(mm.get_string(1)))
 			blocks.append({"type":"list", "ordered":ordered, "items":items, "numbers":numbers}); continue
 		para.append(t); i += 1
 	flush.call()
-	return {"meta":meta, "blocks":blocks}
+	return {"meta":meta, "blocks":blocks, "lines":lines_info}

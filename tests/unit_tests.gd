@@ -11,6 +11,7 @@ func _init() -> void:
 	_check_markdown_parser()
 	_check_markdown_spans()
 	_check_markdown_blocks()
+	_check_markdown_line_model()
 	_check_html_exporter()
 	_check_move_path_remap()
 	_check_graph_model()
@@ -305,6 +306,65 @@ func _check_tag_suggest() -> void:
 	_check(TagMatchScript.score("jw", "j-w") >= 0, "near-duplicate tag surfaces (jw / j-w)")
 	_check(TagMatchScript.score("coding", "code") >= 0, "near-duplicate tag surfaces (coding / code)")
 	_check(TagMatchScript.score("home", "work") < 0, "unrelated tag does not surface")
+
+## Block-level line model: NeonHighlighter consumes parse()["lines"] +
+## line_markers() instead of re-deriving block rules, so block classification is
+## tested here once, not per view. The editor and the preview must agree on what
+## a heading / fence / table / quote / list is.
+func _check_markdown_line_model() -> void:
+	var BL := MarkdownParser.BlockLine
+	var BM := MarkdownParser.BlockMark
+
+	# fenced code: open fence / code body / close fence
+	var code := MarkdownParser.parse("```js\nlet x = 1\n```")
+	var cl: Array = code["lines"]
+	_check(cl.size() == 3, "line model covers every source line")
+	_check(cl[0]["kind"] == BL.FENCE and cl[1]["kind"] == BL.CODE and cl[2]["kind"] == BL.FENCE,
+		"fence lines classified around the code body")
+	_check(cl[1]["lang"] == "js", "code body carries its fence language")
+
+	# chart body rows expose the `key:` marker the editor tints
+	var chart := MarkdownParser.parse("```chart\ntype: line\nvalues: 1, 2\n```")
+	var ch: Array = chart["lines"]
+	_check(ch[1]["kind"] == BL.CHART and ch[1]["lang"] == "chart", "chart body classified as chart")
+	var ck: Variant = _mark_of(MarkdownParser.line_markers(ch[1]["kind"], "type: line"), BM.CHART_KEY)
+	_check(ck != null and ck["start"] == 0 and ck["length"] == 5, "chart key marker spans `type:`")
+
+	# heading vs a hash that is not a heading (no space) -> plain, so the editor
+	# tints exactly what the preview renders
+	var hd := MarkdownParser.parse("# Title\n#nospace")
+	_check(hd["lines"][0]["kind"] == BL.HEADING and hd["lines"][1]["kind"] == BL.PLAIN,
+		"heading requires the space the preview requires")
+	var hm: Variant = _mark_of(MarkdownParser.line_markers(hd["lines"][0]["kind"], "# Title"), BM.HEADING_MARK)
+	_check(hm != null and hm["start"] == 0 and hm["length"] == 1, "heading marker spans the hashes")
+
+	# table: header row + delimiter; a pipe line with no delimiter is a paragraph
+	var tb := MarkdownParser.parse("| a | b |\n|---|---|\n| 1 | 2 |")
+	var tl: Array = tb["lines"]
+	_check(tl[0]["kind"] == BL.TABLE_ROW and tl[1]["kind"] == BL.TABLE_DELIM and tl[2]["kind"] == BL.TABLE_ROW,
+		"table header/delimiter/data classified")
+	_check(MarkdownParser.line_markers(tl[0]["kind"], "| a | b |").size() == 3, "table row emits one marker per pipe")
+	var stray := MarkdownParser.parse("| not | a table |")
+	_check(stray["lines"][0]["kind"] == BL.PLAIN, "pipe row without a delimiter stays plain")
+
+	# quote + list markers
+	var q := MarkdownParser.parse("> quoted\n> [!tip] t")
+	_check(q["lines"][0]["kind"] == BL.QUOTE and q["lines"][1]["kind"] == BL.QUOTE, "quote lines classified")
+	_check(_mark_of(MarkdownParser.line_markers(q["lines"][0]["kind"], "> quoted"), BM.QUOTE_MARK) != null,
+		"quote marker spans the `>`")
+	var li := MarkdownParser.parse("- one\n2. two")
+	_check(li["lines"][0]["kind"] == BL.LIST and li["lines"][1]["kind"] == BL.LIST, "list items classified")
+	var lm: Variant = _mark_of(MarkdownParser.line_markers(li["lines"][0]["kind"], "- one"), BM.LIST_MARK)
+	_check(lm != null and lm["start"] == 0 and lm["length"] == 2, "list marker spans the bullet")
+
+
+## First block-marker span of the given kind, or null.
+func _mark_of(markers: Array, mtype: int):
+	for m in markers:
+		if int(m["type"]) == mtype:
+			return m
+	return null
+
 
 func _check(ok: bool, label: String) -> void:
 	if ok:
