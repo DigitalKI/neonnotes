@@ -360,6 +360,9 @@ func _build_dynamic_ui() -> void:
 	slash_menu.name = "SlashMenu"
 	add_child(slash_menu)
 	slash_menu.build(code_edit, _flush_save)
+	slash_menu.applied.connect(func():
+		if selection_overlay:
+			selection_overlay.hide_overlay())
 
 	# ExportComponent owns the complete menu and the shared action IDs.
 	# Do not pre-populate this PopupMenu here: duplicate labels with different
@@ -503,6 +506,9 @@ func _on_selection_overlay_action(id: String) -> void:
 			_flash("Copied")
 		"paste":
 			_flash("Pasted")
+		"format":
+			var caret: Vector2 = code_edit.get_global_position() + code_edit.get_caret_draw_pos()
+			slash_menu.open_for_selection(caret + Vector2(0, 12))
 
 func _show_selection_menu() -> void:
 	var menu := code_edit.get_menu()

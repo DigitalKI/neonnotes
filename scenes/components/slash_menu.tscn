@@ -5,12 +5,14 @@
 [node name="SlashMenu" type="Node"]
 script = ExtResource("1_slash")
 
-[node name="SlashPanel" type="PopupPanel" parent="."]
+[node name="SlashPopup" type="PopupMenu" parent="."]
 unique_name_in_owner = true
 
-[node name="SlashList" type="ItemList" parent="SlashPanel"]
+[node name="FormatMenu" type="PopupMenu" parent="SlashPopup"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(360, 0)
-max_columns = 2
-fixed_column_width = 175
-auto_height = true
+
+[node name="EffectsMenu" type="PopupMenu" parent="SlashPopup"]
+unique_name_in_owner = true
+
+[node name="InsertMenu" type="PopupMenu" parent="SlashPopup"]
+unique_name_in_owner = true

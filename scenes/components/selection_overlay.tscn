@@ -48,8 +48,16 @@ layout_mode = 2
 focus_mode = 0
 text = "Paste"
 
+[node name="FormatBtn" type="Button" parent="ActionBar"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "/ Format"
+
 [connection signal="pressed" from="ActionBar/CutBtn" to="." method="_on_action_pressed" binds=["cut"]]
 
 [connection signal="pressed" from="ActionBar/CopyBtn" to="." method="_on_action_pressed" binds=["copy"]]
 
 [connection signal="pressed" from="ActionBar/PasteBtn" to="." method="_on_action_pressed" binds=["paste"]]
+
+[connection signal="pressed" from="ActionBar/FormatBtn" to="." method="_on_action_pressed" binds=["format"]]

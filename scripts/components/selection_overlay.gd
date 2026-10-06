@@ -4,7 +4,7 @@ extends Control
 ## Root ignores mouse so editor scroll/caret still work; only handles and the
 ## action bar capture input (MOUSE_FILTER_STOP).
 
-signal action(id: String) # "cut"|"copy"|"paste"
+signal action(id: String) # "cut"|"copy"|"paste"|"format"
 
 const HANDLE_SIZE := Vector2(44, 44)
 const HANDLE_RADIUS := 10.0
@@ -330,4 +330,5 @@ func _on_action_pressed(id: String) -> void:
 			_editor.paste()
 			hide_overlay()
 	action.emit(id)
-	_editor.grab_focus.call_deferred()
+	if id != "format":
+		_editor.grab_focus.call_deferred()
