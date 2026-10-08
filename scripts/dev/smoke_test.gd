@@ -230,7 +230,7 @@ func _run_smoke() -> void:
 			break
 	m.vault_tree.select_note(anchor_note, false)
 	m.new_dialog.name_field.text = "placed_test"
-	m._create_note()
+	m.new_dialog._create_note()
 	var root_order: Array = GameManager.order.get("", [])
 	var ii := root_order.find(anchor_note)
 	fails += _check(ii >= 0 and ii + 1 < root_order.size() and root_order[ii + 1] == "placed_test.md",

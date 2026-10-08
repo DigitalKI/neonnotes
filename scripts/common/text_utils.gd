@@ -13,6 +13,17 @@ static func is_word_char(ch: String) -> bool:
 	return (code >= 48 and code <= 57) or (code >= 65 and code <= 90) or (code >= 97 and code <= 122)
 
 
+## Escape regex metacharacters in `s` for RegEx.create_from_string patterns.
+static func re_escape(s: String) -> String:
+	var out := ""
+	for ch in s:
+		if "\\.^$|?*+()[]{}".contains(ch):
+			out += "\\" + ch
+		else:
+			out += ch
+	return out
+
+
 ## Bounds `[start, end)` of the word touching `col` in `text`.
 ## Returns `Vector2i(-1, -1)` when `col` is out of range or not part of a word.
 ## With `backoff_eol`, a caret sitting just past a word (typically end-of-line)

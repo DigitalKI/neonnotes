@@ -33,6 +33,7 @@ const PAGE_TRASH := "trash"
 
 var sidebar: PanelContainer
 @onready var new_dialog: NewNoteDialog = %NewNoteDialog
+@onready var media_dialog: MediaDialog = %MediaDialog
 @onready var vault_picker: VaultPicker = %VaultPicker
 @onready var trash_page: TrashPage = %TrashPage
 var sync_service: SyncService
@@ -333,10 +334,9 @@ func _build_dynamic_ui() -> void:
 	toolbar.more_btn.visible = true  # always available (delete/export/etc. on desktop too)
 	# pages (new note, vault picker, media picker, sync) are scene-authored
 	# instances inside %Content; only their signals are connected here.
-	new_dialog.create_requested.connect(_create_note)
+	new_dialog.bind(vault_tree, editor, _refresh_list, _flash)
 	vault_picker.folder_chosen.connect(_on_vault_selected)
-	media_dialog.media_selected.connect(_use_local_media)
-	media_dialog.device_requested.connect(_choose_device_image)
+	media_dialog.bind(editor, func(rel: String): sync_service.note_saved(rel), _flash)
 	media_dialog.close_requested.connect(_close_page)
 	sync_page.close_requested.connect(_close_sync)
 	sync_page.bind_service(sync_service)
@@ -416,40 +416,6 @@ func _on_note_selected(fname: String) -> void:
 func _on_new_note() -> void:
 	_open_page(PAGE_NEW_NOTE, new_dialog)
 	new_dialog.begin()
-
-func _create_note() -> void:
-	var name := new_dialog.name_field.text.strip_edges().trim_suffix("/")
-	if name == "" or name.contains(".."):
-		return
-	var fname := (name if name.ends_with(".md") else name + ".md")
-	# Placement: directly below the selected row. A selected note keeps its
-	# folder and the new note lands right after it; a selected folder takes the
-	# note as its first child; with nothing selected the note goes to the vault
-	# root at the end of the list.
-	var dir := ""
-	var neighbor := ""
-	var first_child := false
-	var sel := vault_tree.selected_item()
-	if sel != null and sel != vault_tree.side_tree.get_root():
-		var sel_rel := vault_tree.node_rel(sel)
-		if sel_rel.ends_with(".md"):
-			dir = sel_rel.get_base_dir()
-			neighbor = sel_rel
-		elif sel_rel != "":
-			dir = sel_rel
-			first_child = true
-	fname = (dir + "/" if dir != "" else "") + fname
-	if not FileAccess.file_exists(GameManager.vault_abs() + "/" + fname):
-		var title := fname.get_file().trim_suffix(".md")
-		var initial := editor.note_template(title)
-		var initialized := NoteMetadata.update(NoteMetadata.body(initial), initial,
-			title, [], Time.get_datetime_string_from_system(true, false))
-		GameManager.write_note(fname, initialized)
-		editor.begin_new_note(fname, initialized)
-	GameManager.scan_notes()
-	_refresh_list()
-	vault_tree.order_new_note(fname, dir, neighbor, first_child)
-	vault_tree.select_note(fname)
 
 ## The tree owns its delete button and the whole deletion orchestration; Main
 ## only keeps the ⋮ menu's Delete entry in sync with the tree selection.
@@ -545,168 +511,26 @@ func _open_wikilink(target: String) -> void:
 		# Obsidian-style unfollowed link: clicking it creates the note so the
 		# link resolves from now on. Same folder as the referencing note unless
 		# the target itself names a folder path.
-		fname = _create_note_for_link(target)
+		fname = new_dialog.create_note_for_link(target)
 		if fname == "":
 			status_bar.flash("✗ Note not found: " + target)
 			return
 	vault_tree.select_note(fname)
 
-## Turn an unresolved wiki-link target into a new note file. Returns the created
-## note's relative path, or "" if the target is not a valid note name.
-func _create_note_for_link(target: String) -> String:
-	var rel := target.strip_edges().trim_suffix("/")
-	if rel == "" or rel.contains("..") or rel.contains("\\"):
-		return ""
-	# Strip a leading ./ and any anchor-style suffix; keep folder components.
-	while rel.begins_with("./"):
-		rel = rel.substr(2)
-	rel = rel.trim_suffix(".md")
-	if rel == "":
-		return ""
-	# No folder in the target: place it next to the referencing note.
-	if not rel.contains("/"):
-		var cur := GameManager.current_rel
-		var dir := cur.get_base_dir() if cur != "" and GameManager.notes.has(cur) else ""
-		rel = (dir + "/" if dir != "" else "") + rel
-	var fname := rel + ".md"
-	if FileAccess.file_exists(GameManager.vault_abs() + "/" + fname):
-		return fname  # Raced into existence elsewhere; just open it.
-	var title := rel.get_file()
-	var initial := editor.note_template(title)
-	# save_source marks the form saved so a later flush of the *previous*
-	# editor buffer cannot overwrite the new file's front matter.
-	editor.save_source(fname, initial)
-	GameManager.scan_notes()
-	_refresh_list()
-	var dir := rel.get_base_dir()
-	vault_tree.order_new_note(fname, dir, "", false)
-	vault_tree.select_note(fname)
-	status_bar.flash("Created " + fname)
-	return fname
-
 # ------------------------------------------------- image embeds (v3)
 
-var image_dialog: FileDialog
-@onready var media_dialog: MediaDialog = %MediaDialog
-var _image_target_src := ""
-
-## An image embed was clicked in the preview: choose an existing vault asset or
-## import a new image from the device/machine.
-
-## vault/media/ and the markdown is updated + saved.
+## An image embed was clicked in the preview: the media page owns the whole
+## flow (library browse, device import, embed rewrite); Main only routes.
 func _on_image_click(src: String) -> void:
 	if editor.is_help() or GameManager.current_file == "":
 		return
-	_image_target_src = src
-	_show_media_dialog()
-
-func _show_media_dialog() -> void:
-	var media_dir := GameManager.vault_abs().path_join("media")
-	# Sync/import failures can leave empty media files behind. Clean these up
-	# before building the library so broken entries are never presented.
-	MediaImport.cleanup_empty_media(media_dir)
-	var files := MediaImport.collect_media_images(media_dir)
-	# Page shell (heading, scroll, device button) is scene-authored in
-	# scenes/components/media_dialog.tscn; only the per-file list is dynamic.
 	_open_page(PAGE_MEDIA, media_dialog)
-	media_dialog.begin(files)
+	media_dialog.open_for(src)
 
 ## The image FileDialog is the only real Window left (it must browse files);
 ## every other surface is a page that inherits the shell styling directly.
 func _theme_dialogs() -> void:
-	if image_dialog != null:
-		DialogTheme.apply(image_dialog)
-
-func _use_local_media(path: String) -> void:
-	var t := code_edit.text
-	var pattern := "!\\[[^\\]]*\\]\\(\\s*" + ("" if _image_target_src == "" else vault_tree._re_escape(_image_target_src)) + "\\s*\\)"
-	var m := RegEx.create_from_string(pattern).search(t)
-	if m == null:
-		_flash("✗ Could not find image embed")
-		return
-	var rel := "media/" + path.get_file()
-	code_edit.text = t.substr(0, m.get_start()) + "![](" + rel + ")" + t.substr(m.get_end())
-	var media_source := editor.compose_note_source()
-	editor.save_source(GameManager.current_rel, media_source)
-	sync_service.note_saved(GameManager.current_rel)
-	status_bar.flash("✓ Saved " + GameManager.current_rel)
-	editor.render_preview()
-
-func _choose_device_image() -> void:
-	_close_page()
-	if image_dialog == null:
-		image_dialog = FileDialog.new()
-		image_dialog.name = "ImageDialog"
-		image_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-		image_dialog.access = FileDialog.ACCESS_FILESYSTEM
-		# Android's sandbox cannot enumerate shared storage through Godot's
-		# desktop picker. The native picker uses the Storage Access Framework and
-		# returns a readable, temporary file path without broad storage access.
-		if OS.get_name() == "Android":
-			image_dialog.use_native_dialog = true
-		image_dialog.title = "CHOOSE IMAGE"
-		# Include upper-case suffixes explicitly: Android/Desktop pickers may apply
-		# these filters case-sensitively (camera files commonly use .JPG).
-		image_dialog.filters = ["*.png,*.PNG,*.jpg,*.JPG,*.jpeg,*.JPEG,*.webp,*.WEBP,*.gif,*.GIF ; IMAGE FILES"]
-		image_dialog.file_selected.connect(_on_image_selected)
-		DialogTheme.apply(image_dialog)
-		add_child(image_dialog)
-	var viewport_size := get_viewport().get_visible_rect().size
-	var dialog_size := Vector2i(
-		int(min(700.0, max(300.0, viewport_size.x * 0.92))),
-		int(min(500.0, max(280.0, viewport_size.y * 0.78))))
-	image_dialog.popup_centered(dialog_size)
-
-func _on_image_selected(path: String) -> void:
-	var media_dir := GameManager.vault_abs() + "/media"
-	DirAccess.make_dir_recursive_absolute(media_dir)
-	# Debug aid: some SAF-backed pickers pass a content:// URI whose last
-	# segment is an internal id rather than the display name. Log the exact
-	# path so we know whether this is the folder-dependent case.
-	print("[NN image] selected path='%s' file='%s'" % [path, path.get_file()])
-	# Naming + import live in MediaImport (scripts/common/media_import.gd); the
-	# embed rewrite + note save below stay with the editor state.
-	var is_content_uri := path.begins_with("content://")
-	var dest := MediaImport.media_dest_for(media_dir, path.get_file(), is_content_uri)
-	var wrote := MediaImport.import_image(path, dest, _flash)
-	if not wrote:
-		_flash("✗ Could not import image")
-		return
-	var rel := "media/" + dest.get_file()
-	# update the embed that was clicked: empty-src form `![…]( )` when the
-	# placeholder was used, otherwise the exact src (tolerating whitespace)
-	var t := code_edit.text
-	var re: RegEx
-	if _image_target_src == "":
-		re = RegEx.create_from_string("!\\[[^\\]]*\\]\\(\\s*\\)")
-	else:
-		re = RegEx.create_from_string("!\\[[^\\]]*\\]\\(\\s*" + vault_tree._re_escape(_image_target_src) + "\\s*\\)")
-	var m := re.search(t)
-	# The slash menu inserts `![]( )`; match that exact empty placeholder,
-	# including its optional whitespace, before falling back to another image.
-	if _image_target_src == "":
-		var empty_embed := RegEx.create_from_string("!\\[[^\\]]*\\]\\(\\s*\\)")
-		m = empty_embed.search(t)
-	if m == null:
-		var fallback := RegEx.create_from_string("(?m)^[^\\n]*!\\[[^\\]]*\\]\\([^\\n]*\\)[^\\n]*$")
-		m = fallback.search(t)
-	if m:
-		code_edit.text = t.substr(0, m.get_start()) + "![](" + rel + ")" + t.substr(m.get_end())
-		print("[NN image] embed updated rel='%s'" % rel)
-	else:
-		_flash("✗ Could not find image embed")
-		print("[NN image] embed not found; target='%s' rel='%s'" % [_image_target_src, rel])
-		return
-	# save directly — the click comes from preview mode where the editor is
-	# hidden and _flush_save would bail out
-	if GameManager.current_rel != "":
-		var media_source := editor.compose_note_source()
-		editor.save_source(GameManager.current_rel, media_source)
-		status_bar.flash("✓ Saved " + GameManager.current_rel)
-		sync_service.note_saved(GameManager.current_rel)
-	if not editor.source_mode:
-		editor.render_preview()
-	_flash("🖼 " + rel)
+	media_dialog.apply_theme()
 
 func _toggle_backlinks() -> void:
 	vault_tree.toggle_backlinks()
