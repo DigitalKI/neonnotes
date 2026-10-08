@@ -1,5 +1,5 @@
 class_name StatusBarComponent
-extends PanelContainer
+extends MarginContainer
 ## Compact status bar with a tiny sync health indicator.
 @onready var label: Label = %StatusLabel
 @onready var _sync_dot: Label = %SyncStatus

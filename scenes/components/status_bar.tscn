@@ -2,25 +2,34 @@
 
 [ext_resource type="Script" uid="uid://bovvyacmsxdag" path="res://scripts/components/status_bar_component.gd" id="1_comp"]
 
-[node name="StatusBar" type="PanelContainer" unique_id=940312385]
-custom_minimum_size = Vector2(33, 0)
-offset_right = 33.0
-offset_bottom = 29.0
+[node name="StatusBar" type="MarginContainer" unique_id=220814483]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_right = 5
 script = ExtResource("1_comp")
 
-[node name="SyncStatus" type="Label" parent="."]
-unique_name_in_owner = true
+[node name="Hseparator" type="HBoxContainer" parent="." unique_id=745494669]
 layout_mode = 2
-theme_override_font_sizes/font_size = 10
-custom_minimum_size = Vector2(14, 14)
-horizontal_alignment = 1
-vertical_alignment = 1
-text = "●"
 
-[node name="StatusLabel" type="Label" parent="." unique_id=283039145]
+[node name="StatusLabel" type="Label" parent="Hseparator" unique_id=283039145]
 unique_name_in_owner = true
 layout_mode = 2
+size_flags_horizontal = 3
 theme_override_colors/font_color = Color(0.4, 0.85, 0.95, 1)
 theme_override_font_sizes/font_size = 12
 text = "Ready"
-size_flags_horizontal = 3
+clip_text = true
+text_overrun_behavior = 3
+
+[node name="SyncStatus" type="Label" parent="Hseparator" unique_id=834030380]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(28, 14)
+layout_mode = 2
+theme_override_font_sizes/font_size = 10
+text = "●"
+horizontal_alignment = 1
+vertical_alignment = 1

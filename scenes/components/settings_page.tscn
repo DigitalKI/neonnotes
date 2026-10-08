@@ -3,8 +3,11 @@
 [ext_resource type="Script" uid="uid://b38wimry2d6e4" path="res://scripts/components/settings_component.gd" id="1_settings"]
 
 [node name="SettingsPage" type="MarginContainer" unique_id=1440352913]
-offset_right = 262.0
-offset_bottom = 639.0
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 theme_override_constants/margin_left = 10
 theme_override_constants/margin_right = 10
 theme_override_constants/margin_bottom = 10
@@ -20,46 +23,55 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 20
 text = "⚙ SETTINGS"
 
-[node name="HBoxContainer" type="HBoxContainer" parent="VerticalContainer" unique_id=399775322]
+[node name="VaultContainer" type="HBoxContainer" parent="VerticalContainer" unique_id=399775322]
 layout_mode = 2
 
-[node name="VaultPath" type="Label" parent="VerticalContainer/HBoxContainer" unique_id=735742386]
+[node name="VaultPath" type="Label" parent="VerticalContainer/VaultContainer" unique_id=735742386]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Vault:"
-autowrap_mode = 2
+clip_text = true
+text_overrun_behavior = 3
 
-[node name="VaultButton" type="Button" parent="VerticalContainer/HBoxContainer" unique_id=1085320143]
+[node name="VaultButton" type="Button" parent="VerticalContainer/VaultContainer" unique_id=1085320143]
 unique_name_in_owner = true
+custom_minimum_size = Vector2(80, 0)
 layout_mode = 2
 text = "📂 Select"
 
-[node name="HBoxContainer2" type="HBoxContainer" parent="VerticalContainer" unique_id=1553503690]
+[node name="PairContainer" type="HBoxContainer" parent="VerticalContainer" unique_id=1553503690]
 layout_mode = 2
 
-[node name="PairedDevices" type="Label" parent="VerticalContainer/HBoxContainer2" unique_id=396453928]
+[node name="PairedDevices" type="Label" parent="VerticalContainer/PairContainer" unique_id=396453928]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Paired devices: None"
-autowrap_mode = 2
+clip_text = true
+text_overrun_behavior = 3
 
-[node name="SyncButton" type="Button" parent="VerticalContainer/HBoxContainer2" unique_id=1843274916]
+[node name="SyncButton" type="Button" parent="VerticalContainer/PairContainer" unique_id=1843274916]
 unique_name_in_owner = true
+custom_minimum_size = Vector2(80, 0)
 layout_mode = 2
 text = "⇄ Pair"
 
-[node name="GraphLabel" type="Label" parent="VerticalContainer" unique_id=2012181544]
+[node name="GraphLevelsContainer" type="HBoxContainer" parent="VerticalContainer" unique_id=1291237835]
 layout_mode = 2
+
+[node name="GraphLabel" type="Label" parent="VerticalContainer/GraphLevelsContainer" unique_id=2012181544]
+layout_mode = 2
+size_flags_horizontal = 3
 text = "Graph neighbor levels (1–10)"
 
-[node name="GraphLevels" type="SpinBox" parent="VerticalContainer" unique_id=660931135]
+[node name="GraphLevels" type="SpinBox" parent="VerticalContainer/GraphLevelsContainer" unique_id=660931135]
 unique_name_in_owner = true
 layout_mode = 2
 min_value = 1.0
 max_value = 10.0
 value = 1.0
+rounded = true
 
 [node name="OpenStartLabel" type="Label" parent="VerticalContainer" unique_id=305123447]
 layout_mode = 2
@@ -85,15 +97,19 @@ text = "Font"
 unique_name_in_owner = true
 layout_mode = 2
 
-[node name="FontSizeLabel" type="Label" parent="VerticalContainer" unique_id=1698925856]
+[node name="FontSizeContainer" type="HBoxContainer" parent="VerticalContainer" unique_id=2141491665]
 layout_mode = 2
+
+[node name="FontSizeLabel" type="Label" parent="VerticalContainer/FontSizeContainer" unique_id=1698925856]
+layout_mode = 2
+size_flags_horizontal = 3
 text = "Font size"
 
-[node name="FontSize" type="SpinBox" parent="VerticalContainer" unique_id=403001676]
+[node name="FontSize" type="SpinBox" parent="VerticalContainer/FontSizeContainer" unique_id=403001676]
 unique_name_in_owner = true
 layout_mode = 2
 min_value = 12.0
-max_value = 28.0
+max_value = 36.0
 value = 16.0
 
 [node name="CrtUi" type="CheckButton" parent="VerticalContainer" unique_id=2012189997]
@@ -128,12 +144,16 @@ size_flags_vertical = 3
 
 [node name="CloseButton" type="Button" parent="VerticalContainer/Container" unique_id=1101333219]
 unique_name_in_owner = true
+custom_minimum_size = Vector2(200, 0)
 layout_mode = 1
-anchors_preset = 12
+anchors_preset = 7
+anchor_left = 0.5
 anchor_top = 1.0
-anchor_right = 1.0
+anchor_right = 0.5
 anchor_bottom = 1.0
+offset_left = -64.5
 offset_top = -27.0
+offset_right = 64.5
 grow_horizontal = 2
 grow_vertical = 0
 text = "Close Settings"
