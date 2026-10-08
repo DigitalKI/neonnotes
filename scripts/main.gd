@@ -103,8 +103,12 @@ func _phase_theme_layout() -> void:
 			sync_service.note_restored(new_path)
 		sync_service.note_saved()
 	vault_tree.note_requested.connect(_on_note_selected)
-	vault_tree.delete_requested.connect(_delete_selected_node)
-	vault_tree.tree_delete_btn.pressed.connect(_delete_selected_node)
+	vault_tree.delete_requested.connect(func(): vault_tree.delete_selected_node())
+	# Deletion orchestration lives in the tree; Main injects shell hooks.
+	vault_tree.sync_note_deleted_cb = func(rel: String): sync_service.note_deleted(rel)
+	vault_tree.refresh_cb = _refresh_list
+	vault_tree.clear_note_cb = _clear_open_note
+	vault_tree.is_help_cb = func(): return editor.is_help()
 	vault_tree.side_tree.item_selected.connect(_update_delete_controls)
 	_update_delete_controls(0)
 	vault_tree.build()
@@ -447,10 +451,11 @@ func _create_note() -> void:
 	vault_tree.order_new_note(fname, dir, neighbor, first_child)
 	vault_tree.select_note(fname)
 
+## The tree owns its delete button and the whole deletion orchestration; Main
+## only keeps the ⋮ menu's Delete entry in sync with the tree selection.
 func _update_delete_controls(_column: int = 0) -> void:
 	var it := vault_tree.side_tree.get_selected()
 	var root_selected := it == null or it == vault_tree.side_tree.get_root()
-	vault_tree.tree_delete_btn.disabled = root_selected
 	var popup: PopupMenu = toolbar.more_menu
 	var idx := popup.get_item_index(MoreMenuComponent.ID_DELETE_NOTE)
 	if idx >= 0:
@@ -464,174 +469,13 @@ func _delete_current_note() -> void:
 	if GameManager.current_rel == "_homepage.md":
 		_flash("⌂ The homepage cannot be deleted")
 		return
-	delete_node(GameManager.current_rel)
+	vault_tree.delete_node(GameManager.current_rel)
 
-# ------------------------------------------------- tree node deletion (v3)
-
-## Delete the note/folder row currently selected in the vault tree.
-func _delete_selected_node() -> void:
-	var it := vault_tree.selected_item()
-	if it == null or it.get_metadata(0) == null:
-		_flash("Select a note or folder in the tree first")
-		return
-	var rel := vault_tree.node_rel(it)
-	if rel == "":
-		return
-	if rel == "_homepage.md":
-		_flash("⌂ The homepage cannot be deleted")
-		return
-	delete_node(rel)
-
-## Determine if a path (folder or companion note) has child items in the vault.
-func _has_children(rel: String) -> bool:
-	return vault_tree.has_children(rel)
-
-## Unified node/note/folder deletion. Automatically decides confirmation type based on tree structure.
-func delete_node(rel: String = "", keep_children: bool = false, confirm: bool = true) -> void:
-	if rel == "_homepage.md":
-		_flash("⌂ The homepage cannot be deleted")
-		return
-	if rel == "":
-		var it := vault_tree.selected_item()
-		if it != null and it.get_metadata(0) != null:
-			rel = vault_tree.node_rel(it)
-		elif GameManager.current_rel != "" and not editor.is_help():
-			rel = GameManager.current_rel
-	if rel == "" or editor.is_help():
-		_flash("Select a note or folder to delete")
-		return
-
-	if not confirm:
-		_perform_delete(rel, keep_children)
-		return
-
-	if vault_tree.has_children(rel):
-		_confirm_delete_parent(rel)
-	else:
-		_confirm_delete_leaf(rel)
-
-func _confirm_delete_parent(rel: String) -> void:
-	var dlg := AcceptDialog.new()
-	dlg.title = "Delete Folder"
-	dlg.dialog_text = "\"%s\" contains child items.\n\nHow do you want to delete it?\nDeleted items go to the Trash for %d days." % [rel, NoteCrud.TRASH_RETENTION_DAYS]
-	dlg.ok_button_text = "Cancel"
-	dlg.add_button("🗑 Trash All", false, "del_all")
-	dlg.add_button("Delete Node Only", false, "del_one")
-	DialogTheme.apply(dlg)  # confirmations match the palette like every page
-	add_child(dlg)
-	dlg.custom_action.connect(func(action: String):
-		if action == "del_all":
-			_perform_delete(rel, false)
-		elif action == "del_one":
-			_perform_delete(rel, true)
-		dlg.queue_free())
-	dlg.canceled.connect(func(): dlg.queue_free())
-	dlg.popup_centered()
-
-func _confirm_delete_leaf(rel: String) -> void:
-	editor.flush()
-	var dlg := ConfirmationDialog.new()
-	dlg.title = "Delete"
-	dlg.dialog_text = "Move \"%s\" to the Trash?\n\nYou can restore it for %d days." % [rel, NoteCrud.TRASH_RETENTION_DAYS]
-	dlg.ok_button_text = "🗑 Move to Trash"
-	dlg.get_cancel_button().text = "Cancel"
-	DialogTheme.apply(dlg)
-	add_child(dlg)
-	dlg.confirmed.connect(func():
-		_perform_delete(rel, false)
-		dlg.queue_free())
-	dlg.canceled.connect(func(): dlg.queue_free())
-	dlg.popup_centered()
-
-func _perform_delete(rel: String, keep_children: bool = false) -> void:
-	var vault := GameManager.vault_abs()
-	var folder_rel := rel.trim_suffix(".md") if rel.ends_with(".md") else rel
-	var parent_dir := folder_rel.get_base_dir() if folder_rel.contains("/") else ""
-
-	editor.flush()
-
-	if keep_children:
-		var moved: Array[String] = []
-		var abs_folder := vault.path_join(folder_rel)
-		if DirAccess.dir_exists_absolute(abs_folder):
-			for d in DirAccess.get_directories_at(abs_folder):
-				if d.begins_with("."):
-					continue
-				var old_rel := folder_rel + "/" + d
-				if vault_tree.move_path(old_rel, parent_dir) != "":
-					moved.append(old_rel)
-			for f in DirAccess.get_files_at(abs_folder):
-				if not f.ends_with(".md"):
-					continue
-				var old_rel := folder_rel + "/" + f
-				if vault_tree.move_path(old_rel, parent_dir) != "":
-					moved.append(old_rel)
-			DirAccess.remove_absolute(abs_folder)
-
-		var comp_note := folder_rel + ".md"
-		if FileAccess.file_exists(vault.path_join(comp_note)):
-			# The folder node itself (companion note) is deleted; its children
-			# were moved up above. Recoverable, so it goes to the Trash too.
-			NoteCrud.move_to_trash(comp_note, [comp_note])
-			NoteCrud.erase_note_meta(comp_note)
-			if GameManager.current_rel == comp_note:
-				GameManager.current_file = ""
-				GameManager.current_rel = ""
-				code_edit.text = ""
-
-		NoteCrud.scrub_order(moved)
-		vault_tree.prune_empty_dirs()
-		GameManager.scan_notes()
-		_refresh_list()
-		if GameManager.current_rel != "":
-			vault_tree.select_note(GameManager.current_rel)
-		_flash("Deleted %s — children moved to %s" % [folder_rel.get_file(), parent_dir if parent_dir != "" else "vault root"])
-		return
-
-	# Delete all (node / folder / note / branch): the whole subtree moves into
-	# the Trash and can be restored for TRASH_RETENTION_DAYS. Compute the set
-	# BEFORE moving it — it is read from the on-disk notes index.
-	var affected := NoteCrud.compute_delete_set(rel)
-	NoteCrud.move_to_trash(rel, affected)
-
-	var deleted_current := false
-	var deleted_note := GameManager.current_rel
-	if GameManager.current_rel != "" and (affected.has(GameManager.current_rel) or GameManager.current_rel.get_base_dir() == folder_rel or GameManager.current_rel.begins_with(folder_rel + "/")):
-		deleted_current = true
-		GameManager.current_file = ""
-		GameManager.current_rel = ""
-		code_edit.text = ""
-
-	for n in affected:
-		NoteCrud.erase_note_meta(n)
-	NoteCrud.scrub_order(affected)
-	if sync_service:
-		for deleted_path in affected:
-			sync_service.note_deleted(deleted_path)
-	vault_tree.prune_empty_dirs()
-	GameManager.scan_notes()
-	_refresh_list()
-
-	if deleted_current:
-		var dir := deleted_note.get_base_dir() if deleted_note.contains("/") else ""
-		var candidates := vault_tree.ordered_notes(dir)
-		if candidates.is_empty():
-			for d in GameManager.order.keys():
-				candidates = vault_tree.ordered_notes(str(d))
-				if not candidates.is_empty():
-					break
-		if candidates.is_empty():
-			candidates = vault_tree.visible_notes()
-		var next_note := ""
-		for n in candidates:
-			if not affected.has(n):
-				next_note = n
-				if n > deleted_note:
-					break
-		if next_note != "" and GameManager.notes.has(next_note):
-			vault_tree.select_note(next_note)
-
-	_flash("🗑 Moved to Trash: " + rel)
+## The tree deleted the note currently open: blank the note view and state.
+func _clear_open_note() -> void:
+	GameManager.current_file = ""
+	GameManager.current_rel = ""
+	editor.code_edit.text = ""
 
 # ------------------------------------------------- help
 

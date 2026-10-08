@@ -1152,3 +1152,176 @@ func has_children(rel: String) -> bool:
 		if not f.begins_with("."):
 			return true
 	return false
+
+# ------------------------------------------------- deletion (moved from main.gd)
+
+## Injected by Main (phase theme-layout): SyncService tombstones, tree refresh
+## after a rescan, blanking the note view when the open note is deleted, and
+## the help-mode guard (the Help showcase page must not be deleted).
+var sync_note_deleted_cb: Callable = func(_rel: String) -> void: pass
+var refresh_cb: Callable = func() -> void: pass
+var clear_note_cb: Callable = func() -> void: pass
+var is_help_cb: Callable = func() -> bool: return false
+
+
+## Delete the note/folder row currently selected in the vault tree.
+func delete_selected_node() -> void:
+	var it := selected_item()
+	if it == null or it.get_metadata(0) == null:
+		flash_cb.call("Select a note or folder in the tree first")
+		return
+	var rel := node_rel(it)
+	if rel == "":
+		return
+	if rel == "_homepage.md":
+		flash_cb.call("⌂ The homepage cannot be deleted")
+		return
+	delete_node(rel)
+
+
+## Unified node/note/folder deletion. Automatically decides confirmation type
+## based on tree structure. Empty rel falls back to the tree selection, then to
+## the currently open note.
+func delete_node(rel: String = "", keep_children: bool = false, confirm: bool = true) -> void:
+	if rel == "_homepage.md":
+		flash_cb.call("⌂ The homepage cannot be deleted")
+		return
+	if rel == "":
+		var it := selected_item()
+		if it != null and it.get_metadata(0) != null:
+			rel = node_rel(it)
+		elif GameManager.current_rel != "" and not is_help_cb.call():
+			rel = GameManager.current_rel
+	if rel == "" or is_help_cb.call():
+		flash_cb.call("Select a note or folder to delete")
+		return
+
+	if not confirm:
+		_perform_delete(rel, keep_children)
+		return
+
+	if has_children(rel):
+		_confirm_delete_parent(rel)
+	else:
+		_confirm_delete_leaf(rel)
+
+
+func _confirm_delete_parent(rel: String) -> void:
+	var dlg := AcceptDialog.new()
+	dlg.title = "Delete Folder"
+	dlg.dialog_text = "\"%s\" contains child items.\n\nHow do you want to delete it?\nDeleted items go to the Trash for %d days." % [rel, NoteCrud.TRASH_RETENTION_DAYS]
+	dlg.ok_button_text = "Cancel"
+	dlg.add_button("🗑 Trash All", false, "del_all")
+	dlg.add_button("Delete Node Only", false, "del_one")
+	DialogTheme.apply(dlg)  # confirmations match the palette like every page
+	add_child(dlg)
+	dlg.custom_action.connect(func(action: String):
+		if action == "del_all":
+			_perform_delete(rel, false)
+		elif action == "del_one":
+			_perform_delete(rel, true)
+		dlg.queue_free())
+	dlg.canceled.connect(func(): dlg.queue_free())
+	dlg.popup_centered()
+
+
+func _confirm_delete_leaf(rel: String) -> void:
+	save_cb.call()
+	var dlg := ConfirmationDialog.new()
+	dlg.title = "Delete"
+	dlg.dialog_text = "Move \"%s\" to the Trash?\n\nYou can restore it for %d days." % [rel, NoteCrud.TRASH_RETENTION_DAYS]
+	dlg.ok_button_text = "🗑 Move to Trash"
+	dlg.get_cancel_button().text = "Cancel"
+	DialogTheme.apply(dlg)
+	add_child(dlg)
+	dlg.confirmed.connect(func():
+		_perform_delete(rel, false)
+		dlg.queue_free())
+	dlg.canceled.connect(func(): dlg.queue_free())
+	dlg.popup_centered()
+
+
+func _perform_delete(rel: String, keep_children: bool = false) -> void:
+	var vault := GameManager.vault_abs()
+	var folder_rel := rel.trim_suffix(".md") if rel.ends_with(".md") else rel
+	var parent_dir := folder_rel.get_base_dir() if folder_rel.contains("/") else ""
+
+	save_cb.call()
+
+	if keep_children:
+		var moved: Array[String] = []
+		var abs_folder := vault.path_join(folder_rel)
+		if DirAccess.dir_exists_absolute(abs_folder):
+			for d in DirAccess.get_directories_at(abs_folder):
+				if d.begins_with("."):
+					continue
+				var old_rel := folder_rel + "/" + d
+				if move_path(old_rel, parent_dir) != "":
+					moved.append(old_rel)
+			for f in DirAccess.get_files_at(abs_folder):
+				if not f.ends_with(".md"):
+					continue
+				var old_rel := folder_rel + "/" + f
+				if move_path(old_rel, parent_dir) != "":
+					moved.append(old_rel)
+			DirAccess.remove_absolute(abs_folder)
+
+		var comp_note := folder_rel + ".md"
+		if FileAccess.file_exists(vault.path_join(comp_note)):
+			# The folder node itself (companion note) is deleted; its children
+			# were moved up above. Recoverable, so it goes to the Trash too.
+			NoteCrud.move_to_trash(comp_note, [comp_note])
+			NoteCrud.erase_note_meta(comp_note)
+			if GameManager.current_rel == comp_note:
+				clear_note_cb.call()
+
+		NoteCrud.scrub_order(moved)
+		prune_empty_dirs()
+		GameManager.scan_notes()
+		refresh_cb.call()
+		if GameManager.current_rel != "":
+			select_note(GameManager.current_rel)
+		flash_cb.call("Deleted %s — children moved to %s" % [folder_rel.get_file(), parent_dir if parent_dir != "" else "vault root"])
+		return
+
+	# Delete all (node / folder / note / branch): the whole subtree moves into
+	# the Trash and can be restored for TRASH_RETENTION_DAYS. Compute the set
+	# BEFORE moving it — it is read from the on-disk notes index.
+	var affected := NoteCrud.compute_delete_set(rel)
+	NoteCrud.move_to_trash(rel, affected)
+
+	var deleted_current := false
+	var deleted_note := GameManager.current_rel
+	if GameManager.current_rel != "" and (affected.has(GameManager.current_rel) or GameManager.current_rel.get_base_dir() == folder_rel or GameManager.current_rel.begins_with(folder_rel + "/")):
+		deleted_current = true
+		clear_note_cb.call()
+
+	for n in affected:
+		NoteCrud.erase_note_meta(n)
+	NoteCrud.scrub_order(affected)
+	for deleted_path in affected:
+		sync_note_deleted_cb.call(deleted_path)
+	prune_empty_dirs()
+	GameManager.scan_notes()
+	refresh_cb.call()
+
+	if deleted_current:
+		var dir := deleted_note.get_base_dir() if deleted_note.contains("/") else ""
+		var candidates := ordered_notes(dir)
+		if candidates.is_empty():
+			for d in GameManager.order.keys():
+				candidates = ordered_notes(str(d))
+				if not candidates.is_empty():
+					break
+		if candidates.is_empty():
+			candidates = visible_notes()
+		var next_note := ""
+		for n in candidates:
+			if not affected.has(n):
+				next_note = n
+				if n > deleted_note:
+					break
+		if next_note != "" and GameManager.notes.has(next_note):
+			select_note(next_note)
+
+	flash_cb.call("🗑 Moved to Trash: " + rel)
