@@ -5,7 +5,7 @@
 > decisions, gotchas) — history lives in git, `git log` is the changelog.
 > Size budget ~250 lines: compact in-session if exceeded.
 
-_Last updated: 2026-10-01 · Godot 4.7 · renderer: gl_compatibility_
+_Last updated: 2026-10-08 · Godot 4.7 · renderer: gl_compatibility_
 
 ---
 
@@ -136,7 +136,11 @@ _Last updated: 2026-10-01 · Godot 4.7 · renderer: gl_compatibility_
   its own**, so edit mode tints exactly what the preview renders — e.g. a `|`
   row without a `|---|` delimiter stays plain in both, and `#nospace` is body
   text in both. Fenced code preview uses a full-width padded panel
-  (language-specific token highlighting not implemented); wiki-links `[[Note]]`/`[[Note|label]]`, backlinks,
+  (language-specific token highlighting not implemented); wiki-links `[[Note]]`/`[[Note|label]]` (**clicking an
+  unresolved link auto-creates the note**, 2026-10-08: `_create_note_for_link()`
+  in `main.gd` — target with no folder lands next to the referencing note,
+  `folder/name` targets honour the path (`write_note` makes parent dirs),
+  rejects `..`/empty; scans, orders into the tree and opens it), backlinks,
   Obsidian callouts, `==highlight==`, `%%glitch%%`, `++flicker++` escapes.
   **Editor colour emission (2026-10-01):** CodeEdit reads the syntax dict as
   **column-keyed segments** — a colour runs from its key to the *next* key (or
@@ -163,6 +167,16 @@ _Last updated: 2026-10-01 · Godot 4.7 · renderer: gl_compatibility_
   (renderer-agnostic; user wants a "neon city" redesign eventually).
   **Follow-up:** when the graph gains filtering, reuse the tree search's
   `keywords + #tag` grammar so the vocabulary behaves identically everywhere.
+- **Android export gotcha (2026-10-08):** the "Android (Release)" preset (preset.1)
+  had `permissions/internet=false` while "Android" (preset.0) had it true — a
+  release APK exported without `android.permission.INTERNET` makes every
+  `socket()` call fail on-device (`godot` logcat spam of
+  `_inet_open ... _sock == -1`), so the phone broadcasts nothing and its TCP
+  sync listener never opens; the desktop side only shows a fast `OUT failed ...
+  timeout` (connect refused at 192.168.8:47771) every auto-sync cycle while the
+  peer still appears "connected". Both presets now have `internet=true`. When
+  sync fails with sub-200 ms connect timeouts, check the installed APK's
+  manifest permissions and the phone's logcat first.
 - LAN sync (`scripts/sync/`): UDP 47770 discovery + TCP 47771 streaming
   transfer, **per-vault** eight-word phrase pairing, trusted peers, logical-mtime
   LWW with tombstones; deletes/folder moves propagate and refresh the receiver.

@@ -1123,9 +1123,51 @@ func _open_graph_note(fname: String) -> void:
 func _open_wikilink(target: String) -> void:
 	var fname := WikiLinks.resolve(target)
 	if fname == "":
-		status_bar.flash("✗ Note not found: " + target)
-		return
+		# Obsidian-style unfollowed link: clicking it creates the note so the
+		# link resolves from now on. Same folder as the referencing note unless
+		# the target itself names a folder path.
+		fname = _create_note_for_link(target)
+		if fname == "":
+			status_bar.flash("✗ Note not found: " + target)
+			return
 	vault_tree.select_note(fname)
+
+## Turn an unresolved wiki-link target into a new note file. Returns the created
+## note's relative path, or "" if the target is not a valid note name.
+func _create_note_for_link(target: String) -> String:
+	var rel := target.strip_edges().trim_suffix("/")
+	if rel == "" or rel.contains("..") or rel.contains("\\"):
+		return ""
+	# Strip a leading ./ and any anchor-style suffix; keep folder components.
+	while rel.begins_with("./"):
+		rel = rel.substr(2)
+	rel = rel.trim_suffix(".md")
+	if rel == "":
+		return ""
+	# No folder in the target: place it next to the referencing note.
+	if not rel.contains("/"):
+		var cur := GameManager.current_rel
+		var dir := cur.get_base_dir() if cur != "" and GameManager.notes.has(cur) else ""
+		rel = (dir + "/" if dir != "" else "") + rel
+	var fname := rel + ".md"
+	if FileAccess.file_exists(GameManager.vault_abs() + "/" + fname):
+		return fname  # Raced into existence elsewhere; just open it.
+	var title := rel.get_file()
+	_note_tags.clear()
+	_note_title = title
+	var initial := NOTE_TEMPLATE % [title, title]
+	_metadata_source = initial
+	# Remember the saved form so a later flush of the *previous* editor buffer
+	# cannot overwrite the new file's front matter.
+	GameManager.write_note(fname, initial)
+	_remember_saved_form()
+	GameManager.scan_notes()
+	_refresh_list()
+	var dir := rel.get_base_dir()
+	vault_tree.order_new_note(fname, dir, "", false)
+	vault_tree.select_note(fname)
+	status_bar.flash("Created " + fname)
+	return fname
 
 # ------------------------------------------------- image embeds (v3)
 
