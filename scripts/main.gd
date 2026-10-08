@@ -4,24 +4,6 @@ extends Control
 ## mode toggle, export menu, help showcase.
 
 const MONO_FONT := preload("res://assets/fonts/ShareTechMono-Regular.ttf")
-const NOTE_TEMPLATE := """---
-title: "%s"
----
-
-# %s
-"""
-
-## Showcase note for the "?" Help button: every styling feature in one page.
-## The Help page lives outside the vault as plain markdown (docs/help.md), so
-## editing it never risks GDScript escaping issues and it cannot be exported.
-var _help_doc := ""
-func _load_help_doc() -> String:
-	if _help_doc == "":
-		var f := FileAccess.open("res://docs/help.md", FileAccess.READ)
-		_help_doc = f.get_as_text() if f else "# Help file missing"
-	return _help_doc
-
-
 @onready var bg: ColorRect = %Bg
 @onready var toolbar: ToolbarComponent = %Toolbar
 @onready var vault_tree: VaultTreeComponent = %SidePanel
@@ -53,39 +35,18 @@ var sidebar: PanelContainer
 @onready var new_dialog: NewNoteDialog = %NewNoteDialog
 @onready var vault_picker: VaultPicker = %VaultPicker
 @onready var trash_page: TrashPage = %TrashPage
-var help_mode := false
-var source_mode := false
-var autosave_timer := Timer.new()
 var sync_service: SyncService
 var help_folder := "Help"  # sidebar folder items get this metadata
 var theme_component := ThemeComponent.new()
 var layout_component := LayoutComponent.new()
 var slash_menu: SlashMenuComponent = preload("res://scenes/components/slash_menu.tscn").instantiate()
 @onready var export_component: ExportComponent = %ExportMenu
-@onready var title_panel: PanelContainer = %TitlePanel
-@onready var title_input: LineEdit = %TitleInput
-@onready var tags_panel: PanelContainer = %TagsPanel
-@onready var tags_chips: HFlowContainer = %TagsChips
-@onready var tags_input: LineEdit = %TagsInput
-@onready var tags_add: Button = %TagsAdd
-const TAG_SUGGEST_SCENE := preload("res://scenes/components/tag_suggest.tscn")
-var _tag_suggest: TagSuggest
-var _note_tags: Array[String] = []
 
 ## Boot timing: printed when `NEONNOTES_BOOT_DEBUG=1` (or always in a debug build).
 var _boot_t0 := 0
 var _boot_last := 0
-var _note_title := ""
-var _metadata_source := ""
-var _saved_body := ""
-var _saved_title := ""
-var _saved_tags: Array[String] = []
 
 
-
-func _notification(what: int) -> void:
-	if what == NOTIFICATION_WM_CLOSE_REQUEST and is_instance_valid(autosave_timer):
-		_flush_save()
 
 func _ready() -> void:
 	_boot_t0 = Time.get_ticks_msec()
@@ -131,9 +92,9 @@ func _phase_theme_layout() -> void:
 		if page_mode == PAGE_SETTINGS:
 			_show_settings()
 		elif page_mode == "":
-			_render_preview())
+			editor.render_preview())
 	GameManager.font_changed.connect(_on_font_changed)
-	vault_tree.save_cb = _flush_save
+	vault_tree.save_cb = editor.flush
 	vault_tree.flash_cb = _flash
 	vault_tree.moved_cb = func(old_paths: Array[String], new_paths: Array[String]):
 		for old_path in old_paths:
@@ -193,6 +154,9 @@ func _phase_sync() -> void:
 	sync_service = SyncService.new()
 	sync_service.name = "SyncService"
 	add_child(sync_service)
+	# Cross-component hooks the note view needs after a successful save.
+	editor.sync_service_cb = func(): return sync_service
+	editor.refresh_tree_cb = _refresh_list
 	# Paired vaults reconnect automatically; the dialog is only configuration UI.
 	if GameManager.is_vault_paired():
 		# Bind the UDP listener after the first frame — it is pure background
@@ -265,26 +229,7 @@ func _on_sync_changed(_peer: String, _count: int, changed_paths: Array, structur
 		_open_start_page.call_deferred()
 		return
 	if GameManager.current_rel != "" and changed_paths.has(GameManager.current_rel):
-		_refresh_open_note_after_sync.call_deferred()
-
-func _refresh_open_note_after_sync() -> void:
-	# Auto-refresh the open note when it's in VIEW (preview) mode, so a sync that
-	# pulled a newer copy re-renders it. In edit mode we never clobber the user's
-	# in-progress typing — their edits take priority until they leave edit mode.
-	if help_mode or GameManager.current_rel == "" or source_mode:
-		return
-	var latest := GameManager.read_note(GameManager.current_rel)
-	if latest == _compose_note_source():
-		return
-	_note_tags = GameManager._parse_note_meta(latest).get("tags", [])
-	_metadata_source = latest
-	_note_title = NoteMetadata.field(latest, "title", GameManager.current_rel.get_file().trim_suffix(".md"))
-	_set_title_form(_note_title)
-	code_edit.text = NoteMetadata.body(latest)
-	_remember_saved_form()
-	_refresh_note_tag_chips()
-	_render_preview(true)  # keep reading position across the re-render
-	status_bar.flash("↻ Updated " + GameManager.current_rel)
+		editor.reload_current.call_deferred()
 
 func _prepare_smoke_vault() -> void:
 	# Smoke tests must never read or persist changes to the user's real vault.
@@ -313,47 +258,35 @@ func _build_dynamic_ui() -> void:
 	# container and scroll internally instead.
 	# slightly wider vertical scrollbar for comfortable dragging
 	code_edit.get_v_scroll_bar().custom_minimum_size = Vector2(14, 0)
-	tags_add.pressed.connect(_add_note_tag)
-	tags_input.text_submitted.connect(func(_value: String): _add_note_tag())
-	_setup_tag_suggest()
-	title_input.text_changed.connect(_on_note_title_changed)
-	tags_panel.visible = false
-	title_panel.visible = false
 	var edit_menu := code_edit.get_menu()
 	for i in range(edit_menu.item_count - 1, -1, -1):
 		if edit_menu.get_item_id(i) > TextEdit.MENU_PASTE:
 			edit_menu.remove_item(i)
-	code_edit.text_changed.connect(_on_text_changed)
-
-	# Debounce typing; transitions still flush immediately.
-	autosave_timer.name = "AutosaveTimer"
-	autosave_timer.one_shot = true
-	autosave_timer.wait_time = 0.5
-	autosave_timer.timeout.connect(_flush_save)
-	add_child(autosave_timer)
 
 	sidebar = %SidePanel as PanelContainer
 
 	# toolbar actions
 	toolbar.menu_btn.pressed.connect(layout_component.toggle_sidebar)
 	toolbar.new_btn.pressed.connect(_on_new_note)
-	toolbar.mode_btn.pressed.connect(_toggle_mode)
+	toolbar.mode_btn.pressed.connect(func(): editor.toggle_mode())
 	toolbar.help_btn.pressed.connect(_show_help)
 	toolbar.backlinks_btn.pressed.connect(_toggle_backlinks)
 	toolbar.graph_btn.pressed.connect(_toggle_graph)
 	slash_menu.name = "SlashMenu"
 	add_child(slash_menu)
-	slash_menu.build(code_edit, _flush_save)
+	slash_menu.build(code_edit, editor.flush)
 	# Cross-component hooks for the note view: status flash + slash menu for the
 	# selection bar's "format" action.
-	editor.bind(_flash, slash_menu)
+	editor.bind(_flash, slash_menu, toolbar.note_title, content_body)
+	editor.mode_changed.connect(func(editing: bool):
+		toolbar.mode_btn.text = "✎ Edit" if not editing else "◈ Preview")
 	slash_menu.applied.connect(func(): editor.hide_selection_overlay())
 
 	# ExportComponent owns the complete menu and the shared action IDs.
 	# Do not pre-populate this PopupMenu here: duplicate labels with different
 	# IDs caused Save/Share entries to dispatch to the wrong handlers.
 	var menu: PopupMenu = toolbar.export_btn.get_popup()
-	export_component.doc_cb = _current_doc
+	export_component.doc_cb = editor.current_doc
 	export_component.dest_cb = _export_dest
 	export_component.flash_cb = _flash
 	export_component.get_code = func(): return code_edit.text
@@ -410,104 +343,6 @@ func _build_dynamic_ui() -> void:
 	trash_page.purge_requested.connect(_on_trash_purge)
 	trash_page.empty_requested.connect(_on_trash_empty)
 
-# ------------------------------------------------- autosave
-
-func _on_text_changed() -> void:
-	help_mode = false
-	autosave_timer.start()  # restart after each character/paste
-	slash_menu.check()
-	# Keep the highlight/counter honest while the note is edited with a query up.
-	editor.recount_search_matches()
-
-# ------------------------------------------------- slash menu (v3)
-
-## Save pending edits. Called on debounce, note switch, mode change, sync, quit.
-func _flush_save() -> void:
-	autosave_timer.stop()
-	if help_mode or GameManager.current_file == "" or not code_edit.visible:
-		return
-	var fname: String = GameManager.current_rel
-	if fname == "":
-		return
-	if code_edit.text == _saved_body and _note_title == _saved_title and _note_tags == _saved_tags:
-		return
-	var old_title: String = GameManager.titles.get(fname, "")
-	var source_to_save := _compose_note_source()
-	if GameManager.write_note(fname, source_to_save):
-		_metadata_source = source_to_save
-		_remember_saved_form()
-		status_bar.flash("✓ Saved " + fname)
-		sync_service.note_saved(fname)  # debounce auto-sync + clear any tombstone
-		# rebuild the tree if the front-matter title changed
-		var new_title := _note_title
-		if old_title != new_title:
-			GameManager.scan_notes()
-			_refresh_list()
-
-func _remember_saved_form() -> void:
-	_saved_body = code_edit.text
-	_saved_title = _note_title
-	_saved_tags = _note_tags.duplicate()
-
-func _compose_note_source() -> String:
-	return NoteMetadata.update(code_edit.text, _metadata_source, _note_title, _note_tags,
-		Time.get_datetime_string_from_system(true, false))
-
-func _on_note_title_changed(value: String) -> void:
-	_note_title = value.strip_edges()
-	toolbar.note_title.text = _note_title if _note_title != "" else GameManager.current_rel.get_file().trim_suffix(".md")
-	autosave_timer.start()
-
-func _set_title_form(value: String) -> void:
-	title_input.set_block_signals(true)
-	title_input.text = value
-	title_input.set_block_signals(false)
-	toolbar.note_title.text = value if value != "" else GameManager.current_rel.get_file().trim_suffix(".md")
-
-func _refresh_note_tag_chips() -> void:
-	for child in tags_chips.get_children():
-		child.queue_free()
-	for tag in _note_tags:
-		var chip := Button.new()
-		chip.text = "◆ " + tag + "   ×"
-		chip.tooltip_text = "Remove tag " + tag
-		chip.custom_minimum_size = Vector2(0, 32)
-		chip.pressed.connect(func():
-			_note_tags.erase(tag)
-			_refresh_note_tag_chips()
-			_flush_save())
-		tags_chips.add_child(chip)
-
-func _add_note_tag() -> void:
-	var tag := tags_input.text.strip_edges().trim_prefix("#")
-	if tag == "" or tag.contains(","):
-		return
-	if not _note_tags.has(tag):
-		_note_tags.append(tag)
-	tags_input.clear()
-	_refresh_note_tag_chips()
-	_flush_save()
-
-## Tag autocomplete for the note editor's TagsInput: lists every vault tag
-## with its note count and surfaces near-matches (jw / j-w) so near-duplicate
-## tags are caught before they are created.
-func _setup_tag_suggest() -> void:
-	var overlay_parent := get_tree().current_scene
-	if overlay_parent == null:
-		overlay_parent = self
-	_tag_suggest = TAG_SUGGEST_SCENE.instantiate()
-	overlay_parent.add_child(_tag_suggest)
-	_tag_suggest.bind(tags_input, TagSuggest.Mode.WHOLE)
-	_tag_suggest.tag_chosen.connect(_on_tag_suggestion_chosen)
-
-func _on_tag_suggestion_chosen(_tag: String) -> void:
-	# The component already wrote the canonical tag into the field; add it.
-	_add_note_tag()
-
-func _close_tag_suggest() -> void:
-	if _tag_suggest != null:
-		_tag_suggest.close()
-
 ## Push GameManager's density-derived scale onto the whole canvas (fonts,
 ## metrics and touch targets alike), then re-run the responsive layout.
 func _on_ui_scale_changed() -> void:
@@ -540,24 +375,24 @@ func _on_font_changed() -> void:
 	if page_mode == PAGE_SETTINGS:
 		_show_settings()
 	elif page_mode == "":
-		_render_preview()
+		editor.render_preview()
 
 func _on_mobile_changed(_is_mobile: bool) -> void:
 	theme_component.apply()
 	if graph_view.visible or page_mode != "":
 		return  # graph/pages own the screen; fonts re-apply when they close
-	if help_mode:
+	if editor.is_help():
 		_show_help()
-	elif not source_mode:
-		_render_preview()
+	elif not editor.source_mode:
+		editor.render_preview()
 
 func _on_note_selected(fname: String) -> void:
-	autosave_timer.stop()
 	if page_mode != "":
 		_close_page()
-	# Continue opening the selected note after leaving a page.
-	_flush_save()  # flush previous note first — never lose changes
-	editor.clear_search()  # a new note starts with an empty find bar
+	# Continue opening the selected note after leaving a page. The previous note
+	# is flushed first (its rel is still current), then GameManager is repointed
+	# and the source handed to the editor component.
+	editor.flush()  # flush previous note first — never lose changes
 	GameManager.current_file = GameManager.vault_abs() + "/" + fname
 	GameManager.current_rel = fname
 	GameManager.last_opened_rel = fname
@@ -565,18 +400,9 @@ func _on_note_selected(fname: String) -> void:
 	print("[MAIN-DBG] _on_note_selected fname=", fname)
 	var source := GameManager.read_note(fname)
 	_boot_mark("note-read")
-	_metadata_source = source
-	_note_tags = GameManager._parse_note_meta(source).get("tags", [])
-	_note_title = NoteMetadata.field(source, "title", fname.get_file().trim_suffix(".md"))
-	_set_title_form(_note_title)
-	code_edit.text = NoteMetadata.body(source)
+	editor.load_note(fname, source)
 	_boot_mark("note-highlight")
-	_remember_saved_form()
-	_refresh_note_tag_chips()
-	help_mode = false
 	help_folder = fname.get_base_dir() if fname.contains("/") else ""
-	source_mode = false
-	_set_mode()
 	if layout_component.is_mobile_layout and layout_component.drawer_open:
 		layout_component.toggle_sidebar()
 	if vault_tree.backlinks_panel.visible:
@@ -611,14 +437,11 @@ func _create_note() -> void:
 	fname = (dir + "/" if dir != "" else "") + fname
 	if not FileAccess.file_exists(GameManager.vault_abs() + "/" + fname):
 		var title := fname.get_file().trim_suffix(".md")
-		_note_tags.clear()
-		_note_title = title
-		var initial := NOTE_TEMPLATE % [title, title]
-		_metadata_source = initial
+		var initial := editor.note_template(title)
 		var initialized := NoteMetadata.update(NoteMetadata.body(initial), initial,
-			_note_title, _note_tags, Time.get_datetime_string_from_system(true, false))
+			title, [], Time.get_datetime_string_from_system(true, false))
 		GameManager.write_note(fname, initialized)
-		_metadata_source = initialized
+		editor.begin_new_note(fname, initialized)
 	GameManager.scan_notes()
 	_refresh_list()
 	vault_tree.order_new_note(fname, dir, neighbor, first_child)
@@ -635,7 +458,7 @@ func _update_delete_controls(_column: int = 0) -> void:
 
 ## Delete the current open note after confirmation.
 func _delete_current_note() -> void:
-	if GameManager.current_rel == "" or help_mode:
+	if GameManager.current_rel == "" or editor.is_help():
 		_flash("No note open")
 		return
 	if GameManager.current_rel == "_homepage.md":
@@ -672,9 +495,9 @@ func delete_node(rel: String = "", keep_children: bool = false, confirm: bool = 
 		var it := vault_tree.selected_item()
 		if it != null and it.get_metadata(0) != null:
 			rel = vault_tree.node_rel(it)
-		elif GameManager.current_rel != "" and not help_mode:
+		elif GameManager.current_rel != "" and not editor.is_help():
 			rel = GameManager.current_rel
-	if rel == "" or help_mode:
+	if rel == "" or editor.is_help():
 		_flash("Select a note or folder to delete")
 		return
 
@@ -706,7 +529,7 @@ func _confirm_delete_parent(rel: String) -> void:
 	dlg.popup_centered()
 
 func _confirm_delete_leaf(rel: String) -> void:
-	_flush_save()
+	editor.flush()
 	var dlg := ConfirmationDialog.new()
 	dlg.title = "Delete"
 	dlg.dialog_text = "Move \"%s\" to the Trash?\n\nYou can restore it for %d days." % [rel, NoteCrud.TRASH_RETENTION_DAYS]
@@ -725,7 +548,7 @@ func _perform_delete(rel: String, keep_children: bool = false) -> void:
 	var folder_rel := rel.trim_suffix(".md") if rel.ends_with(".md") else rel
 	var parent_dir := folder_rel.get_base_dir() if folder_rel.contains("/") else ""
 
-	_flush_save()
+	editor.flush()
 
 	if keep_children:
 		var moved: Array[String] = []
@@ -810,87 +633,17 @@ func _perform_delete(rel: String, keep_children: bool = false) -> void:
 
 	_flash("🗑 Moved to Trash: " + rel)
 
-# ------------------------------------------------- mode toggle / help
+# ------------------------------------------------- help
 
-func _set_mode() -> void:
-	editor.source_mode = source_mode  # keep the note view's find-bar gating in sync
-	if page_mode != "":
-		return  # a page owns the screen until it closes
-	_close_tag_suggest()
-	code_edit.visible = source_mode
-	search_row.visible = source_mode
-	edit_padding.visible = source_mode
-	tags_panel.visible = source_mode and not help_mode and GameManager.current_rel != ""
-	title_panel.visible = tags_panel.visible
-	content_host.visible = not source_mode
-	toolbar.mode_btn.text = "✎ Edit" if not source_mode else "◈ Preview"
-	if source_mode:
-		# Android may resize the viewport only after the mode switch and focus
-		# opens the IME. Let LayoutComponent observe that resize and follow the
-		# caret once the editor is actually visible.
-		code_edit.call_deferred("adjust_viewport_to_caret", 0)
-	else:
-		editor.hide_selection_overlay()
-		_render_preview()
-
-func _toggle_mode() -> void:
-	autosave_timer.stop()
-	_flush_save()  # leaving edit mode: persist now
-	source_mode = not source_mode
-	if not source_mode:
-		editor.clear_search()  # exiting the editor resets the find bar
-	graph_view.visible = false
-	_set_mode()
-
+## Help behaves like opening a note: it replaces any page and, on mobile,
+## collapses the tree drawer so the help content is full-screen.
 func _show_help() -> void:
 	if page_mode != "":
 		return  # a page owns the screen until it closes
-	_flush_save()
-	editor.clear_search()
-	# Help behaves like opening a note: it replaces any page and, on mobile,
-	# collapses the tree drawer so the help content is full-screen.
-	if page_mode != "":
-		_close_page()
-	help_mode = true
-	GameManager.current_file = ""
-	autosave_timer.stop()
-	source_mode = false
-	code_edit.visible = false
-	edit_padding.visible = false
-	tags_panel.visible = false
-	title_panel.visible = false
-	content_host.visible = true
+	editor.show_help()
 	graph_view.visible = false
-	note_title.text = "Style Guide"
-	PreviewBuilder.pal_override = {}
-	PreviewBuilder.build(MarkdownParser.parse(_load_help_doc()), content_body)
-	content_host.scroll_vertical = 0
 	if layout_component.is_mobile_layout and layout_component.drawer_open:
 		layout_component.toggle_sidebar()
-
-func _render_preview(preserve_scroll := false) -> void:
-	if page_mode == PAGE_SETTINGS:
-		_show_settings()
-		return
-	if page_mode != "":
-		return
-	code_edit.visible = false
-	edit_padding.visible = false
-	tags_panel.visible = false
-	title_panel.visible = false
-	content_host.visible = true
-	graph_view.visible = false
-	var prev_scroll: float = content_host.scroll_vertical if preserve_scroll else 0.0
-	var doc := MarkdownParser.parse(NoteMetadata.preview(code_edit.text, _note_title))
-	# per-note theme: front-matter  theme: <Palette>
-	PreviewBuilder.pal_override = GameManager.PALETTES.get(str(doc.get("meta", {}).get("theme", "")), {})
-	# Progressive build: a large note streams in over several frames instead of
-	# blocking this one (~1.9 s for a 2k-line note on a phone before).
-	await PreviewBuilder.build_async(self, doc, content_body)
-	# Fresh renders (mode switch/new note) drop to the top; a sync re-render keeps
-	# the reader's scroll offset instead of jumping them.
-	if is_instance_valid(content_host):
-		content_host.scroll_vertical = prev_scroll
 
 func _close_settings() -> void:
 	_close_page()
@@ -913,8 +666,9 @@ func _pages() -> Array[Control]:
 	return [settings_page, sync_page, new_dialog, vault_picker, media_dialog, trash_page]
 
 func _open_page(mode: String, page: Control) -> void:
-	_flush_save()
+	editor.flush()
 	page_mode = mode
+	editor.page_mode = mode
 	# A page owns the whole screen on mobile, same as opening a note:
 	# collapse the tree drawer first.
 	if layout_component.is_mobile_layout and layout_component.drawer_open:
@@ -928,9 +682,10 @@ func _open_page(mode: String, page: Control) -> void:
 
 func _close_page() -> void:
 	page_mode = ""
+	editor.page_mode = ""
 	for p in _pages():
 		p.visible = false
-	_set_mode()
+	editor.apply_mode()
 
 # ------------------------------------------------- v2: wiki / backlinks / graph
 
@@ -973,14 +728,10 @@ func _create_note_for_link(target: String) -> String:
 	if FileAccess.file_exists(GameManager.vault_abs() + "/" + fname):
 		return fname  # Raced into existence elsewhere; just open it.
 	var title := rel.get_file()
-	_note_tags.clear()
-	_note_title = title
-	var initial := NOTE_TEMPLATE % [title, title]
-	_metadata_source = initial
-	# Remember the saved form so a later flush of the *previous* editor buffer
-	# cannot overwrite the new file's front matter.
-	GameManager.write_note(fname, initial)
-	_remember_saved_form()
+	var initial := editor.note_template(title)
+	# save_source marks the form saved so a later flush of the *previous*
+	# editor buffer cannot overwrite the new file's front matter.
+	editor.save_source(fname, initial)
 	GameManager.scan_notes()
 	_refresh_list()
 	var dir := rel.get_base_dir()
@@ -1000,7 +751,7 @@ var _image_target_src := ""
 
 ## vault/media/ and the markdown is updated + saved.
 func _on_image_click(src: String) -> void:
-	if help_mode or GameManager.current_file == "":
+	if editor.is_help() or GameManager.current_file == "":
 		return
 	_image_target_src = src
 	_show_media_dialog()
@@ -1031,13 +782,11 @@ func _use_local_media(path: String) -> void:
 		return
 	var rel := "media/" + path.get_file()
 	code_edit.text = t.substr(0, m.get_start()) + "![](" + rel + ")" + t.substr(m.get_end())
-	var media_source := _compose_note_source()
-	GameManager.write_note(GameManager.current_rel, media_source)
-	_metadata_source = media_source
-	_remember_saved_form()
+	var media_source := editor.compose_note_source()
+	editor.save_source(GameManager.current_rel, media_source)
 	sync_service.note_saved(GameManager.current_rel)
 	status_bar.flash("✓ Saved " + GameManager.current_rel)
-	_render_preview()
+	editor.render_preview()
 
 func _choose_device_image() -> void:
 	_close_page()
@@ -1107,14 +856,12 @@ func _on_image_selected(path: String) -> void:
 	# save directly — the click comes from preview mode where the editor is
 	# hidden and _flush_save would bail out
 	if GameManager.current_rel != "":
-		var media_source := _compose_note_source()
-		GameManager.write_note(GameManager.current_rel, media_source)
-		_metadata_source = media_source
-		_remember_saved_form()
+		var media_source := editor.compose_note_source()
+		editor.save_source(GameManager.current_rel, media_source)
 		status_bar.flash("✓ Saved " + GameManager.current_rel)
 		sync_service.note_saved(GameManager.current_rel)
-	if not source_mode:
-		_render_preview()
+	if not editor.source_mode:
+		editor.render_preview()
 	_flash("🖼 " + rel)
 
 func _toggle_backlinks() -> void:
@@ -1128,9 +875,9 @@ func _toggle_graph() -> void:
 		return  # a page owns the screen until it closes
 	if graph_view.visible:
 		graph_view.visible = false
-		content_host.visible = not source_mode
+		content_host.visible = not editor.source_mode
 		return
-	_flush_save()
+	editor.flush()
 	# The graph behaves like opening a note: leave a page and, on mobile,
 	# collapse the tree drawer so the graph fills the screen.
 	if page_mode != "":
@@ -1153,7 +900,7 @@ func _on_open_vault() -> void:
 func _on_vault_selected(path: String) -> void:
 	if page_mode == PAGE_VAULT:
 		_close_page()
-	_flush_save()
+	editor.flush()
 	if GameManager.set_vault_dir(path):
 		NoteCrud.purge_expired()  # trash belongs to the old vault's retention window
 		# Re-bind sync to the new vault's identity (phrase/peers/sync_state key)
@@ -1236,12 +983,6 @@ func _on_trash_empty() -> void:
 
 # ------------------------------------------------------------ exporting
 
-func _current_doc() -> Variant:
-	if help_mode or GameManager.current_file == "":
-		return null
-	_flush_save()
-	return MarkdownParser.parse(NoteMetadata.preview(code_edit.text, _note_title))
-
 func _export_dest(ext: String) -> String:
 	var filename := GameManager.current_rel.get_file().trim_suffix(".md") + "." + ext
 	# Desktop users expect rendered documents in the native Downloads folder.
@@ -1290,7 +1031,7 @@ func _flash(msg: String) -> void:
 func _on_more_action(id: int) -> void:
 	match id:
 		MoreMenuComponent.ID_SAVE_NOW:
-			_flush_save()
+			editor.flush()
 			_flash("✓ Saved")
 		MoreMenuComponent.ID_DELETE_NOTE:
 			if not vault_tree.side_tree.get_selected() == vault_tree.side_tree.get_root():

@@ -39,7 +39,7 @@ func _run_smoke() -> void:
 	var escaped := WikiLinks.extract_links("literal \\[[Alpha]] and real [[Beta]]")
 	fails += _check(escaped.size() == 1 and escaped[0] == "Beta", "escaped [[ is not a link")
 	m.code_edit.text = "---\ntitle: \"Smoke\"\n---\n\n[[Demo]]\n\n%%g%% ++f++"
-	m._render_preview()
+	m.editor.render_preview()
 	fails += _check(m.content_host.get_child_count() > 0, "preview children=%d" % m.content_host.get_child_count())
 	if DisplayServer.get_name() != "headless":
 		# Visual-only check: render the new block types (callout, multiline
@@ -49,7 +49,7 @@ func _run_smoke() -> void:
 		GameManager.current_rel = "features.md"
 		m.code_edit.text = _SMOKE_FEATURES
 		m.note_title.text = "Features"
-		m._render_preview()
+		m.editor.render_preview()
 		for i in 6:
 			await m.get_tree().process_frame
 		RenderingServer.force_draw()
@@ -68,11 +68,11 @@ func _run_smoke() -> void:
 			himg.save_png("/tmp/neon_help.png")
 			print("  [help preview] saved /tmp/neon_help.png %dx%d" % [himg.get_width(), himg.get_height()])
 		# restore pre-smoke state for the remaining checks
-		m.help_mode = false
-		m.source_mode = false
+		m.editor.help_mode = false
+		m.editor.source_mode = false
 		m.code_edit.text = "---\ntitle: \"Smoke\"\n---\n\n[[Demo]]\n\n%%g%% ++f++"
 		m.note_title.text = "Smoke"
-		m._render_preview()
+		m.editor.render_preview()
 	# tree with folders
 	GameManager.write_note("sub/demo.md", "---\ntitle: \"Sub\"\n---\n\nhi\n")
 	GameManager.scan_notes()
@@ -127,21 +127,21 @@ func _run_smoke() -> void:
 	GameManager.current_rel = "autosave_test.md"
 	m.code_edit.text = "---\ntitle: \"Autosave\"\n---\n\nflush test\n"
 	m.code_edit.visible = true
-	m._flush_save()
+	m.editor.flush()
 	fails += _check(FileAccess.file_exists(GameManager.vault_abs() + "/autosave_test.md"), "autosave flush writes file")
 	# Each character restarts a 1.5 s timer; a second edit before timeout
 	# must not write until the idle period or an explicit transition flush.
 	m.code_edit.text = "delayed first"
-	m._on_text_changed()
-	fails += _check(is_equal_approx(m.autosave_timer.wait_time, 0.5) and m.autosave_timer.time_left > 0.0,
+	m.editor._on_text_changed()
+	fails += _check(is_equal_approx(m.editor.autosave_timer.wait_time, 0.5) and m.editor.autosave_timer.time_left > 0.0,
 		"typing starts 0.5 s debounce")
 	fails += _check(not GameManager.read_note("autosave_test.md").contains("delayed first"),
 		"typing does not write immediately")
-	m._flush_save()
+	m.editor.flush()
 	fails += _check(GameManager.read_note("autosave_test.md").contains("delayed first"),
 		"transition flush saves pending text")
 	# mode toggle
-	m._toggle_mode()
+	m.editor.toggle_mode()
 	fails += _check(m.code_edit.visible and not m.content_host.visible, "mode toggle → source")
 	# in-document find (edit mode): highlight every match + arrow navigation
 	m.code_edit.text = "alpha beta alpha\nAlpha gamma\nalpha"
@@ -191,13 +191,13 @@ func _run_smoke() -> void:
 	# exiting the editor (edit → preview) resets the find bar
 	m.editor.find_in_editor("#api")
 	fails += _check(not m.editor._search_matches.is_empty(), "query active before leaving edit mode")
-	m._toggle_mode()
+	m.editor.toggle_mode()
 	fails += _check(m.editor.edit_search.text == "" and m.editor._search_matches.is_empty() and not m.search_row.visible,
 		"leaving edit mode resets the search box")
 	fails += _check(m.content_host.visible and not m.code_edit.visible, "mode toggle → preview")
 	# help page
 	m._show_help()
-	fails += _check(m.help_mode and m.content_host.get_child_count() > 0, "help page renders")
+	fails += _check(m.editor.is_help() and m.content_host.get_child_count() > 0, "help page renders")
 	# html exporter
 	var html := HtmlExporter.to_html(doc)
 	fails += _check(html.begins_with("<!DOCTYPE") or html.begins_with("<html"), "html export produces doc")
@@ -279,7 +279,7 @@ func _run_smoke() -> void:
 	m.code_edit.text = "---\ntitle: \"Img\"\n---\n\n![]( )\n"
 	GameManager.current_file = GameManager.vault_abs() + "/imgtest.md"
 	GameManager.current_rel = "imgtest.md"
-	m._flush_save()
+	m.editor.flush()
 	m._on_image_selected("/tmp/nn_smoke_img.png")
 	fails += _check(FileAccess.file_exists(GameManager.vault_abs() + "/media/nn_smoke_img.png"), "image copied to media/")
 	fails += _check(GameManager.read_note("imgtest.md").contains("](media/nn_smoke_img"), "image embed md updated")

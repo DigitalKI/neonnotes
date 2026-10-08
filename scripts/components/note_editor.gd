@@ -1,10 +1,14 @@
 class_name NoteEditor
 extends PanelContainer
-## Note view: owns the source editor's in-document find bar and the mobile
-## text-selection gesture. Attached to %Content in Main.tscn (the node that
-## parents the source editor and the preview host), so it needs no scene
-## surgery. Cross-component hooks (status flash, slash menu) are injected by
-## Main via `bind()`.
+## Note view: source editor, preview, in-document find bar, mobile
+## text-selection gesture, autosave + front-matter save, title/tags editing,
+## edit/preview mode and the Help showcase page. Attached to %Content in
+## Main.tscn (the node that parents the editor and the preview host), so it
+## needs no scene surgery.
+##
+## Cross-component hooks are injected by Main via `bind()`; page ownership
+## (settings/sync/…) stays in Main, which mirrors `page_mode` into this
+## component so the note view can yield the screen while a page is open.
 ##
 ## Mobile selection model: plain drag always scrolls (native). A double-tap on
 ## a word activates a selection with SelectionOverlay handles + Cut/Copy/Paste
@@ -15,41 +19,87 @@ const SELECTION_OVERLAY_SCENE := preload("res://scenes/components/selection_over
 const TextSearch := preload("res://scripts/common/text_search.gd")
 const DOUBLE_TAP_WINDOW_MS := 400
 
+const NOTE_TEMPLATE := """---
+title: "%s"
+---
+
+# %s
+"""
+
 @onready var code_edit: CodeEdit = %SourceEditor
 @onready var edit_search: LineEdit = %EditSearch
 @onready var search_row: HBoxContainer = %SearchRow
 @onready var search_prev: Button = %SearchPrev
 @onready var search_next: Button = %SearchNext
+@onready var title_panel: PanelContainer = %TitlePanel
+@onready var title_input: LineEdit = %TitleInput
+@onready var tags_panel: PanelContainer = %TagsPanel
+@onready var tags_chips: HFlowContainer = %TagsChips
+@onready var tags_input: LineEdit = %TagsInput
+@onready var tags_add: Button = %TagsAdd
 
-## Injected by Main: status-bar flash + the slash menu used by the selection
-## bar's "format" action.
+## Injected by Main: status-bar flash, slash menu (selection "format" + typing
+## checks), the toolbar's note-title label, and the preview body container.
 var flash_cb: Callable = func(_msg: String) -> void: pass
 var slash_menu: SlashMenuComponent
+var note_title_label: Label
+var content_body: VBoxContainer
+
+## Which full-content page owns the screen ("" = the note view does). Mirrored
+## from Main; the note view only compares it against the settings page.
+var page_mode := ""
+const PAGE_SETTINGS := "settings"
+
+var help_mode := false
+var source_mode := false
+var autosave_timer := Timer.new()
+
+## Editor state for the currently open note (front matter + saved form).
+var _note_title := ""
+var _metadata_source := ""
+var _saved_body := ""
+var _saved_title := ""
+var _saved_tags: Array[String] = []
+var _note_tags: Array[String] = []
 
 ## In-document find (edit mode): every match is painted by the highlighter,
 ## the arrows step through `_search_matches` and the current one is selected.
 var _search_query := ""
 var _search_matches: Array[Vector2i] = []
-
 var _search_index := -1
-## Mirrors Main's source_mode while the editor session state is still split
-## (Step 3 of the decomposition makes the editor own it outright).
-var source_mode := false
+
 var selection_overlay: SelectionOverlay
 var _last_tap_time := -INF
 
+const TAG_SUGGEST_SCENE := preload("res://scenes/components/tag_suggest.tscn")
+var _tag_suggest: TagSuggest
 
-func bind(p_flash: Callable, p_slash_menu: SlashMenuComponent) -> void:
+## The "?" Help page lives outside the vault as plain markdown (docs/help.md),
+## so editing it never risks GDScript escaping issues and it cannot be exported.
+var _help_doc := ""
+
+
+func bind(p_flash: Callable, p_slash_menu: SlashMenuComponent, p_note_title: Label, p_content_body: VBoxContainer) -> void:
 	flash_cb = p_flash
 	slash_menu = p_slash_menu
+	note_title_label = p_note_title
+	content_body = p_content_body
 
 
 func _ready() -> void:
+	# Debounce typing; transitions still flush immediately.
+	autosave_timer.name = "AutosaveTimer"
+	autosave_timer.one_shot = true
+	autosave_timer.wait_time = 0.5
+	autosave_timer.timeout.connect(flush)
+	add_child(autosave_timer)
+
 	edit_search.text_changed.connect(find_in_editor)
 	edit_search.text_submitted.connect(func(_t: String): search_step(1))
 	search_prev.pressed.connect(search_step.bind(-1))
 	search_next.pressed.connect(search_step.bind(1))
 	update_search_controls()
+	code_edit.text_changed.connect(_on_text_changed)
 	code_edit.gui_input.connect(_on_code_edit_gui_input)
 	code_edit.get_menu().id_pressed.connect(_on_edit_menu_action)
 	code_edit.get_menu().popup_hide.connect(_on_edit_menu_closed)
@@ -66,6 +116,186 @@ func _ready() -> void:
 		selection_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		selection_overlay.bind(code_edit)
 		selection_overlay.action.connect(_on_selection_overlay_action)
+
+	tags_add.pressed.connect(add_note_tag)
+	tags_input.text_submitted.connect(func(_value: String): add_note_tag())
+	setup_tag_suggest()
+	title_input.text_changed.connect(_on_note_title_changed)
+	tags_panel.visible = false
+	title_panel.visible = false
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST and is_instance_valid(autosave_timer):
+		flush()
+
+
+# ------------------------------------------------- open / save a note
+
+## Open a note in the editor: Main flushes the previous note first (its
+## GameManager.current_rel must still be current), repoints GameManager, reads
+## the source and hands it over here. This call only loads the form and applies
+## the mode.
+func load_note(rel: String, source: String) -> void:
+	clear_search()
+	_metadata_source = source
+	_note_tags = GameManager._parse_note_meta(source).get("tags", [])
+	_note_title = NoteMetadata.field(source, "title", rel.get_file().trim_suffix(".md"))
+	set_title_form(_note_title)
+	code_edit.text = NoteMetadata.body(source)
+	remember_saved_form()
+	refresh_note_tag_chips()
+	help_mode = false
+	source_mode = false
+	apply_mode()
+
+
+## Save pending edits. Called on debounce, note switch, mode change, sync, quit.
+func flush() -> void:
+	autosave_timer.stop()
+	_flush_state(GameManager.current_rel, code_edit.text, _note_title, _note_tags, _metadata_source)
+
+
+func _flush_state(fname: String, body: String, title: String, tags: Array[String], metadata_source: String) -> void:
+	if help_mode or fname == "" or not code_edit.visible:
+		return
+	if body == _saved_body and title == _saved_title and tags == _saved_tags:
+		return
+	var old_title: String = GameManager.titles.get(fname, "")
+	var source_to_save := _compose_source(body, metadata_source, title, tags)
+	if GameManager.write_note(fname, source_to_save):
+		_metadata_source = source_to_save
+		_saved_body = body
+		_saved_title = title
+		_saved_tags = tags.duplicate()
+		flash_cb.call("✓ Saved " + fname)
+		sync_service().note_saved(fname)  # debounce auto-sync + clear any tombstone
+		# rebuild the tree if the front-matter title changed
+		if old_title != title:
+			GameManager.scan_notes()
+			refresh_tree_cb.call()
+
+
+func _compose_source(body: String, metadata_source: String, title: String, tags: Array[String]) -> String:
+	return NoteMetadata.update(body, metadata_source, title, tags,
+		Time.get_datetime_string_from_system(true, false))
+
+
+func compose_note_source() -> String:
+	return _compose_source(code_edit.text, _metadata_source, _note_title, _note_tags)
+
+
+## Write a fully composed source to disk now (media rewrites, new-note paths)
+## and mark the editor form as saved so a later flush cannot regress it.
+func save_source(rel: String, source: String) -> void:
+	GameManager.write_note(rel, source)
+	_metadata_source = source
+	remember_saved_form()
+
+
+## Parsed document of the open note for exports (flushes pending edits first).
+func current_doc() -> Variant:
+	if help_mode or GameManager.current_file == "":
+		return null
+	flush()
+	return MarkdownParser.parse(NoteMetadata.preview(code_edit.text, _note_title))
+
+
+## Initialize the editor form for a freshly created note file (new note dialog
+## / wiki-link creation) so a later flush cannot overwrite its front matter.
+func begin_new_note(rel: String, source: String) -> void:
+	_note_tags = GameManager._parse_note_meta(source).get("tags", [])
+	_note_title = NoteMetadata.field(source, "title", rel.get_file().trim_suffix(".md"))
+	_metadata_source = source
+	remember_saved_form()
+	refresh_note_tag_chips()
+
+
+func note_template(title: String) -> String:
+	return NOTE_TEMPLATE % [title, title]
+
+
+## Injected by Main: tree refresh callback (used when a saved title change
+## requires the vault tree to rebuild).
+var refresh_tree_cb: Callable = func() -> void: pass
+
+## Injected by Main (deferred): the SyncService node, which does not exist at
+## editor _ready time.
+var sync_service_cb: Callable = func() -> Variant: return null
+
+func sync_service() -> Variant:
+	return sync_service_cb.call()
+
+
+# ------------------------------------------------- title / tags
+
+func _on_note_title_changed(value: String) -> void:
+	_note_title = value.strip_edges()
+	note_title_label.text = _note_title if _note_title != "" else GameManager.current_rel.get_file().trim_suffix(".md")
+	autosave_timer.start()
+
+
+func set_title_form(value: String) -> void:
+	title_input.set_block_signals(true)
+	title_input.text = value
+	title_input.set_block_signals(false)
+	note_title_label.text = value if value != "" else GameManager.current_rel.get_file().trim_suffix(".md")
+
+
+func refresh_note_tag_chips() -> void:
+	for child in tags_chips.get_children():
+		child.queue_free()
+	for tag in _note_tags:
+		var chip := Button.new()
+		chip.text = "◆ " + tag + "   ×"
+		chip.tooltip_text = "Remove tag " + tag
+		chip.custom_minimum_size = Vector2(0, 32)
+		chip.pressed.connect(func():
+			_note_tags.erase(tag)
+			refresh_note_tag_chips()
+			flush())
+		tags_chips.add_child(chip)
+
+
+func add_note_tag() -> void:
+	var tag := tags_input.text.strip_edges().trim_prefix("#")
+	if tag == "" or tag.contains(","):
+		return
+	if not _note_tags.has(tag):
+		_note_tags.append(tag)
+	tags_input.clear()
+	refresh_note_tag_chips()
+	flush()
+
+
+## Tag autocomplete for the note editor's TagsInput: lists every vault tag
+## with its note count and surfaces near-matches (jw / j-w) so near-duplicate
+## tags are caught before they are created.
+func setup_tag_suggest() -> void:
+	var overlay_parent := get_tree().current_scene
+	if overlay_parent == null:
+		overlay_parent = self
+	_tag_suggest = TAG_SUGGEST_SCENE.instantiate()
+	overlay_parent.add_child(_tag_suggest)
+	_tag_suggest.bind(tags_input, TagSuggest.Mode.WHOLE)
+	_tag_suggest.tag_chosen.connect(func(_tag: String): add_note_tag())  # component wrote the canonical tag already
+
+
+func close_tag_suggest() -> void:
+	if _tag_suggest != null:
+		_tag_suggest.close()
+
+
+# ------------------------------------------------- typing / autosave
+
+func _on_text_changed() -> void:
+	help_mode = false
+	autosave_timer.start()  # restart after each character/paste
+	if slash_menu != null:
+		slash_menu.check()
+	# Keep the highlight/counter honest while the note is edited with a query up.
+	if _search_query != "":
+		recount_search_matches()
 
 
 # ------------------------------------------------------------ mobile selection handles
@@ -277,3 +507,122 @@ func update_search_controls() -> void:
 		edit_search.tooltip_text = "%d / %d matches" % [_search_index + 1, _search_matches.size()]
 	else:
 		edit_search.tooltip_text = "No matches"
+
+
+# ------------------------------------------------- mode toggle / help / preview
+
+signal mode_changed(editing: bool)
+
+## Apply the current mode to the note view's visibility. Main guards this: a
+## full-screen page keeps the screen until it closes (see page_mode), and Main
+## refreshes the toolbar's mode-button label from the mode_changed signal.
+func apply_mode() -> void:
+	close_tag_suggest()
+	code_edit.visible = source_mode
+	search_row.visible = source_mode
+	%EditPadding.visible = source_mode
+	tags_panel.visible = source_mode and not help_mode and GameManager.current_rel != ""
+	title_panel.visible = tags_panel.visible
+	%ContentHost.visible = not source_mode
+	mode_changed.emit(source_mode)
+	if source_mode:
+		# Android may resize the viewport only after the mode switch and focus
+		# opens the IME. Let LayoutComponent observe that resize and follow the
+		# caret once the editor is actually visible.
+		code_edit.call_deferred("adjust_viewport_to_caret", 0)
+	else:
+		hide_selection_overlay()
+		render_preview()
+
+
+## Leaving edit mode: persist now, reset the find bar, re-render.
+func toggle_mode() -> void:
+	autosave_timer.stop()
+	flush()  # leaving edit mode: persist now
+	source_mode = not source_mode
+	if not source_mode:
+		clear_search()  # exiting the editor resets the find bar
+	apply_mode()
+
+
+## Replace the note view with the Help showcase page (docs/help.md).
+func show_help() -> void:
+	flush()
+	clear_search()
+	help_mode = true
+	GameManager.current_file = ""
+	autosave_timer.stop()
+	source_mode = false
+	code_edit.visible = false
+	%EditPadding.visible = false
+	tags_panel.visible = false
+	title_panel.visible = false
+	%ContentHost.visible = true
+	if note_title_label != null:
+		note_title_label.text = "Style Guide"
+	PreviewBuilder.pal_override = {}
+	PreviewBuilder.build(MarkdownParser.parse(load_help_doc()), content_body)
+	%ContentHost.scroll_vertical = 0
+
+
+func load_help_doc() -> String:
+	if _help_doc == "":
+		var f := FileAccess.open("res://docs/help.md", FileAccess.READ)
+		_help_doc = f.get_as_text() if f else "# Help file missing"
+	return _help_doc
+
+
+func is_help() -> bool:
+	return help_mode
+
+
+## Re-render the preview. `preserve_scroll` keeps the reader's position across
+## a sync re-render instead of jumping to the top.
+func render_preview(preserve_scroll := false) -> void:
+	if page_mode == PAGE_SETTINGS:
+		return
+	if page_mode != "":
+		return
+	code_edit.visible = false
+	%EditPadding.visible = false
+	tags_panel.visible = false
+	title_panel.visible = false
+	%ContentHost.visible = true
+	var prev_scroll: float = %ContentHost.scroll_vertical if preserve_scroll else 0.0
+	var doc := MarkdownParser.parse(NoteMetadata.preview(code_edit.text, _note_title))
+	# per-note theme: front-matter  theme: <Palette>
+	PreviewBuilder.pal_override = GameManager.PALETTES.get(str(doc.get("meta", {}).get("theme", "")), {})
+	# Progressive build: a large note streams in over several frames instead of
+	# blocking this one (~1.9 s for a 2k-line note on a phone before).
+	await PreviewBuilder.build_async(self, doc, content_body)
+	# Fresh renders (mode switch/new note) drop to the top; a sync re-render keeps
+	# the reader's scroll offset instead of jumping them.
+	if is_instance_valid(%ContentHost):
+		%ContentHost.scroll_vertical = prev_scroll
+
+
+## Auto-refresh the open note after a sync pulled a newer copy. In VIEW
+## (preview) mode the re-render keeps the reading position; in edit mode we
+## never clobber the user's in-progress typing — their edits take priority
+## until they leave edit mode.
+func reload_current() -> void:
+	if help_mode or GameManager.current_rel == "" or source_mode:
+		return
+	var latest := GameManager.read_note(GameManager.current_rel)
+	if latest == compose_note_source():
+		return
+	_note_tags = GameManager._parse_note_meta(latest).get("tags", [])
+	_metadata_source = latest
+	_note_title = NoteMetadata.field(latest, "title", GameManager.current_rel.get_file().trim_suffix(".md"))
+	set_title_form(_note_title)
+	code_edit.text = NoteMetadata.body(latest)
+	remember_saved_form()
+	refresh_note_tag_chips()
+	render_preview(true)  # keep reading position across the re-render
+	flash_cb.call("↻ Updated " + GameManager.current_rel)
+
+
+func remember_saved_form() -> void:
+	_saved_body = code_edit.text
+	_saved_title = _note_title
+	_saved_tags = _note_tags.duplicate()
