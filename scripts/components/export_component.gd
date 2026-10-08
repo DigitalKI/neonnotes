@@ -5,11 +5,9 @@ extends Node
 ## system sharing. The host supplies callables so this component owns no
 ## note-state itself:
 ##   doc_cb() -> Variant (parsed markdown doc, or null when unavailable)
-##   dest_cb(ext: String) -> String (absolute export destination)
 ##   flash_cb(msg: String) -> status-bar feedback
 
 var doc_cb: Callable
-var dest_cb: Callable
 var flash_cb: Callable
 var get_code: Callable
 ## Callable() -> float logical width of the content pane (the WIDTH the
@@ -45,6 +43,22 @@ func get_active_popup() -> PopupMenu:
 	return popup
 
 
+## Export destination: desktop HTML goes to the OS Downloads folder (users
+## expect rendered documents there). Keep everything else in the vault so the
+## media/share integration can register it with the device; other formats and
+## platforms retain the vault export location for portability.
+func _destination(ext: String) -> String:
+	var filename := GameManager.current_rel.get_file().trim_suffix(".md") + "." + ext
+	if ext == "html" and OS.get_name() in ["Linux", "Windows"]:
+		var downloads := OS.get_system_dir(OS.SYSTEM_DIR_DOWNLOADS)
+		if not downloads.is_empty():
+			DirAccess.make_dir_recursive_absolute(downloads)
+			return downloads.path_join(filename)
+	var d := GameManager.vault_abs() + "/" + GameManager.EXPORTS_SUBDIR
+	DirAccess.make_dir_recursive_absolute(d)
+	return d.path_join(filename)
+
+
 
 
 ## Logical width the document is rendered at on screen. Without ui_scale or the
@@ -78,7 +92,7 @@ func handle_action(id: int) -> void:
 			if doc == null:
 				return
 			var ext := "png" if id == ID_PNG else "gif"
-			var dest: String = dest_cb.call(ext)
+			var dest := _destination(ext)
 			if ext == "png":
 				await Exporter.export_png(get_parent(), _export_width(), dest, doc)
 			else:
@@ -93,7 +107,7 @@ func handle_action(id: int) -> void:
 				saved_msg = "Saved to media library: " + dest.get_file()
 			flash_cb.call(saved_msg)
 		ID_SAVE_HTML:
-			var html_dest: String = dest_cb.call("html") 
+			var html_dest := _destination("html")
 			if HtmlExporter.save(html_dest, MarkdownParser.parse(get_code.call())):
 				flash_cb.call("Saved HTML: " + html_dest.get_file())
 			else:
@@ -113,7 +127,7 @@ func _share(kind: int) -> void:
 	if kind == 3:
 		Share.share_text(GameManager.current_rel.get_file().trim_suffix(".md") + " (HTML)", HtmlExporter.to_html(MarkdownParser.parse(get_code.call())))
 		return
-	var dest: String = dest_cb.call("png" if kind == 0 else "gif")
+	var dest := _destination("png" if kind == 0 else "gif")
 	if kind == 0:
 		await Exporter.export_png(get_parent(), _export_width(), dest, doc)
 	else:

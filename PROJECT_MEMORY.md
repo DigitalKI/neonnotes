@@ -364,12 +364,25 @@ _Last updated: 2026-10-08 · Godot 4.7 · renderer: gl_compatibility_
   every "translucent" color was opaque: table header bg rendered solid accent
   behind accent-colored header text (invisible titles) and data cells solid
   black. `_hex()` now emits 8-digit RRGGBBAA whenever alpha < 1.
-- **Component extraction in progress (2026-09-29):** `MediaImport` and
-  `NoteCrud` extracted to `scripts/common/` (main.gd 1380 → 1210 lines).
-  Remaining: split `vault_tree_component.gd` (1046 lines) into
-  `tree_builder.gd` + `tree_drag_handler.gd` behind the existing facade, then
-  the `setup(context)` component contract. Test harnesses keep their own
-  `_rm_dir` copies (they run without the main scene).
+- **main.gd decomposition complete (2026-10-08):** main.gd 1521 → 665 lines
+  of pure shell (boot phases, page router, thin control handlers). Domain
+  logic moved into components: `NoteEditor` (script on `%Content`; owns
+  source editor + preview + find bar + mobile selection + autosave/save
+  pipeline + title/tags + mode/help + `source_mode`/`help_mode`; injected
+  `flash_cb`/`slash_menu`/`note_title_label`/`content_body`/`sync_service_cb`/
+  `refresh_tree_cb` via `bind()`; Main mirrors `page_mode` into it so the note
+  view yields to full-screen pages), deletion orchestration →
+  `VaultTreeComponent` (injected `sync_note_deleted_cb`/`refresh_cb`/
+  `clear_note_cb`/`is_help_cb`), media embed flow → `MediaDialog`, note
+  creation + wiki-link auto-create → `NewNoteDialog`, trash ops →
+  `TrashPage` (restore/purge/empty, signals dropped for bound Callables),
+  export destination → `ExportComponent._destination` (`dest_cb` removed),
+  background-sync startup + dev gate → `SyncService.start_background_sync()`.
+  `_ready` is decomposed into ordered boot phases (each ends with its
+  `_boot_mark`). Staged commits 2b799ba..HEAD. `TextUtils.re_escape` added
+  (shared regex escape). Remaining idea (older note): split
+  `vault_tree_component.gd` (1327 lines) into tree_builder + drag_handler
+  behind the facade.
 - **Next up:**
   - **Graph-first direction (proposed 2026-09-29):** make the graph the center
     of the app rather than a toggle — semantic-zoom node cards/digests
@@ -578,7 +591,8 @@ _These OVERRIDE the skill's defaults for this project._
 | Path | Responsibility |
 |---|---|
 | `res://scenes/main/Main.tscn` | Authored UI shell; instances component subscenes |
-| `res://scripts/main.gd` | Main wiring: modes, autosave, sync, settings page, smoke test |
+| `res://scripts/main.gd` | Shell wiring only: boot phases, page router, control handlers → components; smoke test |
+| `res://scripts/components/note_editor.gd` | Note view (script on `%Content`): editor+preview, find bar, mobile selection, autosave/save, title/tags, mode/help, reload-on-sync |
 | `res://scripts/common/GameManager.gd` | Autoload — global state, scan, palettes, settings, link index |
 | `res://scripts/common/dev_session.gd` | Static editor/MCP dev-session detection (isolates agent runs from the real vault) |
 | `res://scripts/markdown/markdown_parser.gd` | Unified engine: blocks + inline spans + per-line block model (`lines`/`line_markers`) shared by editor & preview |

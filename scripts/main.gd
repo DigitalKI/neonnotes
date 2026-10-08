@@ -1,7 +1,9 @@
 extends Control
-## NeonNotes v2 main wiring. UI shell is authored in Main.tscn; this script
-## binds to it and builds data-driven content. v2.1: autosave, tree vault,
-## mode toggle, export menu, help showcase.
+## NeonNotes shell wiring. The UI is authored in Main.tscn; domain behaviour
+## lives in the components (note_editor, vault_tree, media_dialog,
+## new_note_dialog, export, trash, sync, theme, layout, slash menu...). This
+## script only routes control events into components, owns the page router
+## (which full-screen page owns the screen) and runs the ordered boot phases.
 
 const MONO_FONT := preload("res://assets/fonts/ShareTechMono-Regular.ttf")
 @onready var bg: ColorRect = %Bg
@@ -292,7 +294,6 @@ func _build_dynamic_ui() -> void:
 	# IDs caused Save/Share entries to dispatch to the wrong handlers.
 	var menu: PopupMenu = toolbar.export_btn.get_popup()
 	export_component.doc_cb = editor.current_doc
-	export_component.dest_cb = _export_dest
 	export_component.flash_cb = _flash
 	export_component.get_code = func(): return code_edit.text
 	# Share the live CRT overlay material with the Exporter so exports that opt
@@ -343,9 +344,9 @@ func _build_dynamic_ui() -> void:
 	new_dialog.close_requested.connect(_close_page)
 	vault_picker.close_requested.connect(_close_page)
 	trash_page.close_requested.connect(_close_page)
-	trash_page.restore_requested.connect(_on_trash_restore)
-	trash_page.purge_requested.connect(_on_trash_purge)
-	trash_page.empty_requested.connect(_on_trash_empty)
+	trash_page.bind(_refresh_list,
+		func(rel: String): sync_service.note_restored(rel),
+		func(): sync_service.note_saved(), _flash)
 
 ## Push GameManager's density-derived scale onto the whole canvas (fonts,
 ## metrics and touch targets alike), then re-run the responsive layout.
@@ -613,58 +614,7 @@ func _open_trash() -> void:
 	_open_page(PAGE_TRASH, trash_page)
 	trash_page.begin()
 
-func _on_trash_restore(id: String) -> void:
-	var res := NoteCrud.restore_from_trash(id)
-	if not res.get("ok", false):
-		status_bar.flash("✗ Could not restore item")
-		trash_page.refresh()
-		return
-	GameManager.scan_notes()
-	if sync_service:
-		for p in res.get("paths", []):
-			sync_service.note_restored(str(p))
-		sync_service.note_saved()
-	_refresh_list()
-	trash_page.refresh()
-	_flash("↩ Restored " + str(res.get("rel", "")))
-
-func _on_trash_purge(id: String) -> void:
-	NoteCrud.purge_from_trash(id)
-	trash_page.refresh()
-	_flash("🗑 Deleted permanently")
-
-func _on_trash_empty() -> void:
-	var dlg := ConfirmationDialog.new()
-	dlg.title = "Empty Trash"
-	dlg.dialog_text = "Permanently delete every trashed item?\n\nThis cannot be undone."
-	dlg.ok_button_text = "🗑 Empty Trash"
-	dlg.get_cancel_button().text = "Cancel"
-	DialogTheme.apply(dlg)
-	add_child(dlg)
-	dlg.confirmed.connect(func():
-		NoteCrud.empty_trash()
-		trash_page.refresh()
-		_flash("🗑 Trash emptied")
-		dlg.queue_free())
-	dlg.canceled.connect(func(): dlg.queue_free())
-	dlg.popup_centered()
-
 # ------------------------------------------------------------ exporting
-
-func _export_dest(ext: String) -> String:
-	var filename := GameManager.current_rel.get_file().trim_suffix(".md") + "." + ext
-	# Desktop users expect rendered documents in the native Downloads folder.
-	# Keep Android exports in the vault so the media/share integration can
-	# register them with the device; other formats/platforms retain the vault
-	# export location for portability.
-	if ext == "html" and OS.get_name() in ["Linux", "Windows"]:
-		var downloads := OS.get_system_dir(OS.SYSTEM_DIR_DOWNLOADS)
-		if not downloads.is_empty():
-			DirAccess.make_dir_recursive_absolute(downloads)
-			return downloads.path_join(filename)
-	var d := GameManager.vault_abs() + "/" + GameManager.EXPORTS_SUBDIR
-	DirAccess.make_dir_recursive_absolute(d)
-	return d.path_join(filename)
 
 func _boot_mark(label: String) -> void:
 	# Printed in debug builds, with NEONNOTES_BOOT_DEBUG=1, or when the marker
