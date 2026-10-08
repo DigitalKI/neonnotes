@@ -332,6 +332,22 @@ func _run_smoke() -> void:
 	fails += _check(GameManager.font_name == opt.get_item_text(1), "font picker applies the selection")
 	m.settings_component.font_size.value = 20.0
 	fails += _check(GameManager.font_size == 20, "font size control applies the selection")
+	# Density-derived UI scale: automatic value, a manual percentage override on
+	# top of it, and both reachable from the settings page.
+	GameManager.set_auto_ui_scale(false)
+	GameManager.set_ui_scale_percent(150)
+	fails += _check(is_equal_approx(GameManager.ui_scale(), 1.5),
+		"layout scale override applies (got %.2f)" % GameManager.ui_scale())
+	fails += _check(is_equal_approx(m.get_tree().root.content_scale_factor, GameManager.ui_scale()),
+		"layout scale reaches the window")
+	m.settings_component.ui_scale.value = 200.0
+	fails += _check(GameManager.ui_scale_percent == 200, "layout scale control applies the selection")
+	GameManager.set_ui_scale_percent(100)
+	GameManager.set_auto_ui_scale(true)
+	fails += _check(is_equal_approx(GameManager.ui_scale(), GameManager.density_scale()),
+		"automatic layout scale restores the detected density")
+	fails += _check(m.get_tree().root.content_scale_factor == GameManager.ui_scale(),
+		"window scale tracks the automatic setting")
 	m._close_settings()
 	GameManager.set_font("Share Tech Mono")
 	GameManager.set_font_size(GameManager.BASE_FONT_SIZE)

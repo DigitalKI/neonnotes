@@ -40,8 +40,8 @@ func setup(p_bg: ColorRect, p_note_title: Label,
 
 
 ## Record every control's authored font size before the runtime theme exists.
-## The note title is skipped: LayoutComponent owns its size (it also varies by
-## orientation), so it applies the font delta itself.
+## The note title is skipped: LayoutComponent owns its size (it also follows the
+## phone/desktop split), so it applies the font delta itself.
 func _capture_font_sizes(node: Node) -> void:
 	if node == note_title:
 		return
@@ -68,8 +68,8 @@ func apply() -> void:
 	for btn in toolbar.get_children():
 		if btn is Button:
 			btn.add_theme_font_override("font", orb)
-			# Landscape phones shrink all fonts by LayoutComponent.ui_font_delta,
-			# which now also carries the user font-size delta.
+			# Toolbar glyphs follow the user font-size preference only; the
+			# canvas scale already handles the screen (no per-orientation shrink).
 			btn.add_theme_font_size_override("font_size", 13 - LayoutComponent.ui_font_delta)
 	code_edit.add_theme_color_override("font_color", c["text"])
 	code_edit.add_theme_color_override("background_color", Color(c["bg"].r, c["bg"].g, c["bg"].b, 0.7))

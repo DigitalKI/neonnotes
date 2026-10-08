@@ -13,6 +13,9 @@ signal metadata_ready
 signal sync_identity_changed
 ## Emitted when the live CRT overlay master switch changes (see `crt_ui`).
 signal crt_ui_changed(enabled: bool)
+## Emitted when the density-derived UI scale or its manual override changes, so
+## the shell re-applies it to the window and re-runs the responsive layout.
+signal ui_scale_changed
 
 const VAULT_DIR := "user://vault"
 const SETTINGS := "user://settings.cfg"
@@ -67,6 +70,37 @@ const MAX_FONT_SIZE := 28
 var font_name := DEFAULT_FONT
 var font_size := BASE_FONT_SIZE
 var _font_cache: Dictionary = {}
+
+## ---------------------------------------------------------- UI scaling
+## The whole canvas is scaled by the display's pixel *density*, so a physically
+## small screen with a large resolution does not render a tiny UI. The scale is
+## derived from the panel density alone — never from the window size or aspect —
+## because rotating a phone must not change how large the text is.
+## REFERENCE_DPI is Android's `mdpi` baseline: 160 dpi == 1.0 (the classic
+## desktop panel the shell's authored sizes were tuned on).
+const REFERENCE_DPI := 160.0
+## `screen_get_dpi()` is reliable on Android, but some Linux drivers/headless
+## sessions report nonsense (0, or a value no real panel has). Only trust it
+## inside this window; otherwise leave the UI at the authored baseline.
+const MIN_TRUSTED_DPI := 110.0
+const MAX_TRUSTED_DPI := 700.0
+const MIN_DENSITY_SCALE := 1.0
+const MAX_DENSITY_SCALE := 3.0
+## Manual override of the automatic scale, in percent (100 == as detected).
+const MIN_UI_SCALE_PERCENT := 60
+const MAX_UI_SCALE_PERCENT := 200
+const MAX_UI_SCALE := 4.0
+## A phone, for layout purposes, is a screen whose shorter side is under this
+## many inches — a landscape phone is still a phone, a tablet is not.
+const PHONE_MAX_SHORT_SIDE_INCHES := 4.5
+
+## Follow the detected display density (the user can still nudge the result).
+var auto_ui_scale := true
+## Manual override: a percentage applied on top of the automatic scale, or on
+## top of the authored baseline when `auto_ui_scale` is off.
+var ui_scale_percent := 100
+## Cached density reading; -1 means "not measured yet" (see density_scale()).
+var _density_scale := -1.0
 var graph_levels := 2
 var export_crt := true  # apply CRT overlay to exported PNG/JPEG/GIF
 var crt_ui := true  # live CRT overlay on the UI — master switch for CRT FX
@@ -264,6 +298,68 @@ func set_font_size(size: int) -> void:
 	font_size = clamped
 	font_changed.emit()
 	_save_settings()
+
+# --------------------------------------------------------- UI scaling
+
+## Multiplier the canvas is scaled by, taken from the display density alone.
+## Measured lazily so it is read after the window/display exists.
+func density_scale() -> float:
+	if _density_scale < 0.0:
+		_density_scale = _compute_density_scale()
+	return _density_scale
+
+func _compute_density_scale() -> float:
+	var dpi := float(DisplayServer.screen_get_dpi())
+	if dpi < MIN_TRUSTED_DPI or dpi > MAX_TRUSTED_DPI:
+		return 1.0
+	return clampf(dpi / REFERENCE_DPI, MIN_DENSITY_SCALE, MAX_DENSITY_SCALE)
+
+## Total canvas scale: automatic density x the manual override. Depends on the
+## display only — never on the window's size or orientation.
+func ui_scale() -> float:
+	var base := density_scale() if auto_ui_scale else 1.0
+	return clampf(base * float(ui_scale_percent) / 100.0,
+			MIN_UI_SCALE_PERCENT / 100.0, MAX_UI_SCALE)
+
+## Shorter side of the display in inches, or 0.0 when the density is untrusted.
+func physical_short_side_inches() -> float:
+	var dpi := float(DisplayServer.screen_get_dpi())
+	if dpi < MIN_TRUSTED_DPI or dpi > MAX_TRUSTED_DPI:
+		return 0.0
+	var s := DisplayServer.screen_get_size()
+	if s.x <= 0 or s.y <= 0:
+		return 0.0
+	return float(mini(s.x, s.y)) / dpi
+
+## True for phone-sized screens (phones, not tablets or desktops) — the layout
+## split uses this instead of the pixel viewport so a landscape phone is never
+## mistaken for a small desktop window.
+func is_phone_screen() -> bool:
+	var inches := physical_short_side_inches()
+	return inches > 0.0 and inches < PHONE_MAX_SHORT_SIDE_INCHES
+
+func set_auto_ui_scale(enabled: bool) -> void:
+	if enabled == auto_ui_scale:
+		return
+	auto_ui_scale = enabled
+	ui_scale_changed.emit()
+	_save_settings()
+
+func set_ui_scale_percent(percent: int) -> void:
+	var clamped := clampi(percent, MIN_UI_SCALE_PERCENT, MAX_UI_SCALE_PERCENT)
+	if clamped == ui_scale_percent:
+		return
+	ui_scale_percent = clamped
+	ui_scale_changed.emit()
+	_save_settings()
+
+## Re-read the display metrics (moving a window between monitors can change the
+## reported density). Re-emits only when the effective scale actually moved.
+func refresh_display_metrics() -> void:
+	var before := ui_scale()
+	_density_scale = -1.0
+	if not is_equal_approx(before, ui_scale()):
+		ui_scale_changed.emit()
 
 # ------------------------------------------------------------ vault
 
@@ -727,6 +823,9 @@ func _load_settings() -> void:
 	crt_ui = bool(cf.get_value("ui", "crt_ui", crt_ui))
 	font_name = String(cf.get_value("ui", "font", font_name))
 	font_size = clampi(int(cf.get_value("ui", "font_size", font_size)), MIN_FONT_SIZE, MAX_FONT_SIZE)
+	auto_ui_scale = bool(cf.get_value("ui", "auto_ui_scale", auto_ui_scale))
+	ui_scale_percent = clampi(int(cf.get_value("ui", "ui_scale_percent", ui_scale_percent)),
+			MIN_UI_SCALE_PERCENT, MAX_UI_SCALE_PERCENT)
 	graph_levels = clampi(int(cf.get_value("ui", "graph_levels", graph_levels)), 1, 10)
 	open_start_mode = String(cf.get_value("ui", "open_start_mode", open_start_mode))
 	if open_start_mode != "last" and open_start_mode != "homepage":
@@ -772,6 +871,8 @@ func _save_settings() -> void:
 	cf.set_value("ui", "crt_ui", crt_ui)
 	cf.set_value("ui", "font", font_name)
 	cf.set_value("ui", "font_size", font_size)
+	cf.set_value("ui", "auto_ui_scale", auto_ui_scale)
+	cf.set_value("ui", "ui_scale_percent", ui_scale_percent)
 	cf.set_value("ui", "graph_levels", graph_levels)
 	cf.set_value("ui", "open_start_mode", open_start_mode)
 	cf.set_value("ui", "last_opened_rel", last_opened_rel)

@@ -164,12 +164,13 @@ func _ready() -> void:
 	PreviewBuilder.image_cb = _on_image_click
 	layout_component.ready()
 	_boot_mark("theme-layout")
-	# Landscape/portrait rotation changes LayoutComponent.ui_font_delta; chrome
-	# and content fonts must be re-applied for the new delta to take effect.
+	# Rotation changes the available layout shape (toolbar/margins), but not
+	# the density-based font/UI scale.
 	layout_component.mobile_changed.connect(_on_mobile_changed)
-	# High-DPI phones: scale the whole UI from the 96dpi desktop baseline
-	var ui_scale := clampf(DisplayServer.screen_get_dpi() / 160.0, 1.0, 3.0)
-	get_tree().root.content_scale_factor = ui_scale
+	# High-DPI phones: scale the whole canvas from the display's physical density
+	# so a small high-resolution screen does not render a tiny UI.
+	_apply_ui_scale()
+	GameManager.ui_scale_changed.connect(_on_ui_scale_changed)
 	if OS.get_environment("NEONNOTES_SMOKE") == "1":
 		_prepare_smoke_vault()
 	# Housekeeping is deferred past the first frame: it stat()s the trash dir
@@ -621,6 +622,29 @@ func _on_tag_suggestion_chosen(_tag: String) -> void:
 func _close_tag_suggest() -> void:
 	if _tag_suggest != null:
 		_tag_suggest.close()
+
+## Push GameManager's density-derived scale onto the whole canvas (fonts,
+## metrics and touch targets alike), then re-run the responsive layout.
+func _on_ui_scale_changed() -> void:
+	_apply_ui_scale()
+	layout_component.update_layout(true)
+	theme_component.apply()
+
+
+## Apply the global UI scale to the window.
+##
+## Phones: `canvas_items` would also scale by the window's short ratio
+## (min(w/base_w, h/base_h)), which flips by ~1.8x between portrait and
+## landscape on the *same* device — the real cause of "portrait too small,
+## landscape too large". Disabling the canvas stretch there leaves the scale
+## purely density-derived, so rotating the phone changes nothing. Desktop keeps
+## `canvas_items`, so resizing a window still scales the UI as it always did.
+func _apply_ui_scale() -> void:
+	var root := get_tree().root
+	root.content_scale_mode = (Window.CONTENT_SCALE_MODE_DISABLED if OS.has_feature("mobile")
+			else Window.CONTENT_SCALE_MODE_CANVAS_ITEMS)
+	root.content_scale_factor = GameManager.ui_scale()
+
 
 func _on_font_changed() -> void:
 	# Family and size both flow through ThemeComponent + LayoutComponent; the

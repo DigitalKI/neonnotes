@@ -210,9 +210,9 @@ static func _font_variants_for_ui() -> Dictionary:
 	return _font_variants
 
 static func _rich(bb: String, default_col: Color) -> RichTextLabel:
-	# Landscape phones shrink every body font and the user font-size setting
-	# grows/shrinks it — both via LayoutComponent.ui_font_delta. Wrapping the
-	# whole bbcode scales everything without explicit sizes; tags that set their
+	# The user font-size preference grows/shrinks every body font (via
+	# LayoutComponent.ui_font_delta). Wrapping the whole bbcode scales
+	# everything without explicit sizes; tags that set their
 	# own font_size (headings) still win over the wrapper.
 	if LayoutComponent.ui_font_delta != 0:
 		bb = "[font_size=%d]%s[/font_size]" % [16 - LayoutComponent.ui_font_delta, bb]

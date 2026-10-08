@@ -291,7 +291,9 @@ Open **⚙ Settings** from the bottom of the sidebar.
 | **Open at startup** | Last opened page, or the vault homepage |
 | **Style** | Palette: Synthwave, Midnight Drive, Toxic Terminal, Arcade Sunset |
 | **Font** | `Share Tech Mono` (default) or `VT323` |
-| **Font size** | 12–28; scales the whole interface |
+| **Font size** | 12–28; the text-size preference, applied on top of the layout scale |
+| **Match screen density** | Scale the whole interface from the display's physical pixel density (on by default) so a small high-resolution screen never renders tiny text. The result is the same in portrait and landscape |
+| **Layout scale** | Manual override of that scale, 60–200% (100% = as detected); the page shows the density the app detected |
 | **Apply CRT FX on export** | Bake the scanline/grille look into exported images |
 
 ## 15. Sync

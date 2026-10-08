@@ -109,8 +109,37 @@ text = "Font size"
 unique_name_in_owner = true
 layout_mode = 2
 min_value = 12.0
-max_value = 36.0
+max_value = 28.0
 value = 16.0
+
+[node name="AutoUiScale" type="CheckButton" parent="VerticalContainer" unique_id=2141492001]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Scale the whole interface (text, spacing, touch targets) from the display's physical pixel density. A physically small screen with a large resolution then no longer renders a tiny UI. The scale never depends on portrait/landscape."
+text = "Match screen density"
+
+[node name="UiScaleContainer" type="HBoxContainer" parent="VerticalContainer" unique_id=2141492002]
+layout_mode = 2
+
+[node name="UiScaleLabel" type="Label" parent="VerticalContainer/UiScaleContainer" unique_id=2141492003]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Layout scale"
+
+[node name="UiScale" type="SpinBox" parent="VerticalContainer/UiScaleContainer" unique_id=2141492004]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 60.0
+max_value = 200.0
+value = 100.0
+suffix = "%"
+
+[node name="UiScaleHint" type="Label" parent="VerticalContainer" unique_id=2141492005]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Screen density"
+autowrap_mode = 2
+theme_override_font_sizes/font_size = 12
 
 [node name="CrtUi" type="CheckButton" parent="VerticalContainer" unique_id=2012189997]
 unique_name_in_owner = true

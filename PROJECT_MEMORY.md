@@ -199,8 +199,11 @@ _Last updated: 2026-10-08 · Godot 4.7 · renderer: gl_compatibility_
   by `_valid_sync_path` (only `.neonnotes.json` + the tombstone cart sync).
 - Exports: PNG (2×), deterministic GIF (worker thread), HTML, clipboard copy,
   optional CRT FX on export; saves to OS gallery + `vault/exports/`.
-- Mobile: drawer sidebar, safe-area insets, landscape font delta
-  (`LayoutComponent.ui_font_delta`), Android content-URI image import, media
+- Mobile: drawer sidebar, safe-area insets, density-derived canvas scale
+  (`GameManager.ui_scale()` → `root.content_scale_factor`; phones disable the
+  canvas stretch so rotation cannot resize anything); consistent 10 pt side +
+  bottom margins across orientation (safe-area/keyboard insets added on top),
+  Android content-URI image import, media
   source dialog over `vault/media/`. Tree taps resolve the pressed row once and
   only open it on release when finger displacement stays under 16 px; mobile
   long-press drag arms after 3 s and consumes drag motion so the tree does not
@@ -250,11 +253,35 @@ _Last updated: 2026-10-08 · Godot 4.7 · renderer: gl_compatibility_
   `font_delta()`, `font_changed`), persisted as `ui/font` + `ui/font_size`.
   `ThemeComponent` assigns a runtime `Theme` (`default_font` +
   `default_font_size`) to the window root and rescales every authored
-  `font_size` override captured at setup; `LayoutComponent.ui_font_delta` is now
-  `landscape_shrink − GameManager.font_delta()` (signed) so the preview body,
+  `font_size` override captured at setup; `LayoutComponent.ui_font_delta` is
+  `−GameManager.font_delta()` (signed) so the preview body,
   headings, charts, editor and toolbar buttons all follow one scale. Orbitron
   remains the display face for the title/headings. PNG/GIF exports inherit the
   window theme; OS `FileDialog`s are re-themed by `DialogTheme`.
+- **Screen-density UI scale (2026-10-08):** the canvas is scaled from the
+  display's pixel *density* — never from the window size or orientation — so a
+  physically small high-resolution screen no longer renders a tiny UI, and a
+  rotation resizes nothing. `GameManager` owns it: `density_scale()`
+  (`screen_get_dpi() / REFERENCE_DPI` with 160 = Android mdpi, clamped 1–3; a
+  dpi outside 110–700 is untrustworthy → 1.0), `ui_scale()` = automatic ×
+  `ui_scale_percent` (60–200, persisted as `ui/auto_ui_scale` +
+  `ui/ui_scale_percent`), `is_phone_screen()` (physical short side < 4.5 in)
+  and the `ui_scale_changed` signal; main.gd `_apply_ui_scale()` puts the
+  result on `root.content_scale_factor`. **This is the fix for "portrait too
+  small, landscape too large":** `canvas_items` + `expand` scales by the
+  window's short ratio, so one device measured 1.78× larger in landscape
+  (probe, csf 2.5: 1080×600 → total 2.083, 600×1080 → total 1.172). Phones
+  therefore run `CONTENT_SCALE_MODE_DISABLED` (total == density, identical in
+  both orientations) while desktop keeps `canvas_items` so window resizing
+  still scales the UI. `LayoutComponent` now derives mobile-vs-desktop from the
+  *physical* screen on phones and keeps the old viewport rules on desktop
+  (with `expand` the logical viewport always covers the 1280x720 base, so those
+  terms only fire for a portrait window); the old landscape 2 pt font shrink
+  and the 10 pt landscape note title are gone. Settings ▸ **Match screen
+  density** + **Layout scale** expose it, with the detected dpi shown inline.
+  Phone workspace margins are fixed at 10 pt in both orientations; safe-area
+  and keyboard insets remain additive. Toolbar button tap targets can still
+  have orientation-specific dimensions, but font size and margins do not move.
 - **Preview emphasis fonts (2026-09-30):** the preview adds an emoji-capable
   `FontVariation` to every `RichTextLabel` (`PreviewBuilder._font_variants_for_ui()`).
   Those overrides must preserve Godot's synthetic styles: `bold_font` /
@@ -671,6 +698,17 @@ _These OVERRIDE the skill's defaults for this project._
 - Godot defaults: Tree `drop_position_color`/`drop_on_item_color` are pure
   white (zeroed in app); default Tree cursor/hover styleboxes are overridden
   with `StyleBoxEmpty` (selection is the only feedback).
+- **Canvas scale is orientation-dependent on `canvas_items`:** with
+  `stretch/mode="canvas_items"` + `aspect="expand"` Godot scales by
+  `min(w/base_w, h/base_h)`, so rotating the *same* window changes the UI scale
+  by ~1.8× (measured: total 2.083 landscape vs 1.172 portrait at csf 2.5).
+  Anything that must be orientation-stable (text size, touch targets) needs
+  `content_scale_mode = CONTENT_SCALE_MODE_DISABLED` with the scale carried by
+  `content_scale_factor` instead — that is what `main.gd _apply_ui_scale()`
+  does on phones. `content_scale_factor` also reaches exports:
+  `export_component._export_width()` divides it back out in its fallback path
+  (the bound `width_cb` path returns the logical content width, so export
+  resolution still follows the logical canvas).
 - `MenuButton` child PopupMenus named in the scene never show; `SubViewport
   .content_scale_*` doesn't exist in 4.7 (use `Control.scale`); `MovieWriter`
   only has MJPEG/PNGWAV; `String.hash()` has weak low-bit mixing (use the

@@ -11,11 +11,11 @@ signal mobile_changed(is_mobile: bool)
 const MOBILE_MARGIN_SIDE := 10
 const MOBILE_MARGIN_BOTTOM := 10
 
-## Font points subtracted from all UI/content fonts (set by update_layout,
-## read by ThemeComponent/PreviewBuilder). It combines the landscape-phone
-## shrink (2) with the user's font-size preference: a size above the
-## GameManager baseline yields a negative delta (i.e. fonts grow). Portrait
-## desktop layout with the default size keeps it at 0.
+## Font points added to every UI/content font (set by update_layout, read by
+## ThemeComponent/PreviewBuilder/ChartView): a size above the GameManager
+## baseline yields a negative delta, i.e. fonts grow. The old landscape-phone
+## shrink is gone — a rotation must not resize text (the canvas scale is
+## density-derived, see main.gd `_apply_ui_scale`).
 static var ui_font_delta := 0
 
 var root_ctl: Control
@@ -36,6 +36,7 @@ var is_mobile_layout := false
 var _kb_h := -1
 var _caret_adjust_frames := 0
 var _editor_size := Vector2.ZERO
+var _last_landscape := false
 
 
 func ready() -> void:
@@ -66,14 +67,18 @@ func _process(_delta: float) -> void:
 			_force_caret_visible(code_edit)
 
 
-func update_layout() -> void:
+func update_layout(force: bool = false) -> void:
 	var vp := get_viewport().get_visible_rect().size
-	var mobile := vp.x < 720.0 or vp.y > vp.x
+	var mobile := _is_phone_layout(vp)
 	var layout_changed := mobile != is_mobile_layout
+	var landscape_changed := mobile and ((vp.x > vp.y) != _last_landscape)
+	_last_landscape = vp.x > vp.y
 	is_mobile_layout = mobile
 	_apply_safe_area()
 	# Keep all root controls inside the viewport after rotation/resizing.
-	if not layout_changed:
+	# `force` re-derives the sizes when the global UI scale changed without
+	# moving the mobile/desktop breakpoint.
+	if not layout_changed and not landscape_changed and not force:
 		return
 	ChartView.compact = mobile
 	# cramped toolbar? collapse secondary actions into the ⋮ overflow menu
@@ -85,13 +90,11 @@ func update_layout() -> void:
 	graph_btn.visible = not cramped
 	export_btn.visible = not cramped
 	if mobile:
-		# Landscape phones have far less vertical room: tighter margins and a
-		# smaller header font. Portrait keeps the comfortable mobile values.
+		# Keep physical margins identical in portrait and landscape. Safe-area and
+		# keyboard insets are added separately by _apply_safe_area().
 		var landscape := vp.x > vp.y
-		var side := 2 if landscape else MOBILE_MARGIN_SIDE
-		var bottom := 2 if landscape else MOBILE_MARGIN_BOTTOM
-		set_meta("mobile_side", side)
-		set_meta("mobile_bottom", bottom)
+		set_meta("mobile_side", MOBILE_MARGIN_SIDE)
+		set_meta("mobile_bottom", MOBILE_MARGIN_BOTTOM)
 		sidebar.visible = drawer_open
 		sidebar.custom_minimum_size = Vector2(mini(280, int(vp.x * 0.75)), 0)
 		# mobile: tree and editor never share space — hide content while the drawer is open
@@ -120,9 +123,23 @@ func update_layout() -> void:
 		for btn in toolbar.get_children():
 			if btn is Button:
 				btn.custom_minimum_size = Vector2(56, 36)
-	ui_font_delta = (2 if (mobile and vp.x > vp.y) else 0) - GameManager.font_delta()
+	ui_font_delta = -GameManager.font_delta()
 	_apply_note_title_size()
-	mobile_changed.emit(is_mobile_layout)
+	if layout_changed or landscape_changed:
+		mobile_changed.emit(is_mobile_layout)
+
+
+## Mobile layout == a phone-sized screen. On phones the canvas is no longer
+## stretched (main.gd `_apply_ui_scale`), so the *physical* short side is the
+## honest signal: a phone stays a phone when rotated, and a high-resolution
+## phone is never mistaken for a desktop because of its pixel count. Desktop
+## keeps the viewport rules — with `canvas_items` + expand the visible rect
+## always covers the 1280x720 base, so those terms only fire for a portrait
+## window, exactly as before.
+func _is_phone_layout(vp: Vector2) -> bool:
+	if OS.has_feature("mobile") and GameManager.physical_short_side_inches() > 0.0:
+		return GameManager.is_phone_screen()
+	return vp.x < 720.0 or vp.y > vp.x or vp.y < 720.0
 
 
 ## Re-derive the toolbar title size after a font-size change (update_layout
@@ -132,14 +149,12 @@ func refresh_fonts() -> void:
 
 
 ## The note title owns its size here (not via ThemeComponent capture): it is
-## smaller on landscape phones and grows/shrinks with the user font size.
+## smaller on phones than in the desktop shell. The size is identical in
+## portrait and landscape — only the user font-size preference moves it.
 func _apply_note_title_size() -> void:
 	if note_title == null:
 		return
-	var base := 18
-	if is_mobile_layout:
-		var vp := get_viewport().get_visible_rect().size
-		base = 10 if vp.x > vp.y else 14
+	var base := 14 if is_mobile_layout else 18
 	note_title.add_theme_font_size_override("font_size", base + GameManager.font_delta())
 
 
@@ -158,7 +173,7 @@ func _apply_safe_area() -> void:
 	var side_margin := 0
 	var base_bottom := 0
 	if is_mobile_layout:
-		# update_layout() narrows these on landscape phones (see meta below).
+		# Same physical margins in portrait and landscape (see update_layout).
 		side_margin = int(get_meta("mobile_side", MOBILE_MARGIN_SIDE))
 		base_bottom = int(get_meta("mobile_bottom", MOBILE_MARGIN_BOTTOM))
 	if OS.get_name() != "Android":
