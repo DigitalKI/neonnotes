@@ -65,6 +65,22 @@ func _ready() -> void:
 
 # ---------------- Discovery ----------------
 
+## Boot-time entry point, called deferred by Main after the first frame.
+## Test/dev harnesses set suppress_settings_save and run against a fixture
+## vault while sharing this device's real vault identity, so they must NEVER
+## announce or listen on the LAN — otherwise a fixture vault syncs its test
+## notes into the real vault's paired peers (this leaked test notes to a
+## phone). Dev sessions also clear pairing, but this is the hard gate.
+## Auto-sync must run even when the UDP broadcast listener can't bind
+## (e.g. another process holds the port, or a phone's UDP isn't reached):
+## with stored peer IPs it can still sync directly over TCP.
+func start_background_sync() -> void:
+	if GameManager.suppress_settings_save:
+		return
+	enable_auto_sync()
+	if not start_discovery():
+		sync_failed.emit("Could not start background discovery (auto-sync via stored peer IP still active)")
+
 func start_discovery() -> bool:
 	# Hard gate: an ephemeral test/dev session (suppress_settings_save) must not
 	# join the LAN. It shares the real vault id/secret, so announcing or listening

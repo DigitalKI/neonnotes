@@ -105,6 +105,16 @@ func _notification(what: int) -> void:
 func _ready() -> void:
 	_boot_t0 = Time.get_ticks_msec()
 	_boot_last = _boot_t0
+	# Boot runs in ordered phases; each one ends with a _boot_mark so a slow
+	# boot can be attributed to exactly one phase (NEONNOTES_BOOT_DEBUG=1).
+	_phase_build_ui()
+	_phase_theme_layout()
+	_phase_vault()
+	_phase_sync()
+	_phase_smoke()
+
+
+func _phase_build_ui() -> void:
 	_build_dynamic_ui()
 	_boot_mark("ui-build")
 	edit_search.text_changed.connect(_find_in_editor)
@@ -112,6 +122,9 @@ func _ready() -> void:
 	search_prev.pressed.connect(_search_step.bind(-1))
 	search_next.pressed.connect(_search_step.bind(1))
 	_update_search_controls()
+
+
+func _phase_theme_layout() -> void:
 	theme_component.name = "ThemeComponent"
 	theme_component.setup(%Bg, toolbar.note_title, %SidePanel as PanelContainer,
 			%Content as PanelContainer, toolbar, code_edit, self)
@@ -140,7 +153,6 @@ func _ready() -> void:
 		elif page_mode == "":
 			_render_preview())
 	GameManager.font_changed.connect(_on_font_changed)
-	GameManager.metadata_ready.connect(_on_metadata_ready)
 	vault_tree.save_cb = _flush_save
 	vault_tree.flash_cb = _flash
 	vault_tree.moved_cb = func(old_paths: Array[String], new_paths: Array[String]):
@@ -171,6 +183,10 @@ func _ready() -> void:
 	# so a small high-resolution screen does not render a tiny UI.
 	_apply_ui_scale()
 	GameManager.ui_scale_changed.connect(_on_ui_scale_changed)
+
+
+func _phase_vault() -> void:
+	GameManager.metadata_ready.connect(_on_metadata_ready)
 	if OS.get_environment("NEONNOTES_SMOKE") == "1":
 		_prepare_smoke_vault()
 	# Housekeeping is deferred past the first frame: it stat()s the trash dir
@@ -191,6 +207,9 @@ func _ready() -> void:
 	_boot_mark("layout")
 	_open_start_page.call_deferred()
 	GameManager.load_metadata_async()
+
+
+func _phase_sync() -> void:
 	sync_service = SyncService.new()
 	sync_service.name = "SyncService"
 	add_child(sync_service)
@@ -205,6 +224,9 @@ func _ready() -> void:
 	GameManager.sync_identity_changed.connect(_on_sync_identity_changed)
 	status_bar.set_sync_service(sync_service)
 	_boot_mark("sync-init")
+
+
+func _phase_smoke() -> void:
 	if OS.get_environment("NEONNOTES_SMOKE") == "1":
 		_start_smoke.call_deferred()
 
@@ -1481,19 +1503,9 @@ func _deferred_housekeeping() -> void:
 
 
 func _start_background_sync() -> void:
-	# Test/dev harnesses set suppress_settings_save and run against a fixture
-	# vault while sharing this device's real vault identity, so they must NEVER
-	# announce or listen on the LAN — otherwise a fixture vault syncs its test
-	# notes into the real vault's paired peers (this leaked test notes to a
-	# phone). Dev sessions also clear pairing, but this is the hard gate.
-	if GameManager.suppress_settings_save:
-		return
-	# Auto-sync must run even when the UDP broadcast listener can't bind
-	# (e.g. another process holds the port, or a phone's UDP isn't reached).
-	# With stored peer IPs it can still sync directly over TCP.
-	sync_service.enable_auto_sync()
-	if not sync_service.start_discovery():
-		sync_service.sync_failed.emit("Could not start background discovery (auto-sync via stored peer IP still active)")
+	# The gating and UDP/TCP startup live in SyncService.start_background_sync();
+	# main only owns the boot timing.
+	sync_service.start_background_sync()
 	_boot_mark("sync-discovery")
 
 
