@@ -4,9 +4,6 @@ extends Control
 ## mode toggle, export menu, help showcase.
 
 const MONO_FONT := preload("res://assets/fonts/ShareTechMono-Regular.ttf")
-const SELECTION_OVERLAY_SCENE := preload("res://scenes/components/selection_overlay.tscn")
-const TextSearch := preload("res://scripts/common/text_search.gd")
-
 const NOTE_TEMPLATE := """---
 title: "%s"
 ---
@@ -32,14 +29,14 @@ func _load_help_doc() -> String:
 @onready var note_title: Label = toolbar.note_title
 @onready var content_host: ScrollContainer = %ContentHost
 @onready var search_row: HBoxContainer = %SearchRow
-@onready var edit_search: LineEdit = %EditSearch
-@onready var search_prev: Button = %SearchPrev
-@onready var search_next: Button = %SearchNext
 @onready var content_body: VBoxContainer = %ContentBody
 @onready var edit_padding: MarginContainer = %EditPadding
 @onready var settings_page: MarginContainer = %SettingsPage
 @onready var settings_component: SettingsComponent = %SettingsPage.get_node("VerticalContainer")
 @onready var content_panel: PanelContainer = %Content
+## The note view (source editor + preview + find bar + mobile selection) is its
+## own component; Main only routes shell-level events into it.
+@onready var editor: NoteEditor = %Content
 @onready var graph_view: GraphView = %GraphView
 @onready var sync_page: SyncPage = %SyncPage
 @onready var code_edit : CodeEdit = %SourceEditor
@@ -58,11 +55,6 @@ var sidebar: PanelContainer
 @onready var trash_page: TrashPage = %TrashPage
 var help_mode := false
 var source_mode := false
-## In-document find (edit mode): every match is painted by the highlighter,
-## the arrows step through `_search_matches` and the current one is selected.
-var _search_query := ""
-var _search_matches: Array[Vector2i] = []
-var _search_index := -1
 var autosave_timer := Timer.new()
 var sync_service: SyncService
 var help_folder := "Help"  # sidebar folder items get this metadata
@@ -89,14 +81,7 @@ var _saved_body := ""
 var _saved_title := ""
 var _saved_tags: Array[String] = []
 
-# ---- mobile text selection (Android).
-# Plain drag always scrolls (native). A double-tap on a word activates a
-# selection with SelectionOverlay handles + Cut/Copy/Paste bar; native
-# clicked-drag selection is disabled on Android so scrolling never
-# accidentally selects text. Desktop is unchanged (native selection).
-var selection_overlay: SelectionOverlay
-var _last_tap_time := -INF
-const DOUBLE_TAP_WINDOW_MS := 400
+
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST and is_instance_valid(autosave_timer):
@@ -117,11 +102,6 @@ func _ready() -> void:
 func _phase_build_ui() -> void:
 	_build_dynamic_ui()
 	_boot_mark("ui-build")
-	edit_search.text_changed.connect(_find_in_editor)
-	edit_search.text_submitted.connect(func(_t: String): _search_step(1))
-	search_prev.pressed.connect(_search_step.bind(-1))
-	search_next.pressed.connect(_search_step.bind(1))
-	_update_search_controls()
 
 
 func _phase_theme_layout() -> void:
@@ -344,25 +324,6 @@ func _build_dynamic_ui() -> void:
 		if edit_menu.get_item_id(i) > TextEdit.MENU_PASTE:
 			edit_menu.remove_item(i)
 	code_edit.text_changed.connect(_on_text_changed)
-	code_edit.gui_input.connect(_on_code_edit_gui_input)
-	# Native clicked-drag selection is disabled on Android; SelectionOverlay
-	# handles are the only way to stretch a selection (see _on_code_edit_gui_input).
-	var sc := OS.get_name()
-	if sc == "Linux" or sc == "Windows":
-		code_edit.selecting_enabled = true
-	else:
-		code_edit.selecting_enabled = false
-	if sc == "Android":
-		selection_overlay = SELECTION_OVERLAY_SCENE.instantiate()
-		selection_overlay.name = "SelectionOverlay"
-		# Child of CodeEdit (not EditPadding): its column keeps the outer margin single-child,
-		# and mouse_filter=IGNORE lets taps/keys reach the editor underneath.
-		code_edit.add_child(selection_overlay)
-		selection_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		selection_overlay.bind(code_edit)
-		selection_overlay.action.connect(_on_selection_overlay_action)
-	code_edit.get_menu().id_pressed.connect(_on_edit_menu_action)
-	code_edit.get_menu().popup_hide.connect(_on_edit_menu_closed)
 
 	# Debounce typing; transitions still flush immediately.
 	autosave_timer.name = "AutosaveTimer"
@@ -383,9 +344,10 @@ func _build_dynamic_ui() -> void:
 	slash_menu.name = "SlashMenu"
 	add_child(slash_menu)
 	slash_menu.build(code_edit, _flush_save)
-	slash_menu.applied.connect(func():
-		if selection_overlay:
-			selection_overlay.hide_overlay())
+	# Cross-component hooks for the note view: status flash + slash menu for the
+	# selection bar's "format" action.
+	editor.bind(_flash, slash_menu)
+	slash_menu.applied.connect(func(): editor.hide_selection_overlay())
 
 	# ExportComponent owns the complete menu and the shared action IDs.
 	# Do not pre-populate this PopupMenu here: duplicate labels with different
@@ -448,104 +410,6 @@ func _build_dynamic_ui() -> void:
 	trash_page.purge_requested.connect(_on_trash_purge)
 	trash_page.empty_requested.connect(_on_trash_empty)
 
-# ------------------------------------------------------------ mobile selection handles
-
-## Desktop uses Godot's native click-drag selection. On touch platforms we are
-## gesture-only: plain drags scroll, a double-tap on text selects a word and
-## shows two handles (start / end) that stretch the selection. We never engage
-## the native clicked-drag selection, so scrolling never selects and the
-## selection is never accidentally moved.
-func _on_code_edit_gui_input(event: InputEvent) -> void:
-	if OS.get_name() == "Linux" or OS.get_name() == "Windows":
-		return  # desktop: native selection/scrolling, untouched
-	# CRITICAL: gui_input fires BEFORE CodeEdit._gui_input — never set_input_as_handled.
-	# On Android, emulate_mouse_from_touch means Controls almost always see MouseButton,
-	# not ScreenTouch. Use MouseButton.double_click; defer so the caret is already placed.
-	if event is InputEventMouseButton:
-		var mb := event as InputEventMouseButton
-		if mb.button_index != MOUSE_BUTTON_LEFT or not mb.pressed:
-			return
-		if mb.double_click:
-			call_deferred("_activate_word_select_from_double_tap")
-		else:
-			# Single tap: drop custom selection; caret/scroll stay native.
-			if selection_overlay and selection_overlay.visible:
-				code_edit.deselect()
-				selection_overlay.hide_overlay()
-		return
-	# Rare path: devices that deliver raw ScreenTouch to Controls.
-	if event is InputEventScreenTouch and not event.pressed:
-		_on_code_edit_tap(event)
-
-func _activate_word_select_from_double_tap() -> void:
-	if selection_overlay:
-		selection_overlay.select_word_at_caret()
-	else:
-		select_word_at(code_edit.get_caret_line(), code_edit.get_caret_column())
-
-func _on_code_edit_tap(_ev: InputEventScreenTouch) -> void:
-	var now := Time.get_ticks_msec()
-	var is_double := now - _last_tap_time <= DOUBLE_TAP_WINDOW_MS
-	_last_tap_time = now
-	if not is_double:
-		code_edit.deselect()
-		if selection_overlay:
-			selection_overlay.hide_overlay()
-		return
-	_activate_word_select_from_double_tap()
-
-## Fallback word select when SelectionOverlay is unavailable (non-Android touch).
-func select_word_at(line: int, col: int) -> void:
-	if line >= code_edit.get_line_count() or col < 0:
-		return
-	var text_line := code_edit.get_line(line)
-	if col >= text_line.length() or not TextUtils.is_word_char(text_line[col]):
-		return
-	var bounds := TextUtils.word_bounds(text_line, col)
-	if bounds.x < 0:
-		return
-	# Same rule as SelectionOverlay: select() is a no-op while selecting_enabled is false.
-	code_edit.selecting_enabled = true
-	code_edit.select(line, bounds.x, line, bounds.y)
-	_show_selection_menu()
-
-## Cut/Copy/Paste popup actions. After the menu closes we keep the selection
-## (IME backspace deletes it); we only drop the handles so the next scroll
-## resumes as a plain scroll.
-func _on_edit_menu_action(id: int) -> void:
-	if id == TextEdit.MENU_CUT or id == TextEdit.MENU_COPY or id == TextEdit.MENU_PASTE:
-		if selection_overlay:
-			selection_overlay.hide_overlay()
-
-func _on_edit_menu_closed() -> void:
-	# Overlay owns its own visibility; native menu close only hides when overlay absent.
-	pass
-
-func _on_selection_overlay_action(id: String) -> void:
-	match id:
-		"cut":
-			_flash("Cut")
-		"copy":
-			_flash("Copied")
-		"paste":
-			_flash("Pasted")
-		"format":
-			var caret: Vector2 = code_edit.get_global_position() + code_edit.get_caret_draw_pos()
-			slash_menu.open_for_selection(caret + Vector2(0, 12))
-
-func _show_selection_menu() -> void:
-	var menu := code_edit.get_menu()
-	var has_sel := code_edit.has_selection()
-	menu.set_item_disabled(menu.get_item_index(TextEdit.MENU_CUT), not has_sel)
-	menu.set_item_disabled(menu.get_item_index(TextEdit.MENU_COPY), not has_sel)
-	menu.set_item_disabled(menu.get_item_index(TextEdit.MENU_PASTE), DisplayServer.clipboard_get() == "")
-	var caret: Vector2 = code_edit.get_global_position() + code_edit.get_caret_draw_pos()
-	menu.popup(Rect2i(Vector2i(caret + Vector2(0, 8)), Vector2i.ZERO))
-	# Give keyboard focus back to the editor: PopupMenu grabs focus on show,
-	# which made the IME backspace stop deleting the selection. The menu still
-	# receives taps because windows get pointer input regardless of focus.
-	code_edit.grab_focus.call_deferred()
-
 # ------------------------------------------------- autosave
 
 func _on_text_changed() -> void:
@@ -553,8 +417,7 @@ func _on_text_changed() -> void:
 	autosave_timer.start()  # restart after each character/paste
 	slash_menu.check()
 	# Keep the highlight/counter honest while the note is edited with a query up.
-	if _search_query != "":
-		_recount_search_matches()
+	editor.recount_search_matches()
 
 # ------------------------------------------------- slash menu (v3)
 
@@ -694,7 +557,7 @@ func _on_note_selected(fname: String) -> void:
 		_close_page()
 	# Continue opening the selected note after leaving a page.
 	_flush_save()  # flush previous note first — never lose changes
-	_clear_search()  # a new note starts with an empty find bar
+	editor.clear_search()  # a new note starts with an empty find bar
 	GameManager.current_file = GameManager.vault_abs() + "/" + fname
 	GameManager.current_rel = fname
 	GameManager.last_opened_rel = fname
@@ -950,6 +813,7 @@ func _perform_delete(rel: String, keep_children: bool = false) -> void:
 # ------------------------------------------------- mode toggle / help
 
 func _set_mode() -> void:
+	editor.source_mode = source_mode  # keep the note view's find-bar gating in sync
 	if page_mode != "":
 		return  # a page owns the screen until it closes
 	_close_tag_suggest()
@@ -966,105 +830,15 @@ func _set_mode() -> void:
 		# caret once the editor is actually visible.
 		code_edit.call_deferred("adjust_viewport_to_caret", 0)
 	else:
-		if selection_overlay:
-			selection_overlay.hide_overlay()
+		editor.hide_selection_overlay()
 		_render_preview()
-
-## Find bar: a new query highlights every match and jumps to the first one.
-## (Clearing the field removes the highlight and disables the step arrows.)
-func _find_in_editor(query: String) -> void:
-	_search_query = query
-	_search_matches = TextSearch.find_all(code_edit.text, query)
-	_search_index = 0 if not _search_matches.is_empty() else -1
-	_refresh_search_highlight()
-	_update_search_controls()
-	if source_mode and _search_index >= 0:
-		_focus_search_match()
-
-## Recompute matches without changing which one is active — used when the note
-## text itself changes while a query is live (typing, paste, sync refresh).
-func _recount_search_matches() -> void:
-	if _search_query == "":
-		return
-	var current: Vector2i = Vector2i(-1, -1)
-	if _search_index >= 0 and _search_index < _search_matches.size():
-		current = _search_matches[_search_index]
-	_search_matches = TextSearch.find_all(code_edit.text, _search_query)
-	_search_index = _search_matches.find(current)
-	if _search_index < 0:
-		_search_index = 0 if not _search_matches.is_empty() else -1
-	_refresh_search_highlight()
-	_update_search_controls()
-
-## Drop the find bar and its highlight (new note, help page, leaving edit mode).
-func _clear_search() -> void:
-	_search_query = ""
-	_search_matches.clear()
-	_search_index = -1
-	if edit_search.text != "":
-		edit_search.set_block_signals(true)
-		edit_search.text = ""
-		edit_search.set_block_signals(false)
-	_refresh_search_highlight()
-	_update_search_controls()
-
-## Step to the previous (-1) or next (+1) match, wrapping around. Pressing
-## Enter in the field also calls this with +1 (standard "find next").
-func _search_step(delta: int) -> void:
-	if _search_query == "" or not source_mode:
-		return
-	if _search_matches.is_empty():
-		_recount_search_matches()
-		if _search_matches.is_empty():
-			return
-	_search_index = wrapi(_search_index + delta, 0, _search_matches.size())
-	_refresh_search_highlight()
-	_update_search_controls()
-	_focus_search_match()
-
-## Select + reveal the active match so the editor scrolls it into view.
-func _focus_search_match() -> void:
-	if _search_index < 0 or _search_index >= _search_matches.size():
-		return
-	var m: Vector2i = _search_matches[_search_index]
-	var length := _search_query.length()
-	code_edit.select(m.x, m.y, m.x, m.y + length)
-	code_edit.set_caret_line(m.x)
-	code_edit.set_caret_column(m.y)
-	code_edit.adjust_viewport_to_caret()
-
-## Hand the query + active match to the syntax highlighter, which paints every
-## occurrence (see NeonHighlighter.set_search()).
-func _refresh_search_highlight() -> void:
-	var hl: NeonHighlighter = code_edit.syntax_highlighter as NeonHighlighter
-	if hl == null:
-		return
-	var line := -1
-	var col := -1
-	if _search_index >= 0 and _search_index < _search_matches.size():
-		line = _search_matches[_search_index].x
-		col = _search_matches[_search_index].y
-	hl.set_search(_search_query, line, col)
-
-## Arrows are only usable when there is at least one match; the field's tooltip
-## doubles as the match counter.
-func _update_search_controls() -> void:
-	var has_matches := not _search_matches.is_empty()
-	search_prev.disabled = not has_matches
-	search_next.disabled = not has_matches
-	if _search_query == "":
-		edit_search.tooltip_text = "Find in document…"
-	elif _search_index >= 0:
-		edit_search.tooltip_text = "%d / %d matches" % [_search_index + 1, _search_matches.size()]
-	else:
-		edit_search.tooltip_text = "No matches"
 
 func _toggle_mode() -> void:
 	autosave_timer.stop()
 	_flush_save()  # leaving edit mode: persist now
 	source_mode = not source_mode
 	if not source_mode:
-		_clear_search()  # exiting the editor resets the find bar
+		editor.clear_search()  # exiting the editor resets the find bar
 	graph_view.visible = false
 	_set_mode()
 
@@ -1072,7 +846,7 @@ func _show_help() -> void:
 	if page_mode != "":
 		return  # a page owns the screen until it closes
 	_flush_save()
-	_clear_search()
+	editor.clear_search()
 	# Help behaves like opening a note: it replaces any page and, on mobile,
 	# collapses the tree drawer so the help content is full-screen.
 	if page_mode != "":
