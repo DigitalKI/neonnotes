@@ -102,6 +102,8 @@ func _use_local_media(path: String) -> void:
 	flash_cb.call("✓ Saved " + GameManager.current_rel)
 	sync_note_saved_cb.call(GameManager.current_rel)
 	editor.render_preview()
+	# Selection consumed the embed: return to the note like the close button.
+	close_requested.emit()
 
 
 func _replace_embed(t: String, m: RegExMatch, rel: String) -> void:
