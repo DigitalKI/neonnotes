@@ -121,10 +121,10 @@ dev-isolation, mobile-tree-touch, sync, per-vault-sync, and full headless smoke
 scenes. Smoke data lives in a disposable `user://neonnotes-smoke` vault; override
 the location with `NEONNOTES_SMOKE_VAULT` (never point it at a real vault).
 
-> **Known issue:** the headless mobile-tree-touch test fails on some machines
-> (null viewport texture). Because `run_tests.sh` uses `set -e`, that failure
-> aborts the run before the sync and smoke tests — run those two individually on
-> an affected machine. See [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md) for details.
+> The headless mobile-tree-touch test used to fail on every machine (see
+> [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md)); fixed 2026-10-08 — it injects input
+> in viewport-local space and no longer screenshots (the old `get_image()` was
+> null under the headless dummy renderer and hung the run, aborting the suite).
 
 ### Build for Android
 

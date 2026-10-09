@@ -64,11 +64,15 @@ func _ready() -> void:
 		await get_tree().process_frame
 	print("tree scroll=", tree.get_scroll(), " vscroll max=", null if vsb == null else vsb.max_value)
 
-	var hold_before := _requested.size()
-	var hold_target := _first_visible_note(tree)
-	if hold_target != null:
-		await _press_and_release(tree, _row_point(tree, hold_target), MOBILE_HOLD_SECONDS + 0.2)
-		_hold_opened = _requested.size() > hold_before
+	# The 3 s hold-to-drag gate only arms on Android (see _handle_tree_press);
+	# off-device a long press is just a click and would always open. Only assert
+	# the "hold does not open" behavior where the gate actually exists.
+	if OS.get_name() == "Android":
+		var hold_before := _requested.size()
+		var hold_target := _first_visible_note(tree)
+		if hold_target != null:
+			await _press_and_release(tree, _row_point(tree, hold_target), MOBILE_HOLD_SECONDS + 0.2)
+			_hold_opened = _requested.size() > hold_before
 
 	# Tap the middle of several visible rows, deepest index first, so a
 	# resulting note list can't be confused by reordering.
@@ -79,6 +83,12 @@ func _ready() -> void:
 		var meta := str(it.get_metadata(0))
 		if meta == "" or not meta.ends_with(".md"):
 			continue
+		# On mobile, opening a note closes the drawer (main.gd) — reopen it
+		# BEFORE measuring, or the row rect is stale and the tap lands wrong.
+		if not main.layout_component.drawer_open:
+			main.layout_component.toggle_sidebar()
+			await get_tree().process_frame
+			await get_tree().process_frame
 		var local := _row_point(tree, it)
 		if local == Vector2.INF:
 			continue
@@ -86,12 +96,6 @@ func _ready() -> void:
 		if not GameManager.notes.has(expected) and GameManager.notes.has(meta.trim_suffix(".md") + ".md"):
 			expected = meta.trim_suffix(".md") + ".md"
 		var before := _requested.size()
-		# On mobile, opening a note closes the drawer (main.gd) — reopen it, or
-		# every tap after the first hits a hidden tree.
-		if not main.layout_component.drawer_open:
-			main.layout_component.toggle_sidebar()
-			await get_tree().process_frame
-			await get_tree().process_frame
 		await _tap(tree, local)
 		var opened := _requested[_requested.size() - 1] if _requested.size() > before else "<none>"
 		_rows.append([meta, opened, expected, local, tree.global_position + local])
@@ -108,9 +112,6 @@ func _ready() -> void:
 		print("%s tapped='%s' opened='%s' expected='%s' local=%s vp=%s" % [
 				"OK      " if rec[1] == rec[2] else "MISMATCH", rec[0], rec[1], rec[2], rec[3], rec[4]])
 	print("MOBILE TREE TOUCH RESULT: ", "OK" if ok else "FAIL")
-	var vp_img := get_viewport().get_texture().get_image()
-	vp_img.save_png("user://repro_tap_shot.png")
-	print("shot=", ProjectSettings.globalize_path("user://repro_tap_shot.png"), " size=", vp_img.get_size())
 	GameManager.vault_dir = original_vault
 	get_tree().quit(0 if ok else 1)
 
@@ -134,7 +135,9 @@ func _press_and_release(tree: Tree, local: Vector2, hold_seconds: float) -> void
 	press.pressed = true
 	press.position = viewport_pos
 	press.global_position = viewport_pos
-	get_viewport().push_input(press)
+	# in_local_coords=true: viewport_pos is already canvas/viewport space, so
+	# push_input must not re-apply the window→viewport content scale.
+	get_viewport().push_input(press, true)
 	await get_tree().process_frame
 	if hold_seconds > 0.0:
 		await get_tree().create_timer(hold_seconds).timeout
@@ -143,7 +146,7 @@ func _press_and_release(tree: Tree, local: Vector2, hold_seconds: float) -> void
 	rel.pressed = false
 	rel.position = viewport_pos
 	rel.global_position = viewport_pos
-	get_viewport().push_input(rel)
+	get_viewport().push_input(rel, true)
 	await get_tree().process_frame
 	await get_tree().process_frame
 

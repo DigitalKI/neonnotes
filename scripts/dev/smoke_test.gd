@@ -280,7 +280,9 @@ func _run_smoke() -> void:
 	GameManager.current_file = GameManager.vault_abs() + "/imgtest.md"
 	GameManager.current_rel = "imgtest.md"
 	m.editor.flush()
-	m._on_image_selected("/tmp/nn_smoke_img.png")
+	# The image-embed flow moved from Main into MediaDialog (Main only routes
+	# via _on_image_click); drive the component directly here.
+	m.media_dialog._on_image_selected("/tmp/nn_smoke_img.png")
 	fails += _check(FileAccess.file_exists(GameManager.vault_abs() + "/media/nn_smoke_img.png"), "image copied to media/")
 	fails += _check(GameManager.read_note("imgtest.md").contains("](media/nn_smoke_img"), "image embed md updated")
 	var nl_doc := MarkdownParser.parse("first **bold** line\nsecond ==hl== line\n")

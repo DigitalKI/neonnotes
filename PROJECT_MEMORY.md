@@ -428,10 +428,17 @@ _Last updated: 2026-10-08 · Godot 4.7 · renderer: gl_compatibility_
 - **Known bugs / open issues:** drag inside-move drop zones still want a
   visual on-device confirmation; watch companion-note collisions
   (`name-2.md`) after sync merges. Multi-vault sync state persists per vault in
-  `user://sync_state.json`. No transport encryption yet. The headless mobile-tree-touch test fails on this
-  machine (null viewport texture / mismatched tree taps), independently of sync.
-  The smoke debounce check was fixed 2026-09-29 (0.5 s) and smoke now passes;
-  the tree-touch failure remains the only known suite failure.
+  `user://sync_state.json`. No transport encryption yet. The headless
+  mobile-tree-touch test was fixed 2026-10-08 (`tests/ReproTreeTap.gd`):
+  it now pushes input with `push_input(ev, true)` so the phone window's 3.2×
+  canvas scale is not applied twice (taps used to land on the wrong row),
+  reopens the mobile drawer *before* measuring the row rect, gates the 3 s
+  hold check to Android (the hold gate only arms there — off-device a long
+  press is just a click), and no longer saves a screenshot (headless
+  `get_image()` is null and the script error hung the run until timeout,
+  aborting every later test). The same pass fixed the smoke test's stale
+  `Main._on_image_selected` call — the image-embed flow moved into
+  `MediaDialog._on_image_selected`. `./tests/run_tests.sh` is green again.
 - **Perf watch (2026-09-30 audit):** `GameManager.scan_notes()` re-reads the
   whole vault on the main thread (launch, vault switch, post-move, several sync
   paths) — the main remaining freeze risk on big vaults; the roadmap targets an
