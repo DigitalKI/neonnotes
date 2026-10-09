@@ -574,6 +574,15 @@ _These OVERRIDE the skill's defaults for this project._
   note in `scan_notes()`, refreshed by `write_note()`; backlinks/graph/move
   rewrite all read it. Moves remap the index (`PathRemap.remap_moved`) before
   rewriting links; drop path is rescan-free (`prune_empty_ancestors`).
+- **IME autocorrect disabled on text inputs** (2026-10-08) — Godot's
+  `autocorrect` (TextEdit/CodeEdit/LineEdit) defaults to `true`, and on Android
+  it routes programmatic inserts (paste) through the native IME autocorrect,
+  which mangles large markdown pastes: drops letters, swaps straight quotes
+  for smart quotes (`«`/`"`), collapses indentation. Reproduces only on
+  mobile (no IME autocorrect on desktop). Set `autocorrect = false` on
+  `SourceEditor` (CodeEdit, Main.tscn) and on value-bearing LineEdits
+  (TitleInput, TagsInput, NameField, sync PinEdit). Keep it off for any new
+  text input that feeds stored data; search boxes may keep it on.
 - **Graph = radial hierarchy map** with hierarchical edge bundling + flowing
   link light; user explicitly chose it over force-directed (2026-09-20).
 - **Metadata-first sync** (`probe` → `manifest` → needed paths → `push_stream`); inventory records sizes + logical mtimes on worker, and only requested payloads are read/transferred. The `probe` gate sends a deterministic content fingerprint (`state_fingerprint` over path|mtime|size); when it matches the fingerprint recorded in `_confirmed[peer_id]`, the whole manifest+payload exchange is skipped (idle sync = bytes each way).

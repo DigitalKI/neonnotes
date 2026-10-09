@@ -125,6 +125,7 @@ unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "Untitled note"
+autocorrect = false
 
 [node name="TagsPanel" type="PanelContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn" unique_id=1330336696]
 unique_name_in_owner = true
@@ -153,6 +154,7 @@ unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "Add or pick a tag…"
+autocorrect = false
 
 [node name="TagsAdd" type="Button" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TagsPanel/TagsRow/TagsInputRow" unique_id=1668094736]
 unique_name_in_owner = true
@@ -195,6 +197,10 @@ layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 placeholder_text = "# Write markdown here…"
+# autocorrect=false: Android IME autocorrect mangles large pasted inserts
+# (drops letters, smart-quotes, collapses indentation). Markdown must not
+# pass through spellcheck. Desktop unaffected either way.
+autocorrect = false
 drag_and_drop_selection_enabled = false
 wrap_mode = 1
 
