@@ -310,7 +310,10 @@ func setup_tag_suggest() -> void:
 	if overlay_parent == null:
 		overlay_parent = self
 	_tag_suggest = TAG_SUGGEST_SCENE.instantiate()
-	overlay_parent.add_child(_tag_suggest)
+	# Deferred: this runs from _ready, while the scene root is still setting up
+	# its children, so an immediate add_child() is rejected ("parent node is
+	# busy setting up children") and the overlay would never enter the tree.
+	overlay_parent.add_child.call_deferred(_tag_suggest)
 	_tag_suggest.bind(tags_input, TagSuggest.Mode.WHOLE)
 	_tag_suggest.tag_chosen.connect(func(_tag: String): add_note_tag())  # component wrote the canonical tag already
 

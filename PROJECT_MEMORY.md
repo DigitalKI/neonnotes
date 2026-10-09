@@ -86,6 +86,15 @@ _Last updated: 2026-10-08 · Godot 4.7 · renderer: gl_compatibility_
   the overlay and the unit tests. The overlay closes on Esc, accept, field
   blur, and on a click/tap anywhere outside the field or the overlay (needed
   because non-focusable areas never fire `focus_exited`).
+  **Gotcha (2026-10-08) — add the overlay deferred.** After the NoteEditor
+  refactor the editor's overlay is created in `NoteEditor._ready()`, which runs
+  while the scene root is still setting up its children; an immediate
+  `add_child()` is rejected ("parent node is busy setting up children"), so the
+  overlay never enters the tree and `refresh()` silently bails on
+  `is_inside_tree()` — focusing `TagsInput` showed no list. `setup_tag_suggest()`
+  now uses `overlay_parent.add_child.call_deferred(_tag_suggest)`. The search
+  field's overlay (`VaultTreeComponent.build()`, called from `Main._ready`) is
+  not in that window and needs no change.
   Search debounces typing (0.35 s), copies only path/title metadata on the UI
   thread, and reads/matches note bodies on a worker. Cancellation is polled
   once per frame (not a tight deferred loop); matches are published only on
