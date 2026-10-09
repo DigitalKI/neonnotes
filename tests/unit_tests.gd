@@ -4,6 +4,7 @@ const NoteMetadataHelper := preload("res://scripts/common/note_metadata.gd")
 const DevSession := preload("res://scripts/common/dev_session.gd")
 const GameManagerScript := preload("res://scripts/common/GameManager.gd")
 const TagMatchScript := preload("res://scripts/common/tag_match.gd")
+const TextMatchScript := preload("res://scripts/common/text_match.gd")
 const TextSearchScript := preload("res://scripts/common/text_search.gd")
 
 var failures := 0
@@ -22,6 +23,7 @@ func _init() -> void:
 	_check_font_settings()
 	_check_icon_font_fallback()
 	_check_tag_suggest()
+	_check_text_match()
 	_check_text_search()
 	print("UNIT RESULT: %s (%d failures)" % ["FAIL" if failures > 0 else "OK", failures])
 	quit(failures)
@@ -309,6 +311,30 @@ func _check_tag_suggest() -> void:
 	_check(TagMatchScript.score("jw", "j-w") >= 0, "near-duplicate tag surfaces (jw / j-w)")
 	_check(TagMatchScript.score("coding", "code") >= 0, "near-duplicate tag surfaces (coding / code)")
 	_check(TagMatchScript.score("home", "work") < 0, "unrelated tag does not surface")
+
+## Shared Levenshtein/ranking core (used by tags AND wikilink resolution).
+func _check_text_match() -> void:
+	_check(TextMatchScript.edit_distance("code", "coding") == 3, "levenshtein distance counts edits")
+	_check(TextMatchScript.edit_distance("", "abc") == 3, "empty vs word is its length")
+	_check(TagMatchScript.score("jw", "j-w") == TextMatchScript.score("jw", "j-w"),
+		"TagMatch delegates to TextMatch")
+
+	# rank: prefix/contains first, near-matches next, filtered by the cap.
+	var cands: Array = [
+		{"value": "note.bin", "label": "note.bin", "keys": ["note.bin", "note.bin"]},
+		{"value": "Notes", "label": "Notes", "keys": ["Notes"]},
+		{"value": "meeting-notes", "label": "Meeting notes", "keys": ["meeting-notes"]},
+		{"value": "zzzz", "label": "zzzz", "keys": ["zzzz"]},
+	]
+	var hit := TextMatchScript.rank("Notes", cands, 3, 8)
+	_check(hit.size() >= 1 and String(hit[0]["value"]) == "Notes", "exact match ranks first")
+	_check(TextMatchScript.rank("Notes", cands, 0, 8).all(func(e): return String(e["value"]) != "zzzz"),
+		"unrelated candidate never ranks")
+	# "Ntoes" (typo) finds "Notes" only while the distance cap allows it.
+	_check(TextMatchScript.rank("Ntoes", cands, 2, 8).any(func(e): return String(e["value"]) == "Notes"),
+		"near-match surfaces within the cap")
+	_check(not TextMatchScript.rank("Ntoes", cands, 0, 8).any(func(e): return String(e["value"]) == "Notes"),
+		"cap 0 hides near-matches")
 
 ## In-document find positions: case-insensitive, non-overlapping, per line.
 func _check_text_search() -> void:

@@ -1,0 +1,80 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/components/link_resolve_dialog.gd" id="1_lrd"]
+
+[node name="LinkResolveDialog" type="MarginContainer"]
+unique_name_in_owner = true
+visible = false
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_bottom = 10
+script = ExtResource("1_lrd")
+
+[node name="Root" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="TitleRow" type="HBoxContainer" parent="Root"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="Root/TitleRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 20
+text = "◈ LINK NOT FOUND"
+
+[node name="CloseButton" type="Button" parent="Root/TitleRow"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "✕ Close"
+
+[node name="TargetLabel" type="Label" parent="Root"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "[[…]]"
+autowrap_mode = 3
+
+[node name="Hint" type="Label" parent="Root"]
+layout_mode = 2
+text = "Pick a similar note to re-point the link, or create it as a new note."
+autowrap_mode = 3
+
+[node name="DistRow" type="HBoxContainer" parent="Root"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="DistLabel" type="Label" parent="Root/DistRow"]
+layout_mode = 2
+text = "Max distance"
+
+[node name="DistSpin" type="SpinBox" parent="Root/DistRow"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 0.0
+max_value = 8.0
+value = 3.0
+allow_greater = true
+
+[node name="SuggestScroll" type="ScrollContainer" parent="Root"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="SuggestList" type="VBoxContainer" parent="Root/SuggestScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="EmptyLabel" type="Label" parent="Root"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "No similar notes."
+autowrap_mode = 3
+
+[node name="CreateBtn" type="Button" parent="Root"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "✓ Create new note"

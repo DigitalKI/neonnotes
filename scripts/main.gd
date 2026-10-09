@@ -26,18 +26,22 @@ const MONO_FONT := preload("res://assets/fonts/ShareTechMono-Regular.ttf")
 @onready var code_edit : CodeEdit = %SourceEditor
 ## Which full-content page owns the screen: "" or one of PAGE_*.
 var page_mode := ""
+## The unresolved target whose LinkResolveDialog page is open (set by _open_wikilink).
+var _link_target := ""
 const PAGE_SETTINGS := "settings"
 const PAGE_SYNC := "sync"
 const PAGE_NEW_NOTE := "new_note"
 const PAGE_VAULT := "vault"
 const PAGE_MEDIA := "media"
 const PAGE_TRASH := "trash"
+const PAGE_LINK_RESOLVE := "link_resolve"
 
 var sidebar: PanelContainer
 @onready var new_dialog: NewNoteDialog = %NewNoteDialog
 @onready var media_dialog: MediaDialog = %MediaDialog
 @onready var vault_picker: VaultPicker = %VaultPicker
 @onready var trash_page: TrashPage = %TrashPage
+@onready var link_dialog: LinkResolveDialog = %LinkResolveDialog
 var sync_service: SyncService
 var help_folder := "Help"  # sidebar folder items get this metadata
 var theme_component := ThemeComponent.new()
@@ -342,6 +346,9 @@ func _build_dynamic_ui() -> void:
 	sync_page.close_requested.connect(_close_sync)
 	sync_page.bind_service(sync_service)
 	new_dialog.close_requested.connect(_close_page)
+	link_dialog.close_requested.connect(_close_page)
+	link_dialog.link_accepted.connect(_on_link_accepted)
+	link_dialog.create_requested.connect(_on_link_create)
 	vault_picker.close_requested.connect(_close_page)
 	trash_page.close_requested.connect(_close_page)
 	trash_page.bind(_refresh_list,
@@ -474,7 +481,7 @@ func _show_settings() -> void:
 ## Every page is a scene instance inside %Content, so all of them are sized
 ## like an open note. Sharing one helper keeps the hide/show rules identical.
 func _pages() -> Array[Control]:
-	return [settings_page, sync_page, new_dialog, vault_picker, media_dialog, trash_page]
+	return [settings_page, sync_page, new_dialog, vault_picker, media_dialog, trash_page, link_dialog]
 
 func _open_page(mode: String, page: Control) -> void:
 	editor.flush()
@@ -507,16 +514,79 @@ func _open_graph_note(fname: String) -> void:
 	vault_tree.select_note(fname)
 
 func _open_wikilink(target: String) -> void:
+	# `[[#tag]]` is a tag reference, not a note: filter the tree by it and never
+	# create a file (an unresolved `#foo` target used to become `#foo.md`).
+	if target.strip_edges().begins_with("#"):
+		vault_tree.filter_by_tag(target)
+		# The results live in the tree; reveal the drawer on mobile.
+		if layout_component.is_mobile_layout and not layout_component.drawer_open:
+			layout_component.toggle_sidebar()
+		status_bar.flash("Filtering " + target.strip_edges())
+		return
 	var fname := WikiLinks.resolve(target)
+	if fname != "":
+		vault_tree.select_note(fname)
+		return
+	# Unresolved: let the user decide — pick a similar note to re-point the
+	# link, or explicitly create the note. No more silent auto-creation.
+	_link_target = target
+	_open_page(PAGE_LINK_RESOLVE, link_dialog)
+	link_dialog.open_for(target, _link_candidates())
+
+
+## Link target to write for `rel`: the bare name when it is unique across the
+## vault (Obsidian-friendly), otherwise the vault-relative path.
+func _link_target_for(rel: String) -> String:
+	var noext := rel.trim_suffix(".md")
+	var base := noext.get_file()
+	for other in GameManager.notes:
+		if other != rel and String(other).trim_suffix(".md").get_file() == base:
+			return noext
+	return base
+
+
+## Every note as a ranking candidate: match on the vault path and the bare name.
+func _link_candidates() -> Array:
+	var out: Array = []
+	for rel in GameManager.notes:
+		var r := String(rel)
+		if not r.ends_with(".md"):
+			continue
+		var noext := r.trim_suffix(".md")
+		var base := noext.get_file()
+		var title := String(GameManager.titles.get(r, ""))
+		out.append({
+			"rel": r,
+			"label": title if title != "" else base,
+			"value": _link_target_for(r),
+			"keys": [noext, base],
+		})
+	return out
+
+
+## A suggested note was accepted: re-point the broken link and open it.
+func _on_link_accepted(value: String) -> void:
+	var rel := WikiLinks.resolve(value)
+	var changed := editor.replace_wikilink(_link_target, value)
+	if changed == 0:
+		status_bar.flash("Link not found: " + _link_target)
+		return
+	if rel != "":
+		vault_tree.select_note(rel)
+	else:
+		_close_page()
+	status_bar.flash("✓ Re-pointed " + _link_target)
+
+
+## The user chose to create the unresolved target as a new note.
+func _on_link_create(target: String) -> void:
+	var fname := new_dialog.create_note_for_link(target)
 	if fname == "":
-		# Obsidian-style unfollowed link: clicking it creates the note so the
-		# link resolves from now on. Same folder as the referencing note unless
-		# the target itself names a folder path.
-		fname = new_dialog.create_note_for_link(target)
-		if fname == "":
-			status_bar.flash("✗ Note not found: " + target)
-			return
-	vault_tree.select_note(fname)
+		# Recoverable: an invalid target leaves the dialog open with its
+		# suggestions so the user can pick one instead.
+		status_bar.flash("✗ Cannot create: " + target)
+		return
+	status_bar.flash("Created " + fname)
 
 # ------------------------------------------------- image embeds (v3)
 

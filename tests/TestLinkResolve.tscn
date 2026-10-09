@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://tests/test_link_resolve.gd" id="1_link"]
+
+[node name="TestLinkResolve" type="Node"]
+script = ExtResource("1_link")

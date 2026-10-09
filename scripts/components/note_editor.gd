@@ -193,6 +193,40 @@ func save_source(rel: String, source: String) -> void:
 	remember_saved_form()
 
 
+## Re-point every unescaped `[[old]]` / `[[old|alias]]` in the open note at
+## `new_target`, preserving the visible text: an existing alias is kept, and a
+## bare link gains the typed name as its alias (`[[mari]]` -> the suggestion
+## `quien-es-mari` becomes `[[quien-es-mari|mari]]`). Returns the number of
+## links rewritten. Writes immediately (save_source) because the caller is a
+## full-screen page that hides the editor, where flush() early-returns.
+func replace_wikilink(old_target: String, new_target: String) -> int:
+	var src := code_edit.text
+	if src == "" or old_target == "" or new_target == "":
+		return 0
+	var re := RegEx.create_from_string(
+		"(?i)(?<!\\\\)\\[\\[\\s*" + TextUtils.re_escape(old_target) + "\\s*(\\|[^\\]]*)?\\]\\]")
+	var out := ""
+	var last := 0
+	var count := 0
+	for m in re.search_all(src):
+		out += src.substr(last, m.get_start() - last)
+		var alias := m.get_string(1)
+		if alias == "" and old_target != new_target:
+			alias = "|" + old_target  # keep the name the user typed as the label
+		out += "[[" + new_target + alias + "]]"
+		count += 1
+		last = m.get_end()
+	if count == 0:
+		return 0
+	out += src.substr(last)
+	code_edit.text = out
+	save_source(GameManager.current_rel, compose_note_source())
+	var svc: Variant = sync_service()
+	if svc != null:
+		svc.note_saved(GameManager.current_rel)
+	return count
+
+
 ## Parsed document of the open note for exports (flushes pending edits first).
 func current_doc() -> Variant:
 	if help_mode or GameManager.current_file == "":

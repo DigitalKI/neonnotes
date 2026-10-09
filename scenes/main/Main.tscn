@@ -14,6 +14,7 @@
 [ext_resource type="PackedScene" path="res://scenes/components/vault_picker.tscn" id="13_vault_picker"]
 [ext_resource type="PackedScene" path="res://scenes/components/sync_page.tscn" id="14_sync_page"]
 [ext_resource type="PackedScene" path="res://scenes/components/trash_page.tscn" id="15_trash"]
+[ext_resource type="PackedScene" path="res://scenes/components/link_resolve_dialog.tscn" id="17_link_resolve"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMat_crt"]
 shader = ExtResource("3_crt")
@@ -233,6 +234,11 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 
 [node name="TrashPage" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=995322747 instance=ExtResource("15_trash")]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="LinkResolveDialog" parent="Root/WorkspaceMargin/Workspace/Content" instance=ExtResource("17_link_resolve")]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3

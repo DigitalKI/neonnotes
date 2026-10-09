@@ -317,6 +317,16 @@ func _setup_tag_suggest() -> void:
 	# (a programmatic text assignment does not emit text_changed).
 	_tag_suggest.tag_chosen.connect(func(_tag: String): _on_search_changed(search.text))
 
+## Apply a `#tag` filter to the tree search (used when a `[[#tag]]` link is
+## clicked). A programmatic text assignment does not emit text_changed, so run
+## the handler explicitly.
+func filter_by_tag(tag: String) -> void:
+	var t := tag.strip_edges().trim_prefix("#")
+	if t == "":
+		return
+	search.text = "#" + t
+	_on_search_changed(search.text)
+
 func _on_tag_browse_pressed() -> void:
 	if _tag_suggest == null:
 		return

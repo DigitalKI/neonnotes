@@ -136,12 +136,27 @@ _Last updated: 2026-10-08 · Godot 4.7 · renderer: gl_compatibility_
   its own**, so edit mode tints exactly what the preview renders — e.g. a `|`
   row without a `|---|` delimiter stays plain in both, and `#nospace` is body
   text in both. Fenced code preview uses a full-width padded panel
-  (language-specific token highlighting not implemented); wiki-links `[[Note]]`/`[[Note|label]]` (**clicking an
-  unresolved link auto-creates the note**, 2026-10-08: `_create_note_for_link()`
-  in `main.gd` — target with no folder lands next to the referencing note,
-  `folder/name` targets honour the path (`write_note` makes parent dirs),
-  rejects `..`/empty; scans, orders into the tree and opens it), backlinks,
-  Obsidian callouts, `==highlight==`, `%%glitch%%`, `++flicker++` escapes.
+  (language-specific token highlighting not implemented); wiki-links `[[Note]]`/`[[Note|label]]`,
+  backlinks, Obsidian callouts, `==highlight==`, `%%glitch%%`, `++flicker++` escapes.
+  **Unresolved links no longer auto-create (2026-10-08).** Clicking a
+  `[[target]]` that resolves to nothing opens the **LinkResolveDialog** page
+  (`scenes/components/link_resolve_dialog.tscn`, `PAGE_LINK_RESOLVE`) instead
+  of writing a file: it lists the most similar vault notes (Levenshtein rank,
+  live "Max distance" SpinBox) so the user re-points the link, plus an explicit
+  **Create "target"** button. Accepting a suggestion rewrites every unescaped
+  `[[target]]`/`[[target|alias]]` in the open note (`NoteEditor.replace_wikilink`)
+  via `save_source` — the page hides the editor, so `flush()` would
+  early-return — and opens the target. The visible text is preserved: an
+  existing alias is kept, and a bare link gains the typed name as its alias
+  (`[[mari]]` + suggestion `quien-es-mari` -> `[[quien-es-mari|mari]]`). `[[#tag]]` is treated as a tag
+  reference: it filters the tree (`VaultTreeComponent.filter_by_tag`) and never
+  creates `#foo.md`. Creation still goes through `create_note_for_link()`
+  (target with no folder lands next to the referencing note, `folder/name`
+  honours the path, rejects `..`/empty). Covered by `tests/TestLinkResolve.tscn`.
+  The similarity core is shared: **`TextMatch`** (`scripts/common/text_match.gd`,
+  `edit_distance` + `rank` with a *hard* distance cap) now backs both
+  `TagMatch` (tag autocomplete) and link resolution; `TagMatch` preloads it so
+  it still compiles under `godot --script`.
   **Editor colour emission (2026-10-01):** CodeEdit reads the syntax dict as
   **column-keyed segments** — a colour runs from its key to the *next* key (or
   EOL); a value's `length` is not a rendered end. So `_get_line_syntax_highlighting`
