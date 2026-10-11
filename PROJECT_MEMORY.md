@@ -111,6 +111,21 @@ _Last updated: 2026-10-11 · Godot 4.7 · renderer: gl_compatibility_
   falls back to entering directly when the target isn't in history).
   Startup option **"Graph map"** (`open_start_mode = "graph"`) opens the graph
   instead of a note; the settings Open-at-startup dropdown has the third entry.
+- **Graph focus camera + homepage hub (2026-10-11, slice 3):** tapping/clicking
+  a node now plays a **two-phase camera**: stage 1 glides the node to the
+  centre at the incoming zoom, stage 2 zooms so the immediate neighbourhood
+  fits — and the fit may now zoom **out** (the old clamp to the incoming zoom
+  prevented exactly that). The homepage note (`_homepage.md`) becomes the
+  **vault-root hub node** (`_open_target[""]`): it always connects to every
+  top-level section instead of floating as a lone leaf; `_norm`/`_key_for_note`
+  map it to `""`, its label comes from its front-matter title, and links
+  targeting it route through the hub. Breadcrumbs sit **left, beside the ⌂
+  home button** (no longer centred) and lead with the homepage crumb.
+  **Fixed a real ordering bug found by the smoke:** `_apply_order` appended a
+  new note to the bottom when the selected anchor wasn't yet in the custom
+  order list; it now reseeds from the visual order before inserting. The smoke
+  also gained a deterministic `anchor_note.md` (previous anchor pick could hit
+  a folder companion and swallow the new note into the folder).
 - **Tree reveal on external selection (2026-10-11):** selecting a note from
   the graph (menu Open) or a wiki-link now always brings the tree row into
   view: `VaultTreeComponent._reveal_tree_item()` expands every collapsed

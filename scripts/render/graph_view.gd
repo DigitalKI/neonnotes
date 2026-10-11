@@ -31,6 +31,7 @@ const LABEL_ZOOM := 1.5         # only label leaves once zoomed in this far
 ## Defaults only; the live values live in GameManager (settings page, persisted).
 ## Defaults only; the live values live in GameManager (settings page, persisted).
 const ANCESTOR_CONTEXT := 2     # visible parent landmarks when entering a group
+const HOME_NOTE := "_homepage.md"  # the homepage IS the vault-root hub node
 const MAX_ROUTES := 400
 
 var _font: Font
@@ -84,6 +85,7 @@ var _routes: Array = []          # {"samples": PackedVector2Array, "bidir": bool
 # level and route passes — resolving each link via WikiLinks.resolve() rebuilt
 # them per call, which was O(links × notes): ~7 s at docs-vault scale.
 var _resolve_maps: Array = []
+var _root_home := ""            # homepage note path when it exists (root hub)
 
 func _ready() -> void:
 	# Pan/zoom is a draw transform: clip so the map never spills past the
@@ -165,6 +167,8 @@ func _restore_state(state: Dictionary) -> void:
 		_tween_to(key)
 
 func _key_for_note(note: String) -> String:
+	if note == _root_home:
+		return ""
 	var stem := note.trim_suffix(".md")
 	var key := stem if _children.has(stem) else note
 	if _keys.has(key):
@@ -183,6 +187,7 @@ func _key_for_note(note: String) -> String:
 func _build_hierarchy() -> void:
 	_pos.clear(); _parent.clear(); _children.clear(); _companion.clear()
 	_open_target.clear(); _collapsed.clear(); _cluster_nodes.clear(); _keys.clear()
+	_root_home = ""
 	_children[""] = []
 	var notes: Array[String] = GameManager.notes
 	for n in notes:
@@ -201,6 +206,13 @@ func _build_hierarchy() -> void:
 			_parent[seg] = prev
 			prev = seg
 	for n in notes:
+		# The homepage becomes the vault-root hub node itself: it then always
+		# connects to every top-level section instead of floating as a lone
+		# leaf with no edges.
+		if n == HOME_NOTE:
+			_root_home = n
+			_open_target[""] = n
+			continue
 		var stem := n.trim_suffix(".md")
 		if _children.has(stem):
 			_companion[stem] = n
@@ -356,6 +368,8 @@ func _is_leaf(key: String) -> bool:
 
 func _label(key: String) -> String:
 	if String(key) == "":
+		if _root_home != "" and GameManager.titles.has(_root_home):
+			return String(GameManager.titles[_root_home])
 		return "vault"
 	if _cluster_nodes.has(key):
 		var parent := String(_cluster_nodes[key])
@@ -376,6 +390,8 @@ func _depth(k: String) -> int:
 func _norm(k: String) -> String:
 	var stem := String(k).trim_suffix(".md")
 	var key := stem if _children.has(stem) else String(k)
+	if key == _root_home:
+		return ""  # the homepage routes through the root hub node
 	var p := String(_parent.get(key, ""))
 	if p != "" and _collapsed.get(p, false):
 		return p
@@ -721,7 +737,8 @@ func _section_color(k: String) -> Color:
 
 func _node_color(k: String) -> Color:
 	var hot := k == _center_note or String(_companion.get(k, "")) == _center_note \
-		or k == _selected
+		or k == _selected \
+		or (_center_note != "" and String(_open_target.get(k, "")) == _center_note)
 	var col := _accent if hot else _section_color(k)
 	var in_focus := _center_note == "" or _levels.has(String(_open_target.get(k, "")))
 	if not hot and not in_focus:
@@ -777,6 +794,11 @@ func _draw_labels() -> void:
 func _nav_labels() -> Array[String]:
 	return ["<<", "<", "%d/%d" % [_page + 1, _page_count], ">", ">>"]
 
+func _home_button_rect() -> Rect2:
+	# The permanent ⌂ button: fixed at the top-left of the nav bar.
+	var home_w := _font.get_string_size("⌂", HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
+	return Rect2(10.0, 2.0, home_w + 16.0, 34.0)
+
 func _crumb_chain() -> Array[String]:
 	# Full ancestor chain, deepest last: every level stays clickable, so a deep
 	# sub-sub-folder can always be exited without depending on the 2 landmark
@@ -788,6 +810,9 @@ func _crumb_chain() -> Array[String]:
 		while p != "":
 			chain.push_front(p)
 			p = String(_parent.get(p, ""))
+	# The homepage/root hub leads the chain when it exists.
+	if _root_home != "":
+		chain.push_front("")
 	return chain
 
 func _nav_widths(labels: Array[String]) -> Array[float]:
@@ -811,20 +836,15 @@ func _draw_navigation() -> void:
 	# Permanent home button — the always-visible way back to the overview,
 	# whatever depth the user has navigated to.
 	var home := "⌂"
-	var home_w := _font.get_string_size(home, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
-	var home_rect := Rect2(10.0, 2.0, home_w + 16.0, 34.0)
+	var home_rect := _home_button_rect()
 	draw_rect(home_rect, Color(GameManager.color("bg"), 0.7), true)
 	draw_rect(home_rect, Color(_accent, 0.6 if _scope != "" else 0.25), false, 1.0)
 	draw_string(_font, Vector2(home_rect.position.x + 8.0, y), home,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 16, _accent)
-	var path := "Overview"
-	if _scope != "":
-		var chain := _crumb_chain()
-		path = " / ".join(chain)
-	var path_w := _font.get_string_size(path, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-	var path_x := maxf(8.0, (size.x - path_w) * 0.5)
+	# Crumbs sit right beside the home button, not centred.
+	var path_x := home_rect.end.x + 10.0
 	if _scope == "":
-		draw_string(_font, Vector2(path_x, y + 24.0), path,
+		draw_string(_font, Vector2(path_x, y + 24.0), "Overview",
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, _accent)
 	else:
 		var chain := _crumb_chain()
@@ -871,17 +891,19 @@ func _nav_hit(at: Vector2) -> String:
 			return labels[i]
 		x += widths[i] + gaps
 	# Home button first: top-left, always present.
-	var home_w := _font.get_string_size("⌂", HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
-	if Rect2(10.0, 2.0, home_w + 16.0, 34.0).has_point(at):
+	if _home_button_rect().has_point(at):
 		return "home"
 	var path := "Overview"
 	var chain := _crumb_chain()
 	if _scope != "":
-		path = " / ".join(chain)
-	var path_w := _font.get_string_size(path, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-	var path_x := maxf(8.0, (size.x - path_w) * 0.5)
+		var crumb_labels: Array[String] = []
+		for c in chain:
+			crumb_labels.append(_label(String(c)))
+		path = " / ".join(crumb_labels)
+	# Crumbs sit right beside the home button, not centred.
+	var path_x := _home_button_rect().end.x + 10.0
 	if _scope == "":
-		if Rect2(path_x, 34.0, path_w, 20.0).has_point(at):
+		if Rect2(path_x, 34.0, _font.get_string_size(path, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x, 20.0).has_point(at):
 			return "overview"
 	else:
 		var cx := path_x
@@ -904,7 +926,11 @@ func _activate_nav(action: String) -> void:
 		">>": _set_page(_page_count - 1)
 		"home", "overview": _go_overview()
 	if action.begins_with("crumb:"):
-		_navigate_to_ancestor(action.trim_prefix("crumb:"))
+		var target := action.trim_prefix("crumb:")
+		if target == "":
+			_go_overview()  # the homepage/root crumb
+		else:
+			_navigate_to_ancestor(target)
 
 func _navigate_to_ancestor(target: String) -> void:
 	if target == "" or not _is_scope_ancestor(target):
@@ -1196,16 +1222,28 @@ func _tween_to(key: String) -> void:
 	var pad := 90.0
 	var extent := hi - lo + Vector2(pad * 2.0, pad * 2.0)
 	var avail := size.max(Vector2.ONE)
-	var target := clampf(minf(avail.x / extent.x, avail.y / extent.y), _map_scale, _max_zoom)
+	# Fit may zoom OUT (that is the point: reveal the neighbours) — only guard
+	# against absurd values, never clamp to the incoming zoom.
+	var target := clampf(minf(avail.x / extent.x, avail.y / extent.y), _min_zoom, _max_zoom)
 	var mid := (lo + hi) / 2.0
 	var end_off := size / 2.0 - mid * target
-	if _cam_tween and _cam_tween.is_valid():
-		_cam_tween.kill()
+	# Stage 1 glides the picked node to the centre at the incoming zoom;
+	# stage 2 zooms so the immediate neighbourhood fits. Feels like pointing
+	# at the node first, then opening up the space around it.
 	var start_scale := _map_scale
 	var start_off := _map_offset
+	var center_off: Vector2 = size / 2.0 - _pos[key] * start_scale
+	if _cam_tween and _cam_tween.is_valid():
+		_cam_tween.kill()
 	_cam_tween = create_tween()
 	_cam_tween.tween_method(func(f: float) -> void:
-		_map_scale = lerpf(start_scale, target, f)
-		_map_offset = start_off.lerp(end_off, f)
-		queue_redraw(), 0.0, 1.0, 0.45) \
+		if f < 0.4:
+			var g: float = f / 0.4
+			_map_scale = start_scale
+			_map_offset = start_off.lerp(center_off, g)
+		else:
+			var g: float = (f - 0.4) / 0.6
+			_map_scale = lerpf(start_scale, target, g)
+			_map_offset = center_off.lerp(end_off, g)
+		queue_redraw(), 0.0, 1.0, 0.7) \
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)

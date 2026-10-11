@@ -903,6 +903,14 @@ func _apply_order(rel: String, dir: String, neighbor: String, before: bool) -> v
 	lst.erase(rel)
 	var idx := lst.find(neighbor)
 	if idx == -1:
+		# The want-list can predate the neighbour (e.g. the anchor note was
+		# created after the list was established and never reordered): reseed
+		# from the full visual order, otherwise the new note silently lands at
+		# the very bottom instead of directly below the selection.
+		lst = ordered_notes(dir)
+		lst.erase(rel)
+		idx = lst.find(neighbor)
+	if idx == -1:
 		lst.append(rel)
 	else:
 		lst.insert(idx if before else idx + 1, rel)

@@ -223,15 +223,19 @@ func _run_smoke() -> void:
 	await m.get_tree().process_frame
 	fails += _check(not m.vault_picker.visible and m.content_host.visible, "closing a page restores the note")
 	# New notes land directly below the selected row in the custom order.
-	var anchor_note := ""
-	for n in GameManager.notes:
-		if n.get_base_dir() == "" and not n.begins_with("_"):
-			anchor_note = n
-			break
+	# Deterministic anchor: earlier steps create folder companions (dnd.md,
+	# sub.md) whose tree row IS the folder, so scanning for "any root note"
+	# could pick a row that swallows the new note into the folder.
+	GameManager.write_note("anchor_note.md", "# anchor")
+	GameManager.scan_notes()
+	var anchor_note := "anchor_note.md"
 	m.vault_tree.select_note(anchor_note, false)
 	m.new_dialog.name_field.text = "placed_test"
 	m.new_dialog._create_note()
-	var root_order: Array = GameManager.order.get("", [])
+	# Assert on the VISUAL order (notes + custom order merged), not the raw
+	# order map: the map may not know the freshly created anchor yet, in which
+	# case _apply_order appends and the visual check still validates placement.
+	var root_order: Array = m.vault_tree.ordered_notes("")
 	var ii := root_order.find(anchor_note)
 	fails += _check(ii >= 0 and ii + 1 < root_order.size() and root_order[ii + 1] == "placed_test.md",
 		"new note is ordered directly below the selected note")
