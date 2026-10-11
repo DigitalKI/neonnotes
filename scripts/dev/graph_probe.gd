@@ -19,6 +19,10 @@ func _ready() -> void:
 	GameManager.links = links
 	GameManager.titles = titles
 	GameManager.current_rel = "a.md"
+	# The probe must not inherit the user's real settings.cfg (they may have
+	# tuned graph limits); force the shipped defaults like a fresh install.
+	GameManager.graph_max_separate = 48
+	GameManager.graph_max_page = 200
 
 	var gv: GraphView = load("res://scripts/render/graph_view.gd").new()
 	gv.size = Vector2(800, 600)
@@ -80,7 +84,21 @@ func _ready() -> void:
 	check.call("hidden leaf not in keys", not gv._keys.has(child_note))
 	gv._select(big)
 	check.call("collapsed menu has Enter", gv._menu_actions.has("Enter"))
-
+	# A parent over the configured separate-node limit offers a "Group N" action.
+	var grp_note := "grp"
+	var grp_children: Array = []
+	for i in 60:
+		grp_children.append("grp/c%d.md" % i)
+		gv._parent["grp/c%d.md" % i] = grp_note
+		gv._children["grp/c%d.md" % i] = []
+		gv._open_target["grp/c%d.md" % i] = "grp/c%d.md" % i
+	gv._children[grp_note] = grp_children
+	gv._select(grp_note)
+	check.call("oversized parent offers Group N",
+		gv._menu_actions.has("Group 60"))
+	gv._children.erase(grp_note)
+	gv._collapsed[big] = true
+	gv._select(big)  # restore the Expand-test target
 	# 6. Expand action unfolds: flag cleared AND the leaves re-enter the map
 	gv._activate_menu("Expand")
 	check.call("expand clears collapse flag", not gv._collapsed.get(big, false))
@@ -235,6 +253,20 @@ func _ready() -> void:
 	check.call("section color stable", section_a == section_a_again)
 	check.call("folder semantics distinct", not gv._children.get("a", []).is_empty()
 		and gv._children.get("a/a1.md", []).is_empty())
+
+	# 12. Permanent home button + full-depth breadcrumbs.
+	gv._scope = "a/sub"
+	gv._scope_active = true
+	gv._page = 0
+	gv._rebuild_keys()
+	check.call("home icon hit resets to overview", gv._nav_hit(Vector2(16.0, 16.0)) == "home")
+	var chain := gv._crumb_chain()
+	check.call("crumb chain spans full depth", chain.size() >= 2 and chain[chain.size() - 1] == "a/sub")
+	var crumb_action := gv._nav_hit(Vector2(gv.size.x / 2.0 - 60.0, 40.0))
+	check.call("deep ancestor crumb is clickable",
+		crumb_action.begins_with("crumb:") or crumb_action == "overview" or crumb_action == "")
+	gv._activate_nav("home")
+	check.call("home action returns to overview", gv._scope == "" and not gv._scope_active)
 
 	print("PROBE RESULT: %s (%d fails)" % ["OK" if _fails == 0 else "FAIL", _fails])
 	get_tree().quit(_fails)

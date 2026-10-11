@@ -104,8 +104,13 @@ _Last updated: 2026-10-11 · Godot 4.7 · renderer: gl_compatibility_
   Nodes get distinct visuals: folders/groups are diamond markers with the
   broad halo, leaves are circles; color is a stable per-top-level-section hue.
   Opening a note from the graph suspends scope/page/camera and restores it on
-  return, focusing the opened note. `GraphProbe.tscn` (~45 checks) covers all
-  of it plus configurable thresholds.
+  return, focusing the opened note. `GraphProbe.tscn` (~50 checks) covers all
+  of it plus configurable thresholds. The nav bar has a permanent **⌂ home**
+  button (top-left, always resets to overview), and breadcrumbs expose the
+  **full ancestor chain** (every level clickable, `_navigate_to_ancestor`
+  falls back to entering directly when the target isn't in history).
+  Startup option **"Graph map"** (`open_start_mode = "graph"`) opens the graph
+  instead of a note; the settings Open-at-startup dropdown has the third entry.
 - **Tree reveal on external selection (2026-10-11):** selecting a note from
   the graph (menu Open) or a wiki-link now always brings the tree row into
   view: `VaultTreeComponent._reveal_tree_item()` expands every collapsed

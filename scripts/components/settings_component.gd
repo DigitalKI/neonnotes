@@ -31,6 +31,7 @@ func _ready() -> void:
 	crt_export.toggled.connect(_on_crt_export_toggled)
 	open_start.add_item("Last opened page")
 	open_start.add_item("Homepage")
+	open_start.add_item("Graph map")
 	open_start.item_selected.connect(_on_open_start_selected)
 	graph_separate.value_changed.connect(_on_graph_separate_changed)
 	graph_page.value_changed.connect(_on_graph_page_changed)
@@ -65,7 +66,7 @@ func refresh() -> void:
 	_refresh_scale_rows()
 	crt_ui.set_pressed_no_signal(GameManager.crt_ui)
 	_sync_crt_export_row()
-	open_start.select(0 if GameManager.open_start_mode == "last" else 1)
+	open_start.select(["last", "homepage", "graph"].find(GameManager.open_start_mode))
 
 func _on_auto_ui_scale_toggled(pressed: bool) -> void:
 	GameManager.set_auto_ui_scale(pressed)
@@ -102,7 +103,7 @@ func _sync_crt_export_row() -> void:
 	crt_export.set_pressed_no_signal(ui_on and GameManager.export_crt)
 
 func _on_open_start_selected(index: int) -> void:
-	GameManager.open_start_mode = "last" if index == 0 else "homepage"
+	GameManager.open_start_mode = ["last", "homepage", "graph"][clampi(index, 0, 2)]
 	GameManager._save_settings()
 
 func _on_graph_separate_changed(value: float) -> void:

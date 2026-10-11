@@ -293,13 +293,13 @@ func _enter_group(key: String) -> void:
 	queue_redraw()
 
 func _is_scope_ancestor(key: String) -> bool:
-	var p := _scope
-	for _i in ANCESTOR_CONTEXT:
-		p = String(_parent.get(p, ""))
-		if p == "":
-			return false
+	# Any depth counts: breadcrumbs expose the full chain, so the check must
+	# match (the 2 landmark nodes on the canvas are the visible subset).
+	var p := String(_parent.get(_scope, ""))
+	while p != "":
 		if p == key:
 			return true
+		p = String(_parent.get(p, ""))
 	return false
 
 func _navigate_back() -> void:
@@ -777,6 +777,19 @@ func _draw_labels() -> void:
 func _nav_labels() -> Array[String]:
 	return ["<<", "<", "%d/%d" % [_page + 1, _page_count], ">", ">>"]
 
+func _crumb_chain() -> Array[String]:
+	# Full ancestor chain, deepest last: every level stays clickable, so a deep
+	# sub-sub-folder can always be exited without depending on the 2 landmark
+	# nodes on the canvas.
+	var chain: Array[String] = []
+	if _scope != "":
+		chain.append(_scope)
+		var p := String(_parent.get(_scope, ""))
+		while p != "":
+			chain.push_front(p)
+			p = String(_parent.get(p, ""))
+	return chain
+
 func _nav_widths(labels: Array[String]) -> Array[float]:
 	var widths: Array[float] = []
 	for label in labels:
@@ -795,13 +808,18 @@ func _draw_navigation() -> void:
 		if i < widths.size() - 1:
 			total_w += gaps
 	x = maxf(10.0, (size.x - total_w) * 0.5)
+	# Permanent home button — the always-visible way back to the overview,
+	# whatever depth the user has navigated to.
+	var home := "⌂"
+	var home_w := _font.get_string_size(home, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
+	var home_rect := Rect2(10.0, 2.0, home_w + 16.0, 34.0)
+	draw_rect(home_rect, Color(GameManager.color("bg"), 0.7), true)
+	draw_rect(home_rect, Color(_accent, 0.6 if _scope != "" else 0.25), false, 1.0)
+	draw_string(_font, Vector2(home_rect.position.x + 8.0, y), home,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 16, _accent)
 	var path := "Overview"
 	if _scope != "":
-		var chain: Array[String] = [_scope]
-		var p := String(_parent.get(_scope, ""))
-		while p != "" and chain.size() < ANCESTOR_CONTEXT + 1:
-			chain.push_front(p)
-			p = String(_parent.get(p, ""))
+		var chain := _crumb_chain()
 		path = " / ".join(chain)
 	var path_w := _font.get_string_size(path, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
 	var path_x := maxf(8.0, (size.x - path_w) * 0.5)
@@ -809,11 +827,7 @@ func _draw_navigation() -> void:
 		draw_string(_font, Vector2(path_x, y + 24.0), path,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, _accent)
 	else:
-		var chain: Array[String] = [_scope]
-		var p := String(_parent.get(_scope, ""))
-		while p != "" and chain.size() < ANCESTOR_CONTEXT + 1:
-			chain.push_front(p)
-			p = String(_parent.get(p, ""))
+		var chain := _crumb_chain()
 		var cx := path_x
 		for i in chain.size():
 			var label := _label(chain[i])
@@ -856,13 +870,13 @@ func _nav_hit(at: Vector2) -> String:
 		if rect.has_point(at):
 			return labels[i]
 		x += widths[i] + gaps
+	# Home button first: top-left, always present.
+	var home_w := _font.get_string_size("⌂", HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
+	if Rect2(10.0, 2.0, home_w + 16.0, 34.0).has_point(at):
+		return "home"
 	var path := "Overview"
+	var chain := _crumb_chain()
 	if _scope != "":
-		var chain: Array[String] = [_scope]
-		var p := String(_parent.get(_scope, ""))
-		while p != "" and chain.size() < ANCESTOR_CONTEXT + 1:
-			chain.push_front(p)
-			p = String(_parent.get(p, ""))
 		path = " / ".join(chain)
 	var path_w := _font.get_string_size(path, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
 	var path_x := maxf(8.0, (size.x - path_w) * 0.5)
@@ -870,17 +884,13 @@ func _nav_hit(at: Vector2) -> String:
 		if Rect2(path_x, 34.0, path_w, 20.0).has_point(at):
 			return "overview"
 	else:
-		var chain: Array[String] = [_scope]
-		var p := String(_parent.get(_scope, ""))
-		while p != "" and chain.size() < ANCESTOR_CONTEXT + 1:
-			chain.push_front(p)
-			p = String(_parent.get(p, ""))
 		var cx := path_x
 		for i in chain.size():
 			var label := _label(chain[i])
 			var w := _font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+			# Every ancestor crumb is clickable, at any depth.
 			if i < chain.size() - 1 and Rect2(cx, 34.0, w, 20.0).has_point(at):
-				return "crumb_parent" if i == chain.size() - 2 else "crumb_grandparent"
+				return "crumb:" + chain[i]
 			cx += w + 5.0
 			if i < chain.size() - 1:
 				cx += 12.0
@@ -892,24 +902,29 @@ func _activate_nav(action: String) -> void:
 		"<": _change_page(-1)
 		">": _change_page(1)
 		">>": _set_page(_page_count - 1)
-		"crumb_parent":
-			if _scope != "":
-				_navigate_to_ancestor(String(_parent.get(_scope, "")))
-		"crumb_grandparent":
-			if _scope != "":
-				_navigate_to_ancestor(String(_parent.get(String(_parent.get(_scope, "")), "")))
-		"overview": _go_overview()
+		"home", "overview": _go_overview()
+	if action.begins_with("crumb:"):
+		_navigate_to_ancestor(action.trim_prefix("crumb:"))
 
 func _navigate_to_ancestor(target: String) -> void:
 	if target == "" or not _is_scope_ancestor(target):
 		return
 	# Breadcrumb jumps return to that scope's own saved page where possible.
+	# The target may be deeper than the recorded history (crumbs expose the
+	# full chain), so fall back to entering it directly.
+	var found := false
 	while not _scope_history.is_empty():
 		var previous: Dictionary = _scope_history.pop_back()
 		_scope = String(previous.get("scope", ""))
+		_scope_active = bool(previous.get("scope_active", _scope != ""))
 		_page = int(previous.get("page", 0))
 		if _scope == target:
+			found = true
 			break
+	if not found:
+		_scope = target
+		_scope_active = true
+		_page = 0
 	_rebuild_keys()
 	_layout_points()
 	_build_routes()

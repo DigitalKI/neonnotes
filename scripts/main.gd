@@ -197,6 +197,15 @@ func _start_smoke() -> void:
 	drv._run_smoke()
 
 func _open_start_page() -> void:
+	if GameManager.open_start_mode == "graph":
+		# Graph map as the startup "homepage": same presentation as toggling
+		# the graph from the toolbar (editor hidden, graph fills the content).
+		code_edit.visible = false
+		edit_padding.visible = false
+		content_host.visible = false
+		graph_view.open(GameManager.current_rel)
+		_boot_mark("first-note")
+		return
 	if GameManager.open_start_mode == "last" and GameManager.last_opened_rel != "" and GameManager.notes.has(GameManager.last_opened_rel):
 		_on_note_selected(GameManager.last_opened_rel)
 	else:

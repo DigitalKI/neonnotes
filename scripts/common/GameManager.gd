@@ -109,7 +109,7 @@ var graph_max_separate := 48
 var graph_max_page := 200
 var export_crt := true  # apply CRT overlay to exported PNG/JPEG/GIF
 var crt_ui := true  # live CRT overlay on the UI — master switch for CRT FX
-var open_start_mode := "last"  # "last" or "homepage"
+var open_start_mode := "last"  # "last", "homepage" or "graph"
 var last_opened_rel := ""
 var vault_dir := VAULT_DIR
 var dev_session := false  # true when this run is editor/MCP-driven (isolated vault)
@@ -834,9 +834,8 @@ func _load_settings() -> void:
 	graph_levels = clampi(int(cf.get_value("ui", "graph_levels", graph_levels)), 1, 10)
 	graph_max_separate = maxi(1, int(cf.get_value("ui", "graph_max_separate", graph_max_separate)))
 	graph_max_page = maxi(10, int(cf.get_value("ui", "graph_max_page", graph_max_page)))
-	open_start_mode = String(cf.get_value("ui", "open_start_mode", open_start_mode))
-	if open_start_mode != "last" and open_start_mode != "homepage":
-		open_start_mode = "last"
+	var mode := String(cf.get_value("ui", "open_start_mode", open_start_mode))
+	open_start_mode = mode if mode in ["last", "homepage", "graph"] else "last"
 	last_opened_rel = String(cf.get_value("ui", "last_opened_rel", last_opened_rel))
 	if not PALETTES.has(palette_name):
 		palette_name = "Synthwave"
