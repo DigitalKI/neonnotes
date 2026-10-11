@@ -39,6 +39,7 @@ run_godot_test "TRASH RESULT: OK" --headless --path . tests/TestTrash.tscn
 # Dev/MCP session isolation: NEONNOTES_DEV=1 must redirect the boot to the
 # disposable dev vault and never persist it (keeps agent runs off the real vault).
 NEONNOTES_DEV=1 run_godot_test "DEV ISOLATION RESULT: OK" --headless --path . tests/TestDevIsolation.tscn
+run_godot_test "REVEAL RESULT: OK" --headless --path . tests/TestTreeReveal.tscn
 # Unresolved wikilinks open the resolve page (suggestions + explicit create)
 # instead of silently creating a note; #tag links filter without creating.
 run_godot_test "LINK RESOLVE RESULT: OK" --headless --path . tests/TestLinkResolve.tscn

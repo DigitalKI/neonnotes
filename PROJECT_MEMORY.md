@@ -5,7 +5,7 @@
 > decisions, gotchas) — history lives in git, `git log` is the changelog.
 > Size budget ~250 lines: compact in-session if exceeded.
 
-_Last updated: 2026-10-08 · Godot 4.7 · renderer: gl_compatibility_
+_Last updated: 2026-10-11 · Godot 4.7 · renderer: gl_compatibility_
 
 ---
 
@@ -60,10 +60,60 @@ _Last updated: 2026-10-08 · Godot 4.7 · renderer: gl_compatibility_
   tombstone) or purges. `NoteCrud.purge_expired()` drops items older than
   `TRASH_RETENTION_DAYS` (30) on launch and vault switch.
 - Vault tree with folder-as-note merge, drag & drop (notes + folders), custom
-  ordering in `vault/.neonnotes.json`, wiki-link rewriting on move. The vault
-  picker (`VaultPicker`) lists hidden (dot) folders too — `DirAccess.include_hidden
-  = true`, so a vault kept in a dot-dir is browsable; hidden entries get a `·`
-  marker.
+  ordering in `vault/.neonnotes.json`, wiki-link rewriting on move.
+  The vault picker (`VaultPicker`) lists hidden (dot) folders too —
+  `DirAccess.include_hidden = true`, so a vault kept in a dot-dir is browsable;
+  hidden entries get a `·` marker.
+- **Graph view — tap-to-focus + circle menu (2026-10-11, slice 1 of the graph
+  rework):** the old release-open bug is gone: a mouse release or touch release
+  only focuses when the gesture was a clean tap (no move past
+  `GraphView.TAP_SLOP` = 12 px, never a second finger, never a pinch — flags
+  `_press_moved` / `_pinch_used`). Tap now **focuses**: `_select()` glides the
+  camera (`_tween_to`, 0.45 s) so the node + children + parent + direct links
+  fit, opens the drawn **circle menu** (`Open` / `Delete`, plus `Expand` on
+  collapsed folders — Expand clears `_collapsed` locally and relayouts) and
+  will feed `focus_cb` for the focus card (not wired yet). `Open`/`Delete`
+  route through `open_cb`/`delete_cb`; Main's `_delete_graph_note` reuses
+  `vault_tree.delete_node()` (confirmed trash flow, homepage blocked).
+  `_key_at()` returns the tree key; `_node_at()` maps to the note. Covered by
+  `scripts/dev/GraphProbe.tscn` (19 checks, run:
+  `godot --headless --path . scripts/dev/GraphProbe.tscn`). **Gotcha:** `_keys`
+  (the drawn node list) is rebuilt only by `_rebuild_keys()`. The view now
+  scopes into groups (circle-menu Enter), keeps up to two parent landmarks
+  without siblings, and offers breadcrumb/ancestor menu navigation + Overview.
+  Page controls are compact `<< < x/y > >>`; `MAX_VISIBLE_NODES` is an
+  easy-to-tune total visible node cap, currently 200; overview and entered-group
+  children are paged separately. Layout uses contiguous descendant-weighted
+  angular sectors within the existing radial renderer (no physics/rewrite).
+  **Gotcha:** whenever changing `_collapsed`, call `_rebuild_keys()`, or the
+  flag clears while hidden leaves stay out of the map. `GraphProbe.tscn`
+  covers group entry, parent-sibling exclusion, 200-node pagination, Back/
+  Overview, and sector placement.
+  Still open in the plan: focus card component, 2-level ancestor spine, label
+  title/overlap logic, node shape/size/colour encoding, pseudo-3D tilt
+  prototype.
+- **Graph scope/pagination/visuals (2026-10-11, slice 2):** the graph view now
+  navigates scopes: the circle menu gained **Enter** (and "Group N" for parents
+  over the limit) to enter a folder, with **Go/Overview** on ancestor landmarks
+  and a breadcrumb path in the nav bar. Pagination is **per entered parent**
+  (the overview keeps the root siblings together): page size and the
+  separate-node grouping threshold are user settings
+  (`ui/graph_max_page` = 200, `ui/graph_max_separate` = 48, replacing the
+  unused "graph neighbor levels" row in the settings page; the old
+  `graph_levels` remains only as the focus-dim radius, not a setting).
+  Nodes get distinct visuals: folders/groups are diamond markers with the
+  broad halo, leaves are circles; color is a stable per-top-level-section hue.
+  Opening a note from the graph suspends scope/page/camera and restores it on
+  return, focusing the opened note. `GraphProbe.tscn` (~45 checks) covers all
+  of it plus configurable thresholds.
+- **Tree reveal on external selection (2026-10-11):** selecting a note from
+  the graph (menu Open) or a wiki-link now always brings the tree row into
+  view: `VaultTreeComponent._reveal_tree_item()` expands every collapsed
+  ancestor, centers `scroll_to_item(it, true)`, and re-scrolls deferred via
+  the validity-guarded `_scroll_deferred()` (the row can be freed before the
+  deferred call runs — an unguarded deferred scroll segfaulted the smoke test).
+  Covered by `tests/TestTreeReveal.tscn` (deep nested note + collapsed
+  ancestors + filler rows).
 - **Tag search + tag autocomplete (2026-09-30):** the always-visible tag-chip
   bar above the tree is **removed**. The search field now takes free text *and*
   `#tags`: a query is `keywords` + `#tag`s, AND-composed and case-insensitive.

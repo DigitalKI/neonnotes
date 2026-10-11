@@ -60,17 +60,33 @@ text = "⇄ Pair"
 [node name="GraphLevelsContainer" type="HBoxContainer" parent="VerticalContainer" unique_id=1291237835]
 layout_mode = 2
 
-[node name="GraphLabel" type="Label" parent="VerticalContainer/GraphLevelsContainer" unique_id=2012181544]
+[node name="GraphSeparateLabel" type="Label" parent="VerticalContainer/GraphLevelsContainer" unique_id=2012181544]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "Graph neighbor levels (1–10)"
+text = "Graph: max separate nodes"
 
-[node name="GraphLevels" type="SpinBox" parent="VerticalContainer/GraphLevelsContainer" unique_id=660931135]
+[node name="GraphSeparate" type="SpinBox" parent="VerticalContainer/GraphLevelsContainer" unique_id=660931135]
 unique_name_in_owner = true
 layout_mode = 2
-min_value = 1.0
-max_value = 10.0
-value = 1.0
+min_value = 5.0
+max_value = 500.0
+value = 48.0
+rounded = true
+
+[node name="GraphPageContainer" type="HBoxContainer" parent="VerticalContainer" unique_id=1291237836]
+layout_mode = 2
+
+[node name="GraphPageLabel" type="Label" parent="VerticalContainer/GraphPageContainer" unique_id=2012181545]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Graph: max page nodes"
+
+[node name="GraphPage" type="SpinBox" parent="VerticalContainer/GraphPageContainer" unique_id=660931136]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 10.0
+max_value = 1000.0
+value = 200.0
 rounded = true
 
 [node name="OpenStartLabel" type="Label" parent="VerticalContainer" unique_id=305123447]

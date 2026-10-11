@@ -102,6 +102,11 @@ var ui_scale_percent := 100
 ## Cached density reading; -1 means "not measured yet" (see density_scale()).
 var _density_scale := -1.0
 var graph_levels := 2
+## Graph view navigation limits. Max separate nodes = per-parent child count
+## shown as individual markers before the group collapses; max page nodes =
+## per-parent page size while inside an entered group.
+var graph_max_separate := 48
+var graph_max_page := 200
 var export_crt := true  # apply CRT overlay to exported PNG/JPEG/GIF
 var crt_ui := true  # live CRT overlay on the UI — master switch for CRT FX
 var open_start_mode := "last"  # "last" or "homepage"
@@ -827,6 +832,8 @@ func _load_settings() -> void:
 	ui_scale_percent = clampi(int(cf.get_value("ui", "ui_scale_percent", ui_scale_percent)),
 			MIN_UI_SCALE_PERCENT, MAX_UI_SCALE_PERCENT)
 	graph_levels = clampi(int(cf.get_value("ui", "graph_levels", graph_levels)), 1, 10)
+	graph_max_separate = maxi(1, int(cf.get_value("ui", "graph_max_separate", graph_max_separate)))
+	graph_max_page = maxi(10, int(cf.get_value("ui", "graph_max_page", graph_max_page)))
 	open_start_mode = String(cf.get_value("ui", "open_start_mode", open_start_mode))
 	if open_start_mode != "last" and open_start_mode != "homepage":
 		open_start_mode = "last"
@@ -874,6 +881,8 @@ func _save_settings() -> void:
 	cf.set_value("ui", "auto_ui_scale", auto_ui_scale)
 	cf.set_value("ui", "ui_scale_percent", ui_scale_percent)
 	cf.set_value("ui", "graph_levels", graph_levels)
+	cf.set_value("ui", "graph_max_separate", graph_max_separate)
+	cf.set_value("ui", "graph_max_page", graph_max_page)
 	cf.set_value("ui", "open_start_mode", open_start_mode)
 	cf.set_value("ui", "last_opened_rel", last_opened_rel)
 	cf.set_value("vault", "dir", vault_dir)

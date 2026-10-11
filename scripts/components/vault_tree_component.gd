@@ -1129,13 +1129,34 @@ func select_note(fname: String, open_note := true) -> void:
 	while not stack.is_empty():
 		var it: TreeItem = stack.pop_back()
 		if it.get_metadata(0) == fname:
-			side_tree.scroll_to_item(it, false)
-			side_tree.set_selected(it, 0)
-			if open_note:
-				_open_tree_item(it)
+			_reveal_tree_item(it, open_note)
 			return
 		for c in it.get_children():
 			stack.append(c)
+
+
+## Select a row and actually bring it into view. `scroll_to_item` alone is not
+## enough from graph/wiki-link navigation: an ancestor folder may be collapsed
+## (scrolling cannot reveal a row inside it), and the scroll can be lost when
+## the tree is laid out in the same frame (mobile drawer opening, note switch).
+## So: expand every ancestor, center on the row, and scroll again deferred.
+func _reveal_tree_item(it: TreeItem, open_note: bool) -> void:
+	var p := it.get_parent()
+	while p != null:
+		p.collapsed = false
+		p = p.get_parent()
+	side_tree.set_selected(it, 0)
+	side_tree.scroll_to_item(it, true)
+	_scroll_deferred.call_deferred(it)
+	if open_note:
+		_open_tree_item(it)
+
+## Deferred re-scroll. The row can be freed before the deferred call runs
+## (page close → tree refresh), so it must be validity-guarded — an unguarded
+## call crashed the smoke test with a segfault.
+func _scroll_deferred(it: TreeItem) -> void:
+	if is_instance_valid(it):
+		side_tree.scroll_to_item(it, true)
 
 
 ## The currently selected tree row (or null).

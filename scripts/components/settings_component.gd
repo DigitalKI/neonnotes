@@ -5,7 +5,8 @@ signal close_requested
 
 @onready var vault_path: Label = %VaultPath
 @onready var paired_devices: Label = %PairedDevices
-@onready var graph_levels: SpinBox = %GraphLevels
+@onready var graph_separate: SpinBox = %GraphSeparate
+@onready var graph_page: SpinBox = %GraphPage
 @onready var style: OptionButton = %Style
 @onready var font_opt: OptionButton = %Font
 @onready var font_size: SpinBox = %FontSize
@@ -31,7 +32,8 @@ func _ready() -> void:
 	open_start.add_item("Last opened page")
 	open_start.add_item("Homepage")
 	open_start.item_selected.connect(_on_open_start_selected)
-	graph_levels.value_changed.connect(_on_graph_levels_changed)
+	graph_separate.value_changed.connect(_on_graph_separate_changed)
+	graph_page.value_changed.connect(_on_graph_page_changed)
 	for p in GameManager.PALETTES.keys():
 		style.add_item(p)
 	style.item_selected.connect(func(i: int): GameManager.set_palette(style.get_item_text(i)))
@@ -55,7 +57,8 @@ func refresh() -> void:
 	paired_devices.text = "Sync: %s · paired devices: %s" % [
 		GameManager.vault_id if GameManager.vault_id != "" else "(none)",
 		(str(GameManager.paired_peers.keys()) if not GameManager.paired_peers.is_empty() else "None")]
-	graph_levels.value = GameManager.graph_levels
+	graph_separate.set_value_no_signal(GameManager.graph_max_separate)
+	graph_page.set_value_no_signal(GameManager.graph_max_page)
 	style.select(maxi(0, GameManager.PALETTES.keys().find(GameManager.palette_name)))
 	font_opt.select(maxi(0, GameManager.FONTS.keys().find(GameManager.font_name)))
 	font_size.set_value_no_signal(GameManager.font_size)
@@ -102,8 +105,13 @@ func _on_open_start_selected(index: int) -> void:
 	GameManager.open_start_mode = "last" if index == 0 else "homepage"
 	GameManager._save_settings()
 
-func _on_graph_levels_changed(value: float) -> void:
-	GameManager.graph_levels = clampi(int(value), 1, 10)
+func _on_graph_separate_changed(value: float) -> void:
+	GameManager.graph_max_separate = maxi(1, int(value))
+	GameManager._save_settings()
+
+
+func _on_graph_page_changed(value: float) -> void:
+	GameManager.graph_max_page = maxi(10, int(value))
 	GameManager._save_settings()
 
 

@@ -124,6 +124,7 @@ func _phase_theme_layout() -> void:
 	settings_component.sync_cb = _on_sync
 	settings_component.close_requested.connect(_close_settings)
 	graph_view.open_cb = _open_graph_note
+	graph_view.delete_cb = _delete_graph_note
 	PreviewBuilder.open_cb = _open_wikilink
 	PreviewBuilder.image_cb = _on_image_click
 	layout_component.ready()
@@ -508,10 +509,19 @@ func _close_page() -> void:
 # ------------------------------------------------- v2: wiki / backlinks / graph
 
 func _open_graph_note(fname: String) -> void:
-	# Graph nodes behave like tree selections: close the graph, select the
-	# corresponding row, and let the normal note-opening path render preview.
+	# Preserve the graph's scope/page/camera before opening the document; toggling
+	# back restores that navigation context and focuses this note.
+	graph_view.suspend_for_open(fname)
 	graph_view.visible = false
 	vault_tree.select_note(fname)
+
+func _delete_graph_note(fname: String) -> void:
+	# The circle menu's Delete reuses the tree's confirmed deletion flow
+	# (move to trash + confirm dialog), so graph deletions match tree deletions.
+	if fname == "" or fname == "_homepage.md":
+		status_bar.flash("⌂ The homepage cannot be deleted")
+		return
+	vault_tree.delete_node(fname)
 
 func _open_wikilink(target: String) -> void:
 	# `[[#tag]]` is a tag reference, not a note: filter the tree by it and never
