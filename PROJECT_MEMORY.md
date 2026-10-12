@@ -26,6 +26,28 @@ _Last updated: 2026-10-11 · Godot 4.7 · renderer: gl_compatibility_
 
 ## 2. Current state (present-tense facts — git is the changelog)
 
+- **Graph pager fix (2026-10-11):** the nav-bar pager was stuck at "1/1" with
+  dead buttons after expanding/entering a node — `_rebuild_keys()` emitted
+  `nav_changed` at its top, before `_page_count` was recomputed, so the bar
+  always mirrored stale values. The emit now happens once the page math is
+  final (both the overview early-return and the scoped path). The pager is now
+  **hidden unless `page_count > 1`** (a single page no longer shows a dead
+  1/1); `%Pager` in `graph_nav_bar.tscn` gained `unique_name_in_owner = true`
+  so the bar can toggle it. Selecting/entering a node still centres it and
+  fits the immediate neighbours (parent + on-page children) via the
+  two-phase `_tween_to` camera — no change needed there.
+- **Graph focus camera consistency (2026-10-11):** `_tween_to` now builds its
+  frame **symmetrically around the selected node** (extent = `2 ×` the farthest
+  neighbour distance, plus pad) instead of around the neighbours' bounding box.
+  The old bbox framing centred on the *box midpoint*, so a parent-only leaf
+  (neighbour = the parent above) slid off-centre and magnified toward it, while
+  a folder (a ring of children, midpoint ≈ the node) centred and zoomed out.
+  Now both cases centre the node dead-on and open up the same way; a node with
+  no neighbours just re-centres and keeps the zoom. `GraphProbe.tscn` gained
+  "stage 2 centres the node", "parent-only leaf zooms out / centres the node"
+  and "folder with children zooms out" checks.
+
+
 - **CRT overlay / GPU cost (2026-10-01):** the UI overlay is a full-window
   multiplicative scanline + RGB grille shader (`shaders/crt.gdshader`) that
   does not sample `SCREEN_TEXTURE`; this avoids the expensive per-frame
@@ -89,9 +111,9 @@ _Last updated: 2026-10-11 · Godot 4.7 · renderer: gl_compatibility_
   flag clears while hidden leaves stay out of the map. `GraphProbe.tscn`
   covers group entry, parent-sibling exclusion, 200-node pagination, Back/
   Overview, and sector placement.
-  Still open in the plan: focus card component, 2-level ancestor spine, label
+  Still open in the plan: 2-level ancestor spine, label
   title/overlap logic, node shape/size/colour encoding, pseudo-3D tilt
-  prototype.
+  prototype (the focus card landed as slice 4, below).
 - **Graph scope/pagination/visuals (2026-10-11, slice 2):** the graph view now
   navigates scopes: the circle menu gained **Enter** (and "Group N" for parents
   over the limit) to enter a folder, with **Go/Overview** on ancestor landmarks
@@ -126,6 +148,110 @@ _Last updated: 2026-10-11 · Godot 4.7 · renderer: gl_compatibility_
   order list; it now reseeds from the visual order before inserting. The smoke
   also gained a deterministic `anchor_note.md` (previous anchor pick could hit
   a folder companion and swallow the new note into the folder).
+  **Follow-up fix (homepage was invisible):** the hub was *mapped* and
+  *labelled* but never *drawn* — `_keys` (the list every draw pass iterates)
+  excluded the root key `""`, so `_layout_points` placed it at the centre while
+  `_draw_node`/`_draw_labels` skipped it. The overview now seeds `""` into
+  `_keys`; the hub hit-tests via `_hub_at` (screen radius, no hierarchy key of
+  its own) and focuses through `_select_hub` (offers only `Open`, since the
+  homepage cannot be deleted or entered). Homepage and cross-section links now
+  also route **through** the centre: the old `if a == "" or b == "": continue`
+  guard in `_build_routes` silently dropped every homepage link, and
+  `_route_samples` now inserts `_pos[""]` when the LCA is the vault root.
+  **The "agglomerate" fix:** after that, the real vault (876 notes) instead
+  piled **801 nodes within 40 px of the centre**, burying the hub.
+  `_collect_overview_nodes` recursed into *every* folder, but `_assign_sectors`
+  refuses to lay out a **collapsed** (oversized) parent's children, so those
+  descendants were never positioned and all hit the `_pos[k] = center`
+  fallback. The overview now stops recursing at a collapsed parent (it collapses
+  to its own ·N node), so the same vault shows 76 nodes with just the hub at the
+  centre. Regression-checked in the probe (no node piles on the fallback).
+  **Link routes were inconsistent on a fresh open:** the fast boot path
+  (`scan_paths()`) clears `links` and indexes titles/tags/links asynchronously
+  (`load_metadata_async`), but `Main._on_metadata_ready` only refreshed the
+  tree + backlinks — never the graph. A graph opened inside that window built
+  its routes from an empty link index (no link light at all), and the routes
+  only "appeared" after digging into a scope and back (which rebuilds them).
+  `GraphView` now subscribes to `GameManager.metadata_ready` and refreshes
+  `_resolve_maps` + `_build_levels` + `_build_routes` when the index completes
+  (skipped while suspended/hidden — returning from a note rebuilds anyway).
+- **Graph focus card + GraphDigest (2026-10-11, slice 4):** tapping a node now
+  also shows a display-only **focus card** ("what is inside this node"):
+  tags chips → outgoing links (resolved to titles, unresolved kept raw + dim)
+  → excerpt → `created … · edited … · N words · N open · N img` meta line.
+  Folder nodes aggregate: union of every descendant's tags + a scrollable
+  child-title list (`▣ N NOTES`, wide 14 px grabber like the tree/preview
+  scrollbars). No actions on the card yet. Data flow:
+  `GraphDigest.summarize()` (pure, `scripts/common/graph_digest.gd`) is run on
+  a single worker `Thread` by **`GraphDigestStore`** (`request()` returns the
+  cached digest or `{}` + queues a read; `digest_ready(rel)` signals back via
+  `call_deferred`; cache invalidated per-note on `editor.saved_cb` (new
+  injected callback) and cleared on vault switch). `GraphDigest.note_card()/
+  folder_card()` build view-models on the main thread (index-backed, so the
+  card renders instantly and fills in when the digest arrives). Card =
+  `scenes/components/graph_focus_card.tscn` + `scripts/components/
+  graph_focus_card.gd`, instanced in Main.tscn as a child of `App` (before
+  CrtOverlay, so CRT still applies); wired via `graph_view.focus_cb →
+  Main._focus_graph_node`. Layout: desktop = semi-transparent (bg α 0.80)
+  floating panel top-right below the toolbar, content-height, capped;
+  phone landscape = right rail full height; phone portrait = bottom sheet
+  (1/3 height). Mobile only: `GraphView.view_inset` (set by
+  `Main._apply_card_layout` from `focus_card.covered_inset()`) keeps the
+  two-phase focus camera centring the neighbourhood in the free area —
+  desktop never re-frames. **Gotchas:** autowrap Labels (excerpt/meta) must
+  carry `custom_minimum_size.x ≥ 200` or their 1-px-width min height inflates
+  the card (classic autowrap feedback loop); the card never lays itself out —
+  Main owns the form factor via `relayout_cb` (a stale-defaults self-layout
+  broke phone modes); `show_model()` re-places deferred because container min
+  sizes settle a frame after the rows are built. Camera positioning for
+  mobile lives in `GraphView._tween_to` via `view_rect()`.
+  **Interactions (user-requested):** tapping/clicking outside the card closes
+  it together with the circle menu (`GraphView.blur_cb`, fired from
+  `_close_menu()` at press time — a pan start also drops both, matching the
+  menu); folder-card child rows are **navigation**: `child_selected(rel)` →
+  `GraphView.focus_note()` selects the node on the map (entering its parent
+  scope first when it is off-page; falls back to opening the note when the map
+  cannot reach it, e.g. beyond the page limit); tag chips filter the vault
+  exactly like a `[[#tag]]` link (`tag_selected(tag)` →
+  `vault_tree.filter_by_tag()` + mobile drawer reveal; graph-side tag/keyword
+  filtering is the future step); **link rows navigate too**
+  (`link_selected(raw_target)` → resolved `focus_note`, else `_open_wikilink`
+  resolve flow), and the link list **pages in by ten** through a persistent
+  "… N more" button (`INITIAL_LINKS`/`LINK_STEP` = 10; the button sits at the
+  end of the grown list and hides only when nothing remains). Children in the
+  view-model are `{rel, title}` dicts now, sorted by title.
+  **Phone overview default zoom:** `GraphView._fit_to_view()` starts phones
+  closer than fit-all (`mobile_fit`, seeded from
+  `GameManager.is_phone_screen()`, overridable by probes): the floor puts the
+  level-1 ring at ~85% of the short half-edge — same floor in portrait and
+  landscape — and frames the current scope's hub; `_min_zoom` keeps the raw
+  fit scale so zooming out to the whole map still works. Desktop unchanged.
+- **Graph nav chrome componentized + links page + folder tabs (2026-10-11):**
+  the `<< < x/y > >>` pager, ⌂ home button and breadcrumbs **no longer draw
+  inside GraphView** — they are a scene,
+  `scenes/components/graph_nav_bar.tscn` + `graph_nav_bar.gd`, instanced as a
+  child of the GraphView node in Main.tscn (so it is visually editable and
+  clips/moves with the map). GraphView only publishes `nav_changed` (emitted
+  from `_rebuild_keys`) + `nav_state()` ({page, page_count, crumbs
+  [{key,label}], in_scope}); the bar mirrors it and emits `nav_action` strings
+  `_activate_nav` already understands ("home", "<<", "<", ">", ">>",
+  "crumb:<key>"; the homepage crumb emits "home"). `_nav_hit`/
+  `_draw_navigation` are gone; `_crumb_chain` stays as the state source. The
+  card's link list was replaced by a compact header row (`⇢ LINKS · N`) whose
+  `☰ all` button opens **`GraphLinksPage`** (new scene page under %Content,
+  `PAGE_GRAPH_LINKS`): every outgoing link at once, rows emit
+  `link_activated(target, resolved)` → `_return_to_graph()` (close page,
+  re-show the graph) then `focus_note`, or the wikilink resolve flow for
+  unresolved targets; ✕ also returns to the graph, not the editor. Folder
+  cards now have **two tabs** (`¶ Content` / `▣ Children`): content
+  (excerpt+meta) is the default tab, the child list moves to the second; notes
+  without children show no tabs. Card API: `links_opened` replaced
+  `link_selected` (paging code removed).
+  Covered by `tests/TestGraphCard.tscn` (in run_tests.sh: digest extraction,
+  dates, view-models, card rendering, three form factors, inset framing,
+  worker cache read-through, child/tag/link navigation, blur, link paging,
+  phone zoom floor), plus nav-bar mirroring/actions, links-page rows, and
+  folder tab switching) — full suite green.
 - **Tree reveal on external selection (2026-10-11):** selecting a note from
   the graph (menu Open) or a wiki-link now always brings the tree row into
   view: `VaultTreeComponent._reveal_tree_item()` expands every collapsed
@@ -837,6 +963,23 @@ _These OVERRIDE the skill's defaults for this project._
   .content_scale_*` doesn't exist in 4.7 (use `Control.scale`); `MovieWriter`
   only has MJPEG/PNGWAV; `String.hash()` has weak low-bit mixing (use the
   `_mix()` avalanche); pan reads tracked touch position, not `event.relative`.
+- **Graph root hub key is `""`:** `_keys` is the drawn-node list, so an overview
+  must seed `""` (`_rebuild_keys`) or the homepage is positioned but never
+  rendered. `""` is also the "no hit" sentinel, so `_key_at` can't report the
+  hub — use `_hub_at(at)` (screen radius) + `_select_hub()`. A `_norm()` result
+  of `""` means "the hub", so never `continue` on `a == ""`/`b == ""` in the
+  route pass or homepage links vanish.
+- **Overview collection must match `_assign_sectors`:** both must agree on what
+  a collapsed (`graph_max_separate`) parent contributes. Collecting a collapsed
+  parent's descendants while the layout skips them dumps every one onto the
+  `_pos[k] = center` fallback — the whole vault stacks on the hub. `_collapsed`
+  keys are the group markers; don't recurse past them.
+- **Link routes lag the boot by design:** `scan_paths()` clears `links` and
+  `load_metadata_async()` fills them 12 notes/frame — a graph opened in that
+  window has an empty index. Anything deriving routes/levels/labels from
+  `GameManager.links`/`titles` must refresh on `metadata_ready` (GraphView
+  does; `Main._on_metadata_ready` covers tree + backlinks), or the view looks
+  broken until the user navigates.
 
 ## 8. Asset / naming notes
 
