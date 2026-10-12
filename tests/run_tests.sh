@@ -44,6 +44,8 @@ run_godot_test "REVEAL RESULT: OK" --headless --path . tests/TestTreeReveal.tscn
 # instead of silently creating a note; #tag links filter without creating.
 run_godot_test "LINK RESOLVE RESULT: OK" --headless --path . tests/TestLinkResolve.tscn
 run_godot_test "MOBILE TREE TOUCH RESULT: OK" --headless --path . tests/ReproTreeTap.tscn
+# Graph focus card: digest extraction/cache, card rendering, form-factor layout.
+run_godot_test "CARD RESULT: OK" --headless --path . tests/TestGraphCard.tscn
 # Sync delete/move propagation over loopback (real frame protocol + tombstones).
 run_godot_test "SYNC DELETE/MOVE RESULT: OK" --headless --path . tests/TestSyncDeleteMove.tscn
 # Sync identity is per vault (in-folder id + device-local phrase); switching

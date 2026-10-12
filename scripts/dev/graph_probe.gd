@@ -6,6 +6,13 @@ extends Node
 
 var _fails := 0
 
+## Reset to a zoomed-in camera and run one focus tween, waiting for it to land.
+func _focus_scale(gv: GraphView, key: String) -> void:
+	gv._map_scale = 2.0
+	gv._map_offset = Vector2(40, 40)
+	gv._tween_to(key)
+	await get_tree().create_timer(0.9).timeout
+
 func _ready() -> void:
 	var notes: Array[String] = [
 		"a.md", "b.md", "a/a1.md", "a/a2.md", "a/sub.md", "a/sub/s1.md",
@@ -259,14 +266,47 @@ func _ready() -> void:
 	gv._scope_active = true
 	gv._page = 0
 	gv._rebuild_keys()
-	check.call("home icon hit resets to overview", gv._nav_hit(Vector2(16.0, 16.0)) == "home")
+	# Navigation chrome moved into scenes/components/graph_nav_bar.tscn; the
+	# view only publishes state (crumbs keep their full-depth chain).
+	var state := gv.nav_state()
 	var chain := gv._crumb_chain()
 	check.call("crumb chain spans full depth", chain.size() >= 2 and chain[chain.size() - 1] == "a/sub")
-	var crumb_action := gv._nav_hit(Vector2(gv.size.x / 2.0 - 60.0, 40.0))
-	check.call("deep ancestor crumb is clickable",
-		crumb_action.begins_with("crumb:") or crumb_action == "overview" or crumb_action == "")
+	check.call("nav state mirrors the crumb chain", (state["crumbs"] as Array).size() == chain.size())
+	var crumb_keys: Array = []
+	for crumb in state["crumbs"]:
+		crumb_keys.append(crumb["key"])
+	check.call("nav state carries every ancestor key", crumb_keys.has("a"))
 	gv._activate_nav("home")
 	check.call("home action returns to overview", gv._scope == "" and not gv._scope_active)
+
+	# 12b. Overview collapses an oversized parent to one node instead of piling
+	#      its descendants on the centre fallback (_assign_sectors skips a
+	#      collapsed parent's children, so collecting them left them unplaced).
+	var saved_sep2: int = GameManager.graph_max_separate
+	GameManager.graph_max_separate = 10
+	gv._children = {"": ["big"], "big": []}
+	gv._parent = {"big": ""}
+	for i in 120:
+		var ch2 := "big/n%03d.md" % i
+		gv._children["big"].append(ch2)
+		gv._parent[ch2] = "big"
+		gv._children[ch2] = []
+		gv._open_target[ch2] = ch2
+	gv._collapsed.clear()
+	gv._detect_collapsed()
+	gv._scope = ""
+	gv._scope_active = false
+	gv._rebuild_keys()
+	gv._layout_points()
+	check.call("oversized parent stays as one collapsed node", gv._keys.has("big"))
+	check.call("collapsed descendants stay out of the overview",
+		not gv._keys.has("big/n000.md"))
+	var piled := 0
+	for k in gv._keys:
+		if k != "" and gv._pos.has(k) and gv._pos[k] == gv.size / 2.0:
+			piled += 1
+	check.call("no node piles on the centre fallback", piled == 0)
+	GameManager.graph_max_separate = saved_sep2
 
 	# 13. Homepage is the root hub: present, hot, and connected to everything.
 	var home_notes: Array[String] = ["_homepage.md", "sec.md", "sec/s1.md", "other.md"]
@@ -280,6 +320,43 @@ func _ready() -> void:
 	check.call("homepage label resolves via root", gv._label("") != "vault" or true)
 	check.call("norm routes homepage to root", gv._norm("_homepage.md") == "")
 	check.call("key_for_note maps homepage to root", gv._key_for_note("_homepage.md") == "")
+	# The hub must actually be in the drawn node list, not just mapped to root —
+	# otherwise _layout_points positions it but no draw pass ever renders it.
+	gv._rebuild_keys()
+	gv._layout_points()
+	check.call("homepage hub is a drawn node", gv._keys.has(""))
+	check.call("homepage hub sits at the centre", gv._pos.has(""))
+	check.call("homepage hub hit-tests at the centre",
+		gv._hub_at(gv._to_screen(gv._pos[""])))
+	check.call("homepage hub is not hit away from centre",
+		not gv._hub_at(gv._to_screen(gv._pos[""]) + Vector2(300, 300)))
+	var opened_home: Array[String] = []
+	gv.open_cb = func(n: String) -> void: opened_home.append(n)
+	gv._select_hub()
+	check.call("hub menu offers Open only",
+		gv._menu_open and gv._menu_actions == ["Open"])
+	gv._activate_menu("Open")
+	check.call("hub Open opens the homepage", opened_home == ["_homepage.md"])
+	# Homepage links (and any cross-section link) route through the hub centre.
+	var saved_links: Dictionary = GameManager.links
+	GameManager.notes = home_notes
+	GameManager.links = {"sec/s1.md": ["other"], "_homepage.md": ["other"]}
+	gv._resolve_maps = WikiLinks.resolve_maps()
+	gv._build_routes()
+	var min_hub_d := 9999.0
+	for r in gv._routes:
+		for s in r["samples"]:
+			min_hub_d = minf(min_hub_d, s.distance_to(gv._pos[""]))
+	check.call("homepage + cross-section links route through the hub", min_hub_d < 10.0)
+	# A graph opened during the async metadata window (links not indexed yet)
+	# must rebuild its routes when metadata_ready fires — otherwise the link
+	# light only appears after navigating somewhere and back. Emitted while the
+	# synthetic hierarchy is still active so the rebuilt routes are placeable.
+	gv._routes.clear()
+	GameManager.metadata_ready.emit()
+	check.call("metadata_ready rebuilds link routes", not gv._routes.is_empty())
+	GameManager.notes = saved_notes
+	GameManager.links = saved_links
 
 	# 14. Two-phase focus: stage 1 centres the node at incoming zoom.
 	gv._map_scale = 2.0
@@ -295,11 +372,23 @@ func _ready() -> void:
 	check.call("stage 1 centres node (<120px)", mid_center.length() < 120.0)
 	await get_tree().create_timer(0.6).timeout
 	var end_center: Vector2 = gv._to_screen(gv._pos["sec"]) - gv.size / 2.0
-	# After the fit, the neighbourhood bbox is centred — the node itself may
-	# legitimately sit off-centre; what matters is that it stays on screen.
+	# The frame is built symmetrically around the node, so after the fit the
+	# selected node must sit centred — for a folder ring *and* for a
+	# parent-only leaf alike (the old neighbour-bbox framing slid a leaf
+	# off-centre toward its parent).
+	check.call("stage 2 centres the node", end_center.length() < 40.0)
 	check.call("stage 2 keeps node on screen",
 		Rect2(Vector2.ZERO, gv.size).has_point(gv._to_screen(gv._pos["sec"])))
-	check.call("stage 2 changed the zoom to fit", absf(end_center.length()) >= 0.0)
+
+	# 15. Consistency: a parent-only leaf must also open up (zoom OUT) and
+	# centre — the same behaviour a folder gets from its ring of children —
+	# instead of sliding off-centre and magnifying toward its parent.
+	await _focus_scale(gv, "sec/s1.md")
+	var leaf_center: Vector2 = gv._to_screen(gv._pos["sec/s1.md"]) - gv.size / 2.0
+	check.call("parent-only leaf zooms out", gv._map_scale < 2.0)
+	check.call("parent-only leaf centres the node", leaf_center.length() < 40.0)
+	await _focus_scale(gv, "sec")
+	check.call("folder with children zooms out", gv._map_scale < 2.0)
 
 	print("PROBE RESULT: %s (%d fails)" % ["OK" if _fails == 0 else "FAIL", _fails])
 	get_tree().quit(_fails)
