@@ -169,6 +169,7 @@ func _flush_state(fname: String, body: String, title: String, tags: Array[String
 		_saved_title = title
 		_saved_tags = tags.duplicate()
 		flash_cb.call("✓ Saved " + fname)
+		saved_cb.call(fname)
 		sync_service().note_saved(fname)  # debounce auto-sync + clear any tombstone
 		# rebuild the tree if the front-matter title changed
 		if old_title != title:
@@ -191,6 +192,7 @@ func save_source(rel: String, source: String) -> void:
 	GameManager.write_note(rel, source)
 	_metadata_source = source
 	remember_saved_form()
+	saved_cb.call(rel)
 
 
 ## Re-point every unescaped `[[old]]` / `[[old|alias]]` in the open note at
@@ -252,6 +254,10 @@ func note_template(title: String) -> String:
 ## Injected by Main: tree refresh callback (used when a saved title change
 ## requires the vault tree to rebuild).
 var refresh_tree_cb: Callable = func() -> void: pass
+
+## Injected by Main: a note was written to disk (rel), so any cached summary
+## of it is stale — the graph focus card drops its digest and re-renders.
+var saved_cb: Callable = func(_rel: String) -> void: pass
 
 ## Injected by Main (deferred): the SyncService node, which does not exist at
 ## editor _ready time.

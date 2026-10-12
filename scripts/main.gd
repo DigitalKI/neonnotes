@@ -22,6 +22,9 @@ const MONO_FONT := preload("res://assets/fonts/ShareTechMono-Regular.ttf")
 ## own component; Main only routes shell-level events into it.
 @onready var editor: NoteEditor = %Content
 @onready var graph_view: GraphView = %GraphView
+@onready var focus_card: GraphFocusCard = %GraphFocusCard
+@onready var graph_nav: GraphNavBar = %GraphNavBar
+@onready var links_page: GraphLinksPage = %GraphLinksPage
 @onready var sync_page: SyncPage = %SyncPage
 @onready var code_edit : CodeEdit = %SourceEditor
 ## Which full-content page owns the screen: "" or one of PAGE_*.
@@ -35,6 +38,16 @@ const PAGE_VAULT := "vault"
 const PAGE_MEDIA := "media"
 const PAGE_TRASH := "trash"
 const PAGE_LINK_RESOLVE := "link_resolve"
+const PAGE_GRAPH_LINKS := "graph_links"
+
+## Digest worker + cache behind the graph focus card (off-thread note
+## summaries). Created in code: it is a service node, not UI.
+var _digest_store: GraphDigestStore
+## The note the card currently describes (digest results arrive by rel).
+var _focus_rel := ""
+## Wiki-link resolve maps for the open card, rebuilt per graph open (or when
+## the metadata index completes) — never per focus tap.
+var _card_maps: Array = []
 
 var sidebar: PanelContainer
 @onready var new_dialog: NewNoteDialog = %NewNoteDialog
@@ -125,6 +138,29 @@ func _phase_theme_layout() -> void:
 	settings_component.close_requested.connect(_close_settings)
 	graph_view.open_cb = _open_graph_note
 	graph_view.delete_cb = _delete_graph_note
+	graph_view.focus_cb = _focus_graph_node
+	_digest_store = GraphDigestStore.new()
+	_digest_store.name = "GraphDigestStore"
+	add_child(_digest_store)
+	_digest_store.digest_ready.connect(_on_digest_ready)
+	# Card rows navigate: a child press focuses that node on the map; a tag
+	# chip filters the vault exactly like typing "#tag" into the tree search.
+	focus_card.child_selected.connect(_focus_card_child)
+	focus_card.tag_selected.connect(_filter_by_tag_from_card)
+	focus_card.links_opened.connect(_open_graph_links_page)
+	links_page.close_requested.connect(_return_to_graph)
+	links_page.link_activated.connect(_graph_link_activated)
+	# The nav chrome is a scene child of GraphView (visually editable); the
+	# view only publishes state, the bar mirrors it and sends actions back.
+	graph_view.nav_changed.connect(_refresh_graph_nav)
+	graph_nav.nav_action.connect(func(action: String): graph_view._activate_nav(action))
+	graph_view.blur_cb = _close_focus_card
+	editor.saved_cb = func(rel: String):
+		_digest_store.invalidate(rel)
+		if focus_card.is_open() and String(focus_card.model().get("rel", "")) == rel:
+			_render_focus_card(rel)
+	get_viewport().size_changed.connect(_apply_card_layout)
+	focus_card.relayout_cb = _apply_card_layout
 	PreviewBuilder.open_cb = _open_wikilink
 	PreviewBuilder.image_cb = _on_image_click
 	layout_component.ready()
@@ -216,6 +252,7 @@ func _on_metadata_ready() -> void:
 	# Titles/tags/links are now complete: refresh the tree text (filenames were
 	# shown until now) and any open derived view.
 	_boot_mark("metadata")
+	_card_maps.clear()
 	_refresh_list()
 	if vault_tree.backlinks_panel.visible:
 		_refresh_backlinks()
@@ -401,6 +438,7 @@ func _on_font_changed() -> void:
 
 func _on_mobile_changed(_is_mobile: bool) -> void:
 	theme_component.apply()
+	_apply_card_layout()
 	if graph_view.visible or page_mode != "":
 		return  # graph/pages own the screen; fonts re-apply when they close
 	if editor.is_help():
@@ -470,6 +508,7 @@ func _show_help() -> void:
 		return  # a page owns the screen until it closes
 	editor.show_help()
 	graph_view.visible = false
+	_close_focus_card()
 	if layout_component.is_mobile_layout and layout_component.drawer_open:
 		layout_component.toggle_sidebar()
 
@@ -491,7 +530,7 @@ func _show_settings() -> void:
 ## Every page is a scene instance inside %Content, so all of them are sized
 ## like an open note. Sharing one helper keeps the hide/show rules identical.
 func _pages() -> Array[Control]:
-	return [settings_page, sync_page, new_dialog, vault_picker, media_dialog, trash_page, link_dialog]
+	return [settings_page, sync_page, new_dialog, vault_picker, media_dialog, trash_page, link_dialog, links_page]
 
 func _open_page(mode: String, page: Control) -> void:
 	editor.flush()
@@ -502,6 +541,7 @@ func _open_page(mode: String, page: Control) -> void:
 	if layout_component.is_mobile_layout and layout_component.drawer_open:
 		layout_component.toggle_sidebar()
 	graph_view.visible = false
+	_close_focus_card()
 	code_edit.visible = false
 	edit_padding.visible = false
 	content_host.visible = false
@@ -520,6 +560,7 @@ func _close_page() -> void:
 func _open_graph_note(fname: String) -> void:
 	# Preserve the graph's scope/page/camera before opening the document; toggling
 	# back restores that navigation context and focuses this note.
+	_close_focus_card()
 	graph_view.suspend_for_open(fname)
 	graph_view.visible = false
 	vault_tree.select_note(fname)
@@ -531,6 +572,99 @@ func _delete_graph_note(fname: String) -> void:
 		status_bar.flash("⌂ The homepage cannot be deleted")
 		return
 	vault_tree.delete_node(fname)
+
+# ------------------------------------------------------- graph focus card
+
+## A node was focused (tap on the map): show what is inside it. Folder nodes
+## aggregate their children; notes show tags, outgoing links and an excerpt.
+func _focus_graph_node(rel: String) -> void:
+	_render_focus_card(rel)
+
+func _render_focus_card(rel: String) -> void:
+	_focus_rel = rel
+	if rel == "":
+		focus_card.close()
+		return
+	var digest := _digest_store.request(rel)
+	var model := GraphDigest.folder_card(rel, digest) if GraphDigest.is_folder(rel) \
+		else GraphDigest.note_card(rel, digest, _card_resolve_maps())
+	focus_card.show_model(model)
+	_apply_card_layout()
+
+## Maps are built once per graph open: resolving every outgoing link of the
+## focused note through per-call maps is O(notes) each time.
+func _card_resolve_maps() -> Array:
+	if _card_maps.is_empty():
+		_card_maps = WikiLinks.resolve_maps()
+	return _card_maps
+
+## A digest finished on the worker; refresh the card only if it is the card's
+## note (results for other notes are just cached for a later focus).
+func _on_digest_ready(rel: String) -> void:
+	if rel == _focus_rel and focus_card.is_open():
+		_render_focus_card(rel)
+
+## Place the card for the current form factor and tell the graph how much room
+## the card takes (mobile only — focus framing there must clear the card).
+func _apply_card_layout() -> void:
+	if not is_instance_valid(focus_card):
+		return
+	var vp := size
+	var mobile := layout_component.is_mobile_layout
+	var portrait := vp.x <= vp.y
+	focus_card.apply_layout(vp, mobile, portrait, toolbar.size.y)
+	var inset := focus_card.covered_inset(vp, mobile, portrait) if focus_card.visible \
+		else {"left": 0.0, "top": 0.0, "right": 0.0, "bottom": 0.0}
+	graph_view.view_inset = inset
+
+## A child row in a folder card was pressed: focus it on the map, or open the
+## note when the map cannot reach it (off-page under the pagination limit).
+func _focus_card_child(rel: String) -> void:
+	if not graph_view.focus_note(rel):
+		_open_graph_note(rel)
+
+## The card's links button: a page with every outgoing link at once, so the
+## card keeps its space for the excerpt.
+func _open_graph_links_page() -> void:
+	_open_page(PAGE_GRAPH_LINKS, links_page)
+	links_page.open(String(focus_card.model().get("title", "")),
+		focus_card.model().get("links", []) as Array)
+
+## A row in the links page was pressed: back to the map, then focus the note
+## (or the wikilink resolve flow when the target does not resolve).
+func _graph_link_activated(target: String, resolved: String) -> void:
+	_return_to_graph()
+	if resolved != "" and graph_view.focus_note(resolved):
+		return
+	_open_wikilink(target)
+
+## Leave a page and put the graph back on screen (the page router normally
+## restores the editor; the graph owns the screen here).
+func _return_to_graph() -> void:
+	if page_mode != "":
+		_close_page()
+	code_edit.visible = false
+	edit_padding.visible = false
+	content_host.visible = false
+	graph_view.visible = true
+	_refresh_graph_nav()
+
+## Mirror the graph's page/scope state into the nav-bar component.
+func _refresh_graph_nav() -> void:
+	graph_nav.update_state(graph_view.nav_state())
+
+## A tag chip was pressed: same path as a [[#tag]] link — fill the tree search
+## with "#tag" and show the results there (graph filtering comes later).
+func _filter_by_tag_from_card(tag: String) -> void:
+	vault_tree.filter_by_tag(tag)
+	if layout_component.is_mobile_layout and not layout_component.drawer_open:
+		layout_component.toggle_sidebar()
+	status_bar.flash("Filtering #" + tag)
+
+func _close_focus_card() -> void:
+	_focus_rel = ""
+	focus_card.close()
+	graph_view.view_inset = {"left": 0.0, "top": 0.0, "right": 0.0, "bottom": 0.0}
 
 func _open_wikilink(target: String) -> void:
 	# `[[#tag]]` is a tag reference, not a note: filter the tree by it and never
@@ -633,6 +767,7 @@ func _toggle_graph() -> void:
 		return  # a page owns the screen until it closes
 	if graph_view.visible:
 		graph_view.visible = false
+		_close_focus_card()
 		content_host.visible = not editor.source_mode
 		return
 	editor.flush()
@@ -645,6 +780,8 @@ func _toggle_graph() -> void:
 	code_edit.visible = false
 	edit_padding.visible = false
 	content_host.visible = false
+	# Resolve maps + digests belong to one graph session.
+	_card_maps.clear()
 	graph_view.open(GameManager.current_rel)
 
 # ------------------------------------------------------------ vault / sync
@@ -661,6 +798,10 @@ func _on_vault_selected(path: String) -> void:
 	editor.flush()
 	if GameManager.set_vault_dir(path):
 		NoteCrud.purge_expired()  # trash belongs to the old vault's retention window
+		# Digest cache and resolve maps describe the previous vault.
+		_digest_store.clear()
+		_card_maps.clear()
+		_close_focus_card()
 		# Re-bind sync to the new vault's identity (phrase/peers/sync_state key)
 		# before anything can announce or push against a stale identity.
 		if sync_service:

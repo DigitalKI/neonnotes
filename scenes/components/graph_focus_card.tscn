@@ -1,0 +1,120 @@
+[gd_scene format=3 uid="uid://b2dnuhafqp4mr"]
+
+[ext_resource type="Script" uid="uid://blsub8j5p7f6k" path="res://scripts/components/graph_focus_card.gd" id="1_card"]
+
+[node name="GraphFocusCard" type="PanelContainer" unique_id=366541351]
+visible = false
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+grow_horizontal = 0
+script = ExtResource("1_card")
+
+[node name="Margin" type="MarginContainer" parent="." unique_id=982035010]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="CardColumn" type="VBoxContainer" parent="Margin" unique_id=42323232]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Head" type="HBoxContainer" parent="Margin/CardColumn" unique_id=312763033]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="CardKind" type="Label" parent="Margin/CardColumn/Head" unique_id=464451331]
+unique_name_in_owner = true
+layout_mode = 2
+text = "●"
+
+[node name="CardTitle" type="Label" parent="Margin/CardColumn/Head" unique_id=1432679046]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Title"
+text_overrun_behavior = 3
+
+[node name="CardTags" type="HFlowContainer" parent="Margin/CardColumn" unique_id=174212483]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/h_separation = 4
+theme_override_constants/v_separation = 4
+
+[node name="LinksRow" type="HBoxContainer" parent="Margin/CardColumn" unique_id=1603834360]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="CardLinksHeader" type="Label" parent="Margin/CardColumn/LinksRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "⇢ LINKS · 0"
+
+[node name="CardLinksBtn" type="Button" parent="Margin/CardColumn/LinksRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "☰ all"
+tooltip_text = "Show every outgoing link"
+
+[node name="CardTabs" type="HBoxContainer" parent="Margin/CardColumn" unique_id=990011001]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="TabContent" type="Button" parent="Margin/CardColumn/CardTabs"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "¶ Content"
+tooltip_text = "The note's own content"
+
+[node name="TabChildren" type="Button" parent="Margin/CardColumn/CardTabs"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "▣ Children"
+tooltip_text = "Notes inside this folder"
+
+[node name="CardChildrenHeader" type="Label" parent="Margin/CardColumn" unique_id=1180368563]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+text = "▣ NOTES"
+
+[node name="CardChildrenScroll" type="ScrollContainer" parent="Margin/CardColumn" unique_id=1413319396]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(0, 90)
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="CardChildren" type="VBoxContainer" parent="Margin/CardColumn/CardChildrenScroll" unique_id=1004988127]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 1
+
+[node name="CardExcerpt" type="Label" parent="Margin/CardColumn" unique_id=1529796888]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+autowrap_mode = 2
+
+[node name="CardMetaSpacer" type="Control" parent="Margin/CardColumn" unique_id=354342641]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="CardMeta" type="Label" parent="Margin/CardColumn" unique_id=1875807134]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+autowrap_mode = 2

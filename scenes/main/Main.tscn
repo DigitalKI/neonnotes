@@ -4,7 +4,6 @@
 [ext_resource type="Shader" uid="uid://d0udygsyay06s" path="res://shaders/crt.gdshader" id="3_crt"]
 [ext_resource type="Script" uid="uid://54xformjxgfq" path="res://scripts/render/graph_view.gd" id="4_graph"]
 [ext_resource type="PackedScene" path="res://scenes/components/toolbar.tscn" id="5_toolbar"]
-[ext_resource type="Script" path="res://scripts/components/note_editor.gd" id="16_editor"]
 [ext_resource type="PackedScene" uid="uid://cj1ama86pqcoo" path="res://scenes/components/status_bar.tscn" id="6_status"]
 [ext_resource type="PackedScene" uid="uid://dr4466qx0hbpp" path="res://scenes/components/side_panel.tscn" id="7_side"]
 [ext_resource type="PackedScene" uid="uid://dsdpg5sa7q611" path="res://scenes/components/settings_page.tscn" id="8_settings"]
@@ -14,7 +13,11 @@
 [ext_resource type="PackedScene" path="res://scenes/components/vault_picker.tscn" id="13_vault_picker"]
 [ext_resource type="PackedScene" path="res://scenes/components/sync_page.tscn" id="14_sync_page"]
 [ext_resource type="PackedScene" path="res://scenes/components/trash_page.tscn" id="15_trash"]
-[ext_resource type="PackedScene" path="res://scenes/components/link_resolve_dialog.tscn" id="17_link_resolve"]
+[ext_resource type="Script" uid="uid://dph74sbqhogxo" path="res://scripts/components/note_editor.gd" id="16_editor"]
+[ext_resource type="PackedScene" uid="uid://btocosm80dy4s" path="res://scenes/components/link_resolve_dialog.tscn" id="17_link_resolve"]
+[ext_resource type="PackedScene" path="res://scenes/components/graph_focus_card.tscn" id="18_card"]
+[ext_resource type="PackedScene" path="res://scenes/components/graph_nav_bar.tscn" id="19_nav"]
+[ext_resource type="PackedScene" path="res://scenes/components/graph_links_page.tscn" id="20_links"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMat_crt"]
 shader = ExtResource("3_crt")
@@ -125,7 +128,6 @@ unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "Untitled note"
-autocorrect = false
 
 [node name="TagsPanel" type="PanelContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn" unique_id=1330336696]
 unique_name_in_owner = true
@@ -154,7 +156,6 @@ unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "Add or pick a tag…"
-autocorrect = false
 
 [node name="TagsAdd" type="Button" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TagsPanel/TagsRow/TagsInputRow" unique_id=1668094736]
 unique_name_in_owner = true
@@ -197,10 +198,6 @@ layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 placeholder_text = "# Write markdown here…"
-# autocorrect=false: Android IME autocorrect mangles large pasted inserts
-# (drops letters, smart-quotes, collapses indentation). Markdown must not
-# pass through spellcheck. Desktop unaffected either way.
-autocorrect = false
 drag_and_drop_selection_enabled = false
 wrap_mode = 1
 
@@ -217,6 +214,15 @@ visible = false
 layout_mode = 2
 size_flags_vertical = 3
 script = ExtResource("4_graph")
+
+[node name="GraphNavBar" parent="Root/WorkspaceMargin/Workspace/Content/GraphView" instance=ExtResource("19_nav")]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+grow_horizontal = 2
+offset_top = 6.0
+offset_bottom = 78.0
 
 [node name="SyncPage" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=300854830 instance=ExtResource("14_sync_page")]
 visible = false
@@ -244,7 +250,14 @@ layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="LinkResolveDialog" parent="Root/WorkspaceMargin/Workspace/Content" instance=ExtResource("17_link_resolve")]
+[node name="GraphLinksPage" parent="Root/WorkspaceMargin/Workspace/Content" instance=ExtResource("20_links")]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="LinkResolveDialog" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=659708925 instance=ExtResource("17_link_resolve")]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
@@ -255,6 +268,9 @@ custom_minimum_size = Vector2(0, 33)
 layout_mode = 2
 
 [node name="ExportMenu" parent="." unique_id=202875446 instance=ExtResource("9_export_menu")]
+
+[node name="GraphFocusCard" parent="." unique_id=1689561051 instance=ExtResource("18_card")]
+unique_name_in_owner = true
 
 [node name="CrtOverlay" type="ColorRect" parent="." unique_id=1821292982]
 material = SubResource("ShaderMat_crt")

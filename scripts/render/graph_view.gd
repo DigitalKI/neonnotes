@@ -13,6 +13,15 @@ class_name GraphView extends Control
 var open_cb := Callable()       # circle menu: open the node's note
 var delete_cb := Callable()     # circle menu: delete the node's note
 var focus_cb := Callable()      # node selected: Main shows the focus card
+var blur_cb := Callable()       # focus dropped (tap outside): Main hides the card
+## Emitted whenever page/scope state changes: the nav-bar component (a scene
+## child of this view) mirrors it — navigation visuals live in
+## scenes/components/graph_nav_bar.tscn, editable like any other UI.
+signal nav_changed
+## Screen space the focus card covers (mobile only — the desktop card floats in
+## the corner and there is room enough to ignore it). Focus framing centres the
+## neighbourhood in the free area instead of behind the card.
+var view_inset := {"left": 0.0, "top": 0.0, "right": 0.0, "bottom": 0.0}
 
 const TAP_SLOP := 12.0          # max pointer travel that still counts as a tap
 const MENU_R := 42.0            # radial menu radius around the focused node
@@ -28,6 +37,11 @@ const ROUTE_SAMPLES := 48       # evenly spaced samples per route
 const NODE_R := 4.5
 const FOLDER_R := 3.0
 const LABEL_ZOOM := 1.5         # only label leaves once zoomed in this far
+## Phones open the overview closer than fit-all: the whole map is unreadable
+## at that zoom, so the default frames the inner rings (the level-1 ring lands
+## at ~85% of the short half-edge) and zooming out to everything stays
+## possible — `_min_zoom` keeps the raw fit scale.
+const MOBILE_FIT_FLOOR := 1.2
 ## Defaults only; the live values live in GameManager (settings page, persisted).
 ## Defaults only; the live values live in GameManager (settings page, persisted).
 const ANCESTOR_CONTEXT := 2     # visible parent landmarks when entering a group
@@ -86,6 +100,9 @@ var _routes: Array = []          # {"samples": PackedVector2Array, "bidir": bool
 # them per call, which was O(links × notes): ~7 s at docs-vault scale.
 var _resolve_maps: Array = []
 var _root_home := ""            # homepage note path when it exists (root hub)
+## Phone-shaped overview default (see MOBILE_FIT_FLOOR). A var, not a constant
+## check, so headless probes can exercise both behaviours.
+var mobile_fit := GameManager.is_phone_screen()
 
 func _ready() -> void:
 	# Pan/zoom is a draw transform: clip so the map never spills past the
@@ -94,6 +111,21 @@ func _ready() -> void:
 	_font = load("res://assets/fonts/Orbitron.ttf")
 	mouse_default_cursor_shape = Control.CURSOR_ARROW
 	set_process(false)
+	GameManager.metadata_ready.connect(_on_metadata_ready)
+
+
+## The fast boot path indexes titles/links asynchronously after the shell is
+## up (load_metadata_async). A graph opened inside that window builds its
+## routes and focus levels from an empty link index and shows no link light at
+## all — the links then "appeared" only after navigating somewhere and back,
+## which rebuilt them. Refresh both passes once the index is complete.
+func _on_metadata_ready() -> void:
+	if not visible or not _map_ready:
+		return
+	_resolve_maps = WikiLinks.resolve_maps()
+	_build_levels()
+	_build_routes()
+	queue_redraw()
 
 # ---------------------------------------------------------------- open / build
 
@@ -111,6 +143,9 @@ func open(center_note: String = "") -> void:
 	_press_moved = false
 	_pinch_used = false
 	_map_ready = false
+	# Re-derive the phone default-zoom flag here: the member initializer can
+	# run before the window/DPI metrics are final (headless probes, resize).
+	mobile_fit = GameManager.is_phone_screen()
 	_accent = GameManager.color("accent")
 	_accent2 = GameManager.color("accent2")
 	_text = GameManager.color("text")
@@ -247,12 +282,18 @@ func _rebuild_keys() -> void:
 	# Overview draws the hierarchy with grouped markers for oversized parents;
 	# pagination applies only after explicitly entering a parent scope.
 	if not _scope_active:
+		# The homepage/root hub is the centre node of the overview. It is the
+		# root itself, so it owns no `_page_children` entry; without adding its
+		# key here `_layout_points` would position it but the draw passes (which
+		# iterate `_keys`) would never render it — the homepage was invisible.
+		_keys.append("")
 		_collect_overview_nodes("", _page_children)
 		# Collapse markers for oversized parents; entering one pages it.
 		for node in _page_children:
 			if _keys.size() >= 2000:
 				break
 			_keys.append(node)
+		nav_changed.emit()
 		return
 	for child in _children.get(_scope, []):
 		_page_children.append(String(child))
@@ -276,6 +317,10 @@ func _rebuild_keys() -> void:
 		_keys.append(_scope)
 	for i in range(lo, hi):
 		_keys.append(_page_children[i])
+	# Emit only once the page math above is final: the nav bar mirrors this
+	# snapshot, so emitting early left it stuck on the previous (often 1/1)
+	# values while the pager actually had pages to flip through.
+	nav_changed.emit()
 
 func _collect_overview_nodes(parent: String, out: Array[String]) -> void:
 	var cluster := String(parent) + "/__group__"
@@ -285,7 +330,13 @@ func _collect_overview_nodes(parent: String, out: Array[String]) -> void:
 	for child in _children.get(parent, []):
 		var node := String(child)
 		out.append(node)
-		_collect_overview_nodes(node, out)
+		# An oversized parent collapses to its own node (drawn with the ·N
+		# badge); do NOT expand its subtree into the overview. `_assign_sectors`
+		# already refuses to lay out a collapsed parent's children, so expanding
+		# them here left them with no position — they all piled up on the
+		# `_pos[k] = center` fallback and buried the root hub.
+		if not _collapsed.get(node, false):
+			_collect_overview_nodes(node, out)
 
 func _enter_group(key: String) -> void:
 	if _cluster_nodes.has(key):
@@ -444,7 +495,7 @@ func _build_routes() -> void:
 		for dst in links[src]:
 			var a := _norm(String(src))
 			var b := _norm(String(dst))
-			if a == "" or b == "" or a == b:
+			if a == b:
 				continue
 			if not _pos.has(a) or not _pos.has(b):
 				continue
@@ -507,6 +558,10 @@ func _route_samples(a: String, b: String) -> PackedVector2Array:
 		raw.append(_pos[k])
 	if l != "" and _pos.has(l):
 		raw.append(_pos[l])
+	elif _pos.has(""):
+		# LCA is the vault root: route through the homepage/root hub so the
+		# light passes the centre instead of cutting straight across the map.
+		raw.append(_pos[""])
 	for k in down:
 		if _pos.has(k):
 			raw.append(_pos[k])
@@ -637,11 +692,25 @@ func _fit_to_view() -> void:
 		return
 	var pad := 80.0
 	var avail := (size - Vector2(pad * 2.0, pad * 2.0)).max(Vector2.ONE)
-	_map_scale = clampf(minf(avail.x / extent.x, avail.y / extent.y), 0.05, 4.0)
+	var fit_scale := clampf(minf(avail.x / extent.x, avail.y / extent.y), 0.05, 4.0)
+	_map_scale = fit_scale
+	# Phones default closer than fit-all, portrait or landscape alike (the
+	# floor is derived from the short edge, so rotation does not change it).
+	if mobile_fit:
+		var ring1 := minf(size.x, size.y) * 0.36
+		_map_scale = maxf(fit_scale, clampf(0.85 * 0.5 * minf(size.x, size.y) / ring1, 0.5, 2.0))
 	var mid := (lo + hi) / 2.0
-	_map_offset = size / 2.0 - mid * _map_scale
-	# Everything fits at this scale, so it is the furthest you can zoom out.
-	_min_zoom = _map_scale
+	var anchor := mid
+	if _map_scale > fit_scale + 0.0001:
+		# Capped (mobile) default: frame the hub of the current scope, not the
+		# bbox middle — outer levels would bias the centre away from the rings.
+		var hub_key := _scope if _scope != "" else ""
+		if _pos.has(hub_key):
+			anchor = _pos[hub_key]
+	_map_offset = size / 2.0 - anchor * _map_scale
+	# Fit-all stays reachable: it is the zoom-out limit even when the default
+	# starts closer.
+	_min_zoom = fit_scale
 	_max_zoom = maxf(_map_scale * 8.0, 3.0)
 
 # ---------------------------------------------------------------- frame
@@ -677,7 +746,6 @@ func _draw() -> void:
 	for k in _keys:
 		_draw_node(k)
 	_draw_labels()
-	_draw_navigation()
 	if _menu_open and _pos.has(_selected):
 		_draw_menu()
 
@@ -791,14 +859,6 @@ func _draw_labels() -> void:
 		draw_string(_font, p + Vector2(11, 4), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, _text)
 
 ## Compact neon navigation bar: << < current/total > >> plus scope path.
-func _nav_labels() -> Array[String]:
-	return ["<<", "<", "%d/%d" % [_page + 1, _page_count], ">", ">>"]
-
-func _home_button_rect() -> Rect2:
-	# The permanent ⌂ button: fixed at the top-left of the nav bar.
-	var home_w := _font.get_string_size("⌂", HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
-	return Rect2(10.0, 2.0, home_w + 16.0, 34.0)
-
 func _crumb_chain() -> Array[String]:
 	# Full ancestor chain, deepest last: every level stays clickable, so a deep
 	# sub-sub-folder can always be exited without depending on the 2 landmark
@@ -815,108 +875,19 @@ func _crumb_chain() -> Array[String]:
 		chain.push_front("")
 	return chain
 
-func _nav_widths(labels: Array[String]) -> Array[float]:
-	var widths: Array[float] = []
-	for label in labels:
-		widths.append(_font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x)
-	return widths
-
-func _draw_navigation() -> void:
-	var y := 28.0
-	var x := 18.0
-	var labels := _nav_labels()
-	var widths := _nav_widths(labels)
-	var gaps := 10.0
-	var total_w := 0.0
-	for i in widths.size():
-		total_w += widths[i]
-		if i < widths.size() - 1:
-			total_w += gaps
-	x = maxf(10.0, (size.x - total_w) * 0.5)
-	# Permanent home button — the always-visible way back to the overview,
-	# whatever depth the user has navigated to.
-	var home := "⌂"
-	var home_rect := _home_button_rect()
-	draw_rect(home_rect, Color(GameManager.color("bg"), 0.7), true)
-	draw_rect(home_rect, Color(_accent, 0.6 if _scope != "" else 0.25), false, 1.0)
-	draw_string(_font, Vector2(home_rect.position.x + 8.0, y), home,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 16, _accent)
-	# Crumbs sit right beside the home button, not centred.
-	var path_x := home_rect.end.x + 10.0
-	if _scope == "":
-		draw_string(_font, Vector2(path_x, y + 24.0), "Overview",
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, _accent)
-	else:
-		var chain := _crumb_chain()
-		var cx := path_x
-		for i in chain.size():
-			var label := _label(chain[i])
-			var w := _font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-			draw_string(_font, Vector2(cx, y + 24.0), label,
-				HORIZONTAL_ALIGNMENT_LEFT, -1, 11, _accent if i == chain.size() - 1 else _accent2)
-			cx += w + 5.0
-			if i < chain.size() - 1:
-				draw_string(_font, Vector2(cx, y + 24.0), "/", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, _text)
-				cx += 12.0
-	for i in labels.size():
-
-		var label := labels[i]
-		var w := widths[i]
-		var rect := Rect2(x - 4.0, 2.0, w + 8.0, 34.0)
-		var active := i == 2 and _page_count > 1
-		var disabled := (i <= 1 and _page == 0) or (i >= 3 and _page >= _page_count - 1)
-		var color := _accent if active else _accent2
-		if disabled:
-			color = Color(color, 0.35)
-		draw_rect(rect, Color(GameManager.color("bg"), 0.7), true)
-		draw_rect(rect, Color(color, 0.6), false, 1.0)
-		draw_string(_font, Vector2(x, y), label,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 13, _text if active or i == 2 else color)
-		x += w + gaps
-
-func _nav_hit(at: Vector2) -> String:
-	var y := 2.0
-	var labels := _nav_labels()
-	var widths := _nav_widths(labels)
-	var gaps := 10.0
-	var total_w := 0.0
-	for i in widths.size():
-		total_w += widths[i]
-		if i < widths.size() - 1:
-			total_w += gaps
-	var x := maxf(10.0, (size.x - total_w) * 0.5)
-	for i in labels.size():
-		var rect := Rect2(x - 4.0, y, widths[i] + 8.0, 34.0)
-		if rect.has_point(at):
-			return labels[i]
-		x += widths[i] + gaps
-	# Home button first: top-left, always present.
-	if _home_button_rect().has_point(at):
-		return "home"
-	var path := "Overview"
-	var chain := _crumb_chain()
-	if _scope != "":
-		var crumb_labels: Array[String] = []
-		for c in chain:
-			crumb_labels.append(_label(String(c)))
-		path = " / ".join(crumb_labels)
-	# Crumbs sit right beside the home button, not centred.
-	var path_x := _home_button_rect().end.x + 10.0
-	if _scope == "":
-		if Rect2(path_x, 34.0, _font.get_string_size(path, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x, 20.0).has_point(at):
-			return "overview"
-	else:
-		var cx := path_x
-		for i in chain.size():
-			var label := _label(chain[i])
-			var w := _font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-			# Every ancestor crumb is clickable, at any depth.
-			if i < chain.size() - 1 and Rect2(cx, 34.0, w, 20.0).has_point(at):
-				return "crumb:" + chain[i]
-			cx += w + 5.0
-			if i < chain.size() - 1:
-				cx += 12.0
-	return ""
+## State snapshot for the nav bar: page pager values plus the full clickable
+## crumb chain (deepest last, homepage first when it exists).
+func nav_state() -> Dictionary:
+	var crumbs: Array[Dictionary] = []
+	for key in _crumb_chain():
+		var k := String(key)
+		crumbs.append({"key": k, "label": _label(k)})
+	return {
+		"page": _page,
+		"page_count": _page_count,
+		"crumbs": crumbs,
+		"in_scope": _scope != "",
+	}
 
 func _activate_nav(action: String) -> void:
 	match action:
@@ -978,6 +949,13 @@ func _draw_menu() -> void:
 
 # ---------------------------------------------------------------- input
 
+## The free area left by the focus card: everything the camera may frame.
+func view_rect() -> Rect2:
+	return Rect2(
+		view_inset.get("left", 0.0), view_inset.get("top", 0.0),
+		maxf(1.0, size.x - view_inset.get("left", 0.0) - view_inset.get("right", 0.0)),
+		maxf(1.0, size.y - view_inset.get("top", 0.0) - view_inset.get("bottom", 0.0)))
+
 func _to_map(at: Vector2) -> Vector2:
 	return (at - _map_offset) / _map_scale
 
@@ -988,25 +966,17 @@ func _to_screen(at: Vector2) -> Vector2:
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
-			var nav := _nav_hit(event.position)
-			if nav != "":
-				_activate_nav(nav)
-				_mouse_action_consumed = true
-				accept_event()
-				return
 			var menu := _menu_hit(event.position)
 			if menu != "":
 				_activate_menu(menu)
 				_mouse_action_consumed = true
 				accept_event()
 				return
-			if _menu_open:
-				_menu_open = false
-				queue_redraw()
+			_close_menu()
 			_press_pos = event.position
 			_press_moved = false
 			_drag_last = event.position
-			_dragging = _key_at(event.position) == ""
+			_dragging = _key_at(event.position) == "" and not _hub_at(event.position)
 			if _dragging:
 				mouse_default_cursor_shape = Control.CURSOR_MOVE
 		else:
@@ -1023,6 +993,9 @@ func _gui_input(event: InputEvent) -> void:
 				if clicked != "":
 					_select(clicked)
 					accept_event()
+				elif _hub_at(event.position):
+					_select_hub()
+					accept_event()
 	elif event is InputEventMouseButton and event.pressed \
 			and (event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN):
 		_zoom_at(event.position, 1.15 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0 / 1.15)
@@ -1035,12 +1008,6 @@ func _gui_input(event: InputEvent) -> void:
 		queue_redraw()
 	elif event is InputEventScreenTouch:
 		if event.pressed:
-			var tnav := _nav_hit(event.position)
-			if tnav != "":
-				_activate_nav(tnav)
-				_touch_action_consumed = true
-				accept_event()
-				return
 			var tmenu := _menu_hit(event.position)
 			if tmenu != "":
 				_activate_menu(tmenu)
@@ -1051,9 +1018,7 @@ func _gui_input(event: InputEvent) -> void:
 				_touch_press = event.position
 				_press_moved = false
 				_pinch_used = false
-			if _menu_open:
-				_menu_open = false
-				queue_redraw()
+			_close_menu()
 			_touches[event.index] = event.position
 		else:
 			_touches.erase(event.index)
@@ -1070,6 +1035,8 @@ func _gui_input(event: InputEvent) -> void:
 				var tapped := _key_at(event.position)
 				if tapped != "":
 					_select(tapped)
+				elif _hub_at(event.position):
+					_select_hub()
 		accept_event()
 	elif event is InputEventScreenDrag:
 		var prev: Vector2 = _touches.get(event.index, event.position)
@@ -1120,6 +1087,13 @@ func _node_at(at: Vector2) -> String:
 
 # ------------------------------------------------------------- selection / menu
 
+## True when `at` is a tap on the homepage/root hub at the centre. The hub has
+## no hierarchy key of its own, so `_key_at` cannot report it as a hit.
+func _hub_at(at: Vector2) -> bool:
+	if _scope != "" or _root_home == "" or not _pos.has(""):
+		return false
+	return at.distance_to(_to_screen(_pos[""])) <= 26.0
+
 ## Nearest node to a point — the tree key (folders + companion stems), which is
 ## what selection, the menu and the camera need. `_node_at` maps it onward.
 func _key_at(at: Vector2) -> String:
@@ -1134,6 +1108,37 @@ func _key_at(at: Vector2) -> String:
 			best_d = d
 			best = k
 	return best
+
+## Close the circle menu after a press outside it — and tell Main to drop the
+## focus card with it, so the two always open and close together.
+func _close_menu() -> void:
+	if not _menu_open:
+		return
+	_menu_open = false
+	if blur_cb.is_valid():
+		blur_cb.call()
+	queue_redraw()
+
+## Focus a node chosen outside the canvas (focus-card child list): select its
+## node when it is on the map, entering its parent scope first when needed.
+## False means "not reachable on the map" — the caller can open the note.
+func focus_note(note: String) -> bool:
+	if _root_home != "" and note == _root_home:
+		_select_hub()
+		return true
+	var stem := note.trim_suffix(".md")
+	var key := stem if _children.has(stem) else note
+	if not _pos.has(key):
+		return false
+	if not _keys.has(key):
+		var p := String(_parent.get(key, ""))
+		if p == "" or not _keys.has(p):
+			return false
+		_enter_group(p)
+		if not _keys.has(key):
+			return false
+	_select(key)
+	return true
 
 ## Focus a node: camera glides so the node and its immediate neighbours
 ## (children, parent, direct links) fit, the circle menu appears, and Main
@@ -1150,9 +1155,23 @@ func _select(key: String) -> void:
 	if _scope != "" and _is_scope_ancestor(key):
 		_menu_actions = ["Go", "Overview"]
 	_menu_open = true
-	_tween_to(key)
+	# The card first: its mobile inset is part of the camera fit, so the
+	# neighbourhood is framed in the space actually left on screen.
 	if focus_cb.is_valid():
 		focus_cb.call(String(_open_target.get(key, key)))
+	_tween_to(key)
+	queue_redraw()
+
+## Focus the homepage/root hub. It has no tree key (its key is ""), so the menu
+## is opened directly rather than via `_select`. Only `Open` is offered: the
+## homepage is the immutable vault root and cannot be deleted or entered.
+func _select_hub() -> void:
+	_selected = ""
+	_menu_actions = ["Open"]
+	_menu_open = true
+	_tween_to("")
+	if focus_cb.is_valid():
+		focus_cb.call(_root_home)
 	queue_redraw()
 
 func _menu_hit(at: Vector2) -> String:
@@ -1196,43 +1215,52 @@ func _activate_menu(action: String) -> void:
 ## Glide the camera so the node plus its immediate neighbourhood (children,
 ## parent, direct links) fits the view — fit, not magnify: the zoom lands so
 ## the neighbourhood is readable without losing the room around it.
+##
+## The frame is built *symmetrically around the selected node* rather than
+## around the neighbours' bounding box: the node always lands dead-centre and
+## the neighbours are revealed the same way whether they are a ring of children
+## or a single parent above it. (Centring on the neighbour box made a
+## parent-only node slide off-centre and magnify instead of opening up.)
 func _tween_to(key: String) -> void:
-	var keys := {key: true}
+	var key_pos: Vector2 = _pos.get(key, Vector2.ZERO)
+	var neighbours := {}
 	for ch in _children.get(key, []):
 		var nk := _norm(ch)
 		if _pos.has(nk):
-			keys[nk] = true
+			neighbours[nk] = true
 	var p := String(_parent.get(key, ""))
 	if p != "" and _pos.has(p):
-		keys[p] = true
+		neighbours[p] = true
 	var t := String(_open_target.get(key, ""))
 	if t != "" and GameManager.links.has(t):
 		for l in GameManager.links[t]:
 			var lk := _norm(String(l))
 			if _pos.has(lk):
-				keys[lk] = true
-	var lo := Vector2(INF, INF)
-	var hi := Vector2(-INF, -INF)
-	for k in keys:
-		if _pos.has(k):
-			lo = lo.min(_pos[k])
-			hi = hi.max(_pos[k])
-	if lo.x > hi.x:
-		return
+				neighbours[lk] = true
+	# Reach = farthest neighbour from the node; the frame is twice that around
+	# the node so it stays centred while every neighbour stays in view.
+	var reach := 0.0
+	for k in neighbours:
+		reach = maxf(reach, key_pos.distance_to(_pos[k]))
 	var pad := 90.0
-	var extent := hi - lo + Vector2(pad * 2.0, pad * 2.0)
-	var avail := size.max(Vector2.ONE)
+	var view := view_rect()
+	var avail := view.size.max(Vector2.ONE)
+	var start_scale := _map_scale
 	# Fit may zoom OUT (that is the point: reveal the neighbours) — only guard
 	# against absurd values, never clamp to the incoming zoom.
-	var target := clampf(minf(avail.x / extent.x, avail.y / extent.y), _min_zoom, _max_zoom)
-	var mid := (lo + hi) / 2.0
-	var end_off := size / 2.0 - mid * target
+	var target: float
+	if reach <= 0.001:
+		# A lone node has no neighbourhood to open up: just centre, keep zoom.
+		target = start_scale
+	else:
+		var extent := Vector2(reach, reach) * 2.0 + Vector2(pad, pad) * 2.0
+		target = clampf(minf(avail.x / extent.x, avail.y / extent.y), _min_zoom, _max_zoom)
+	var end_off := view.get_center() - key_pos * target
 	# Stage 1 glides the picked node to the centre at the incoming zoom;
 	# stage 2 zooms so the immediate neighbourhood fits. Feels like pointing
 	# at the node first, then opening up the space around it.
-	var start_scale := _map_scale
 	var start_off := _map_offset
-	var center_off: Vector2 = size / 2.0 - _pos[key] * start_scale
+	var center_off: Vector2 = view.get_center() - key_pos * start_scale
 	if _cam_tween and _cam_tween.is_valid():
 		_cam_tween.kill()
 	_cam_tween = create_tween()
