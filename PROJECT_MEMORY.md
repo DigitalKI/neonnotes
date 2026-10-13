@@ -5,7 +5,7 @@
 > decisions, gotchas) — history lives in git, `git log` is the changelog.
 > Size budget ~250 lines: compact in-session if exceeded.
 
-_Last updated: 2026-10-11 · Godot 4.7 · renderer: gl_compatibility_
+_Last updated: 2026-10-13 · Godot 4.7 · renderer: gl_compatibility_
 
 ---
 
@@ -175,10 +175,48 @@ _Last updated: 2026-10-11 · Godot 4.7 · renderer: gl_compatibility_
   `GraphView` now subscribes to `GameManager.metadata_ready` and refreshes
   `_resolve_maps` + `_build_levels` + `_build_routes` when the index completes
   (skipped while suspended/hidden — returning from a note rebuilds anyway).
+- **Graph card rendered preview + radial-menu component (2026-10-13):** the
+  focus card's plain 2-line text excerpt is replaced by a **real rendered
+  preview**. `GraphDigest.summarize()` now also stores `preview` = the body's
+  first `PREVIEW_LINES` source lines (default **50**, the easy-to-tune knob in
+  `scripts/common/graph_digest.gd`); `note_card()/folder_card()` pass it
+  through; the card feeds it to the **same** `MarkdownParser.parse` +
+  `PreviewBuilder.build` pipeline the note view uses (synchronous — the digest
+  already capped the input, so it cannot stall a frame; title heading dropped
+  since the card header shows it). Preview lives in `%CardPreviewScroll`
+  (`ScrollContainer`) with the shared touch-width grabber, so it scrolls past
+  50 lines. `PREVIEW_MIN_H` (200) gives the desktop card a readable height while
+  phone sheet/rail let the preview shrink (`apply_layout` zeroes the floor when
+  mobile) — otherwise the fixed 1/3-height sheet clipped its meta line. The
+  radial (circle) menu is now a **component**: `GraphRadialMenu`
+  (`scripts/components/graph_radial_menu.gd`, `RefCounted`) owns open state, the
+  action list, button geometry, hit-testing and drawing; `GraphView` keeps one
+  `_menu` and only decides which actions a node offers (`show_for(ctx)` with
+  `children`/`oversized`/`ancestor`) and what each activation does. Old
+  `GraphView.MENU_R`/`_menu_open`/`_menu_actions` became
+  `GraphRadialMenu.RADIUS`/`.open`/`.actions` (`GraphProbe` + card test updated).
+  The card **title** is now a tap target too: clicking it opens the note
+  through the same flow as the circle menu's Open (`title_opened(rel)` →
+  `Main._open_graph_note`), so folder companions and the hub open as well.
+  Also, opening a note **from the vault tree** now hides the graph map
+  (`Main._on_note_selected` mirrors `_toggle_graph`'s hide branch and closes
+  the focus card), instead of leaving the note loaded behind the visible map.
+- **Graph link signal colour (2026-10-13):** each wiki-link's travelling light
+  now carries the colour of the node it *leaves*, instead of a fixed `_accent2`.
+  Routes keep their resolved endpoints (`"src"`/`"dst"` added in `_build_routes`)
+  and `_draw_flow` tints each direction on its own, so a mutually-linked pair
+  shows both origin hues (matching the two-way traffic). A link whose origin is
+  folded into a collapsed folder **aggregate** resolves through `_norm` to that
+  aggregate node and inherits its colour (`_link_color`). The faint guide rail
+  (`_route_guide_color`) uses the origin hue too — blending both hues for a
+  bidirectional route — and the head tip is the origin hue lightened toward
+  white so it still reads as light. `GraphProbe` gained checks for the folding,
+  the endpoint colours and the rail colour.
 - **Graph focus card + GraphDigest (2026-10-11, slice 4):** tapping a node now
   also shows a display-only **focus card** ("what is inside this node"):
   tags chips → outgoing links (resolved to titles, unresolved kept raw + dim)
-  → excerpt → `created … · edited … · N words · N open · N img` meta line.
+  → rendered preview (2026-10-13, see above) →
+  `created … · edited … · N words · N open · N img` meta line.
   Folder nodes aggregate: union of every descendant's tags + a scrollable
   child-title list (`▣ N NOTES`, wide 14 px grabber like the tree/preview
   scrollbars). No actions on the card yet. Data flow:
@@ -198,7 +236,7 @@ _Last updated: 2026-10-11 · Godot 4.7 · renderer: gl_compatibility_
   (1/3 height). Mobile only: `GraphView.view_inset` (set by
   `Main._apply_card_layout` from `focus_card.covered_inset()`) keeps the
   two-phase focus camera centring the neighbourhood in the free area —
-  desktop never re-frames. **Gotchas:** autowrap Labels (excerpt/meta) must
+  desktop never re-frames. **Gotchas:** autowrap Labels (meta) must
   carry `custom_minimum_size.x ≥ 200` or their 1-px-width min height inflates
   the card (classic autowrap feedback loop); the card never lays itself out —
   Main owns the form factor via `relayout_cb` (a stale-defaults self-layout

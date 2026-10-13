@@ -24,7 +24,6 @@ signal nav_changed
 var view_inset := {"left": 0.0, "top": 0.0, "right": 0.0, "bottom": 0.0}
 
 const TAP_SLOP := 12.0          # max pointer travel that still counts as a tap
-const MENU_R := 42.0            # radial menu radius around the focused node
 
 # Each link flows at its own speed, derived deterministically from its two
 # endpoints — so a given link always fires at the same rate, and neighbouring
@@ -77,8 +76,9 @@ var _page_children: Array[String] = []
 var _page_count := 1
 var _scope_history: Array[Dictionary] = []
 var _suspended_state := {}
-var _menu_open := false
-var _menu_actions: Array[String] = []
+## Radial action menu widget (state, geometry, hit-test, drawing). GraphView
+## only decides *which* actions a node offers and what each one does.
+var _menu := GraphRadialMenu.new()
 var _cam_tween: Tween
 var _hover := ""
 var _center_note := ""
@@ -139,7 +139,7 @@ func open(center_note: String = "") -> void:
 		_page_children.clear()
 		_page_count = 1
 		_scope_history.clear()
-	_menu_open = false
+	_menu.clear()
 	_press_moved = false
 	_pinch_used = false
 	_map_ready = false
@@ -348,7 +348,7 @@ func _enter_group(key: String) -> void:
 	_scope_active = true
 	_page = 0
 	_selected = key
-	_menu_open = false
+	_menu.clear()
 	_rebuild_keys()
 	_layout_points()
 	_build_routes()
@@ -376,7 +376,7 @@ func _navigate_back() -> void:
 	_layout_points()
 	_build_routes()
 	_selected = _scope if _scope != "" else ""
-	_menu_open = false
+	_menu.clear()
 	if _selected != "":
 		_tween_to(_selected)
 	else:
@@ -389,7 +389,7 @@ func _go_overview() -> void:
 	_scope_active = false
 	_page = 0
 	_selected = ""
-	_menu_open = false
+	_menu.clear()
 	_rebuild_keys()
 	_layout_points()
 	_build_routes()
@@ -407,7 +407,7 @@ func _set_page(page: int) -> void:
 		return
 	_page = next
 	_selected = ""
-	_menu_open = false
+	_menu.clear()
 	_rebuild_keys()
 	_layout_points()
 	_build_routes()
@@ -529,7 +529,12 @@ func _build_routes() -> void:
 			# mixes weakly.
 			var h := _mix((a + "|" + b).hash())
 			var speed := SPEED_MIN + (float(h) / 4294967296.0) * (SPEED_MAX - SPEED_MIN)
-			_routes.append({"samples": samples, "bidir": back, "speed": speed})
+			# Keep both resolved endpoints so drawing can tint the signal with the
+			# colour of the node it *leaves*. `a`/`b` are `_norm()`-resolved, so a
+			# link from a note folded into a collapsed folder already names that
+			# aggregate node — the signal inherits the aggregate's colour.
+			_routes.append({"samples": samples, "bidir": back, "speed": speed,
+				"src": a, "dst": b})
 
 ## Deterministic integer mix (32-bit avalanche). String.hash() barely changes
 ## in its low bits when only the last character differs, which gave links out
@@ -739,15 +744,34 @@ func _draw() -> void:
 		if p != "" and _pos.has(p):
 			draw_line(_pos[p], _pos[k], Color(_accent, 0.14), 1.0 * inv, true)
 	for route in _routes:
-		draw_polyline(route["samples"], Color(_accent2, 0.09), 1.0 * inv, true)
+		# The faint guide rail shares the signal's colour so a link reads as one
+		# object; for a mutually-linked pair (two origins, one rail) the two
+		# origin hues are blended.
+		draw_polyline(route["samples"], Color(_route_guide_color(route), 0.09),
+			1.0 * inv, true)
 	for route in _routes:
 		_draw_flow(route, inv)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	for k in _keys:
 		_draw_node(k)
 	_draw_labels()
-	if _menu_open and _pos.has(_selected):
-		_draw_menu()
+	if _menu.open and _pos.has(_selected):
+		_menu.draw(self, _to_screen(_pos[_selected]), _font, _accent, _accent2,
+			_text, GameManager.color("bg"))
+
+## Colour a link signal by the node it originates from. The origin is folded to
+## the node actually drawn for it (`_norm`), so a link leaving a note that sits
+## inside a collapsed folder aggregate adopts the aggregate node's colour.
+func _link_color(key: String) -> Color:
+	return _node_color(_norm(key))
+
+## Rail colour for a route: the origin's colour, or the blend of both origins
+## when the route is drawn in both directions (two origins, one shared rail).
+func _route_guide_color(route: Dictionary) -> Color:
+	var src := _link_color(String(route.get("src", "")))
+	if not bool(route.get("bidir", false)):
+		return src
+	return src.lerp(_link_color(String(route.get("dst", ""))), 0.5)
 
 ## Light travelling from the linking note to the linked one.
 func _draw_flow(route: Dictionary, inv: float) -> void:
@@ -766,6 +790,10 @@ func _draw_flow(route: Dictionary, inv: float) -> void:
 		# pass 0 runs source -> target, pass 1 runs target -> source. Both derive
 		# from the same s, so a mutual pair stays mirrored (two-way traffic).
 		var fwd := pass_i == 0
+		# Each direction carries the colour of the node it leaves: pass 0 leaves
+		# the source, pass 1 (reverse) leaves the target.
+		var col := _link_color(String(route.get("src", ""))) if fwd \
+			else _link_color(String(route.get("dst", "")))
 		var head_f: float = clampf(s, 0.0, 1.0) if fwd else clampf(1.0 - s, 0.0, 1.0)
 		var tail_f: float = (s - span_frac) if fwd else (1.0 - s + span_frac)
 		var lo_f := maxf(minf(head_f, tail_f), 0.0)
@@ -783,13 +811,16 @@ func _draw_flow(route: Dictionary, inv: float) -> void:
 			# Bright at the head, fading out along the tail.
 			var back: float = absf(float(i - head_idx)) / float(TRAIL)
 			var a: float = 0.05 + 0.80 * pow(maxf(0.0, 1.0 - back), 2.0)
-			core.append(Color(_accent2.r, _accent2.g, _accent2.b, a))
-			halo.append(Color(_accent2.r, _accent2.g, _accent2.b, a * 0.22))
+			core.append(Color(col.r, col.g, col.b, a))
+			halo.append(Color(col.r, col.g, col.b, a * 0.22))
 		if pts.size() < 2:
 			continue
 		draw_polyline_colors(pts, halo, 7.0 * inv, true)
 		draw_polyline_colors(pts, core, 2.4 * inv, true)
-		draw_circle(samples[head_idx], 2.8 * inv, Color(1, 1, 1, 0.95))
+		# Head tip: the origin hue brightened toward white so it still reads as a
+		# travelling light rather than a flat stub of colour.
+		draw_circle(samples[head_idx], 2.8 * inv,
+			Color(col.r, col.g, col.b, 0.95).lightened(0.55))
 
 func _section_color(k: String) -> Color:
 	var path := String(_open_target.get(k, k))
@@ -926,26 +957,9 @@ func _navigate_to_ancestor(target: String) -> void:
 	_layout_points()
 	_build_routes()
 	_selected = _scope
-	_menu_open = false
+	_menu.clear()
 	_tween_to(_selected)
 	queue_redraw()
-
-## Circle menu around the focused node. Radial buttons sit on the node, so the
-## action target never moves under the finger between focus and activation.
-func _draw_menu() -> void:
-	var c := _to_screen(_pos[_selected])
-	draw_circle(c, MENU_R + 26.0, Color(GameManager.color("bg"), 0.55))
-	draw_arc(c, MENU_R + 26.0, 0.0, TAU, 40, Color(_accent, 0.35), 1.0, true)
-	for i in _menu_actions.size():
-		var ang := -PI / 2.0 + TAU * float(i) / float(_menu_actions.size())
-		var p := c + Vector2.from_angle(ang) * MENU_R
-		var col := _accent if i == 0 else _accent2
-		draw_circle(p, 20.0, Color(GameManager.color("bg"), 0.9))
-		draw_arc(p, 20.0, 0.0, TAU, 32, Color(col, 0.9), 1.6, true)
-		var txt := _menu_actions[i]
-		var w := _font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-		draw_string(_font, p - Vector2(w / 2.0, -4.0), txt,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, _text)
 
 # ---------------------------------------------------------------- input
 
@@ -1112,9 +1126,9 @@ func _key_at(at: Vector2) -> String:
 ## Close the circle menu after a press outside it — and tell Main to drop the
 ## focus card with it, so the two always open and close together.
 func _close_menu() -> void:
-	if not _menu_open:
+	if not _menu.open:
 		return
-	_menu_open = false
+	_menu.clear()
 	if blur_cb.is_valid():
 		blur_cb.call()
 	queue_redraw()
@@ -1145,16 +1159,12 @@ func focus_note(note: String) -> bool:
 ## shows the focus card. Opening the note is a menu action, never a tap.
 func _select(key: String) -> void:
 	_selected = key
-	_menu_actions = ["Open", "Delete"]
 	var child_count: int = _children.get(key, []).size()
-	if child_count > 0:
-		if child_count > max(1, GameManager.graph_max_separate):
-			_menu_actions.append("Group %d" % child_count)
-		else:
-			_menu_actions.append("Enter")
-	if _scope != "" and _is_scope_ancestor(key):
-		_menu_actions = ["Go", "Overview"]
-	_menu_open = true
+	_menu.show_for({
+		"children": child_count,
+		"oversized": child_count > max(1, GameManager.graph_max_separate),
+		"ancestor": _scope != "" and _is_scope_ancestor(key),
+	})
 	# The card first: its mobile inset is part of the camera fit, so the
 	# neighbourhood is framed in the space actually left on screen.
 	if focus_cb.is_valid():
@@ -1167,22 +1177,16 @@ func _select(key: String) -> void:
 ## homepage is the immutable vault root and cannot be deleted or entered.
 func _select_hub() -> void:
 	_selected = ""
-	_menu_actions = ["Open"]
-	_menu_open = true
+	_menu.show_with(["Open"])
 	_tween_to("")
 	if focus_cb.is_valid():
 		focus_cb.call(_root_home)
 	queue_redraw()
 
 func _menu_hit(at: Vector2) -> String:
-	if not _menu_open or not _pos.has(_selected):
+	if not _pos.has(_selected):
 		return ""
-	var c := _to_screen(_pos[_selected])
-	for i in _menu_actions.size():
-		var ang := -PI / 2.0 + TAU * float(i) / float(_menu_actions.size())
-		if at.distance_to(c + Vector2.from_angle(ang) * MENU_R) <= 26.0:
-			return _menu_actions[i]
-	return ""
+	return _menu.hit(_to_screen(_pos[_selected]), at)
 
 func _activate_menu(action: String) -> void:
 	var note := String(_open_target.get(_selected, _selected))
@@ -1205,7 +1209,7 @@ func _activate_menu(action: String) -> void:
 		_collapsed.erase(_selected)
 		_enter_group(_selected)
 		return
-	_menu_open = false
+	_menu.clear()
 	if action == "Open" and open_cb.is_valid() and note != "":
 		open_cb.call(note)
 	elif action == "Delete" and delete_cb.is_valid() and note != "":

@@ -103,13 +103,20 @@ layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 1
 
-[node name="CardExcerpt" type="Label" parent="Margin/CardColumn" unique_id=1529796888]
+[node name="CardPreviewScroll" type="ScrollContainer" parent="Margin/CardColumn" unique_id=1529796888]
 unique_name_in_owner = true
+visible = false
 custom_minimum_size = Vector2(200, 0)
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="CardPreview" type="VBoxContainer" parent="Margin/CardColumn/CardPreviewScroll" unique_id=1529796890]
+unique_name_in_owner = true
 layout_mode = 2
-autowrap_mode = 2
+size_flags_horizontal = 3
 
 [node name="CardMetaSpacer" type="Control" parent="Margin/CardColumn" unique_id=354342641]
+unique_name_in_owner = true
 layout_mode = 2
 size_flags_vertical = 3
 

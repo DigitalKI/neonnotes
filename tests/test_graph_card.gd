@@ -68,6 +68,14 @@ func _run_digest_checks(check: Callable) -> void:
 	check.call("summary counts images", int(d["images"]) == 1)
 	check.call("summary counts wiki-links out", int(d["links_out"]) == 1)
 	check.call("summary counts words", int(d["words"]) > 20)
+	check.call("summary carries the preview source",
+		String(d["preview"]).begins_with("# Heading here"))
+	var long_lines: Array[String] = []
+	for i in GraphDigest.PREVIEW_LINES + 20:
+		long_lines.append("line %d" % i)
+	check.call("preview truncates to the line budget",
+		GraphDigest.preview_of("\n".join(long_lines)).split("\n").size() == GraphDigest.PREVIEW_LINES)
+	check.call("preview keeps a short body whole", GraphDigest.preview_of("a\nb") == "a\nb")
 	check.call("summary keeps the created stamp", String(d["created"]) == "2020-03-04T10:11:12")
 	check.call("summary keeps the updated stamp", String(d["updated"]) == today)
 
@@ -133,17 +141,27 @@ func _run_card_checks(check: Callable) -> void:
 	await get_tree().process_frame
 
 	card.show_model(GraphDigest.note_card("sec.md", {
-		"excerpt": "First line.", "created": "2020-03-04T10:11:12",
+		"excerpt": "First line.",
+		"preview": "# Heading here\n\nFirst **body** line.",
+		"created": "2020-03-04T10:11:12",
 		"updated": Time.get_datetime_string_from_system(true, false),
 		"words": 42, "checklist_open": 2, "images": 0,
 	}, []))
 	check.call("card renders the title", card.title_label.text == "Section")
+	var title_opens: Array = []
+	card.title_opened.connect(func(rel: String) -> void: title_opens.append(rel))
+	var title_click := InputEventMouseButton.new()
+	title_click.button_index = MOUSE_BUTTON_LEFT
+	title_click.pressed = true
+	card.title_label.gui_input.emit(title_click)
+	check.call("title tap opens the note", title_opens == (["sec.md"] as Array))
 	check.call("note card marks a note glyph", card.kind_label.text == "●")
 	check.call("card renders tag chips", card.tags_chips.get_child_count() == 1)
 	check.call("card shows the links header row", card.links_row.visible
 		and card.links_header.text == "⇢ LINKS · 2")
 	check.call("card hides the children section for a note", not card.children_scroll.visible)
-	check.call("card renders the excerpt", card.excerpt_label.text == "First line.")
+	check.call("card renders the source preview", card.preview_scroll.visible
+		and card.preview_box.get_child_count() > 0)
 	check.call("card meta is human readable",
 		card.meta_label.text.contains("created Mar 4, 2020")
 		and card.meta_label.text.contains("edited today")
@@ -151,6 +169,8 @@ func _run_card_checks(check: Callable) -> void:
 		and card.meta_label.text.contains("2 open"))
 	var grabber_w: float = card.children_scroll.get_v_scroll_bar().custom_minimum_size.x
 	check.call("children scrollbar is touch wide", grabber_w >= 14.0)
+	var preview_grabber_w: float = card.preview_scroll.get_v_scroll_bar().custom_minimum_size.x
+	check.call("preview scrollbar is touch wide", preview_grabber_w >= 14.0)
 
 	card.show_model(GraphDigest.folder_card("sec.md", {}))
 	check.call("folder card marks a folder glyph", card.kind_label.text == "◆")
@@ -207,14 +227,15 @@ func _run_card_checks(check: Callable) -> void:
 	check.call("no links means no header row", not card.links_row.visible)
 
 	# Folder card tabs: content first, children on the second tab.
-	card.show_model(GraphDigest.folder_card("sec.md", {"excerpt": "inside"}))
+	card.show_model(GraphDigest.folder_card("sec.md",
+		{"excerpt": "inside", "preview": "Companion note body."}))
 	check.call("folder card starts on the content tab",
-		card.excerpt_label.visible and not card.children_scroll.visible)
+		card.preview_scroll.visible and not card.children_scroll.visible)
 	(card.tab_children as BaseButton).pressed.emit()
 	check.call("children tab shows the list", card.children_scroll.visible
-		and not card.excerpt_label.visible)
+		and not card.preview_scroll.visible)
 	(card.tab_content as BaseButton).pressed.emit()
-	check.call("content tab shows the excerpt", card.excerpt_label.visible
+	check.call("content tab shows the preview", card.preview_scroll.visible
 		and not card.children_scroll.visible)
 	card.show_model(GraphDigest.note_card("sec.md", {}, []))
 	check.call("note card has no tabs", not card.tabs_row.visible)
@@ -342,7 +363,7 @@ func _run_inset_checks(check: Callable) -> void:
 	gv2._select("sec")  # opens the circle menu on the folder node
 	check.call("focus_note selects a mapped note", gv2.focus_note("sec/one.md"))
 	check.call("focus moved the selection to the child", gv2._selected == "sec/one.md")
-	gv2._menu_open = true
+	gv2._menu.open = true
 	gv2._close_menu()
 	check.call("outside press closes the menu and blurs", blurs[0] == 1)
 	check.call("focus_note falls back when the note is unmapped",

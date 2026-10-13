@@ -2,15 +2,17 @@ class_name GraphFocusCard
 extends PanelContainer
 ## Focus card for the graph map: "what is inside this node" at a glance.
 ##
-## Display-only for now (no actions). Structure is authored in
-## scenes/components/graph_focus_card.tscn; this script renders a view-model
-## built by `GraphDigest` and places the card for the current form factor:
+## Structure is authored in scenes/components/graph_focus_card.tscn; this
+## script renders a view-model built by `GraphDigest` and places the card for
+## the current form factor:
 ##  - desktop        → semi-transparent panel floating at the top-right
 ##  - phone landscape→ right rail, full height
 ##  - phone portrait → bottom sheet (1/3 of the screen)
 ##
 ## The card owns no vault logic: Main resolves the model (note vs folder
 ## aggregate) and calls `show_model()`; a digest arriving later re-renders.
+## Its affordances are all signals: the title opens the note, tag chips filter,
+## child rows navigate, and the links header opens the links page.
 
 const CARD_MIN_W := 260.0
 const CARD_MAX_W := 380.0
@@ -20,6 +22,7 @@ const PORTRAIT_FRACTION := 1.0 / 3.0
 signal child_selected(rel: String)   # a row in a folder's child list
 signal tag_selected(tag: String)     # a tag chip: filter the vault by it
 signal links_opened                  # the links header button: show them all
+signal title_opened(rel: String)     # the title: open that note (like menu Open)
 
 ## Bounded lists: the card must stay readable rather than exhaustive. Links
 ## do not list here at all — the header button opens the full links page, so
@@ -28,6 +31,10 @@ const MAX_TAGS := 16
 const MAX_CHILDREN_VISIBLE := 60
 const CHILD_ROW_H := 19.0
 const CHILDREN_MAX_H := 220.0
+## Desktop preview floor: the corner card sizes itself to its content, so the
+## preview needs a height to make the card open tall enough to read. Phone
+## rail/sheet are fixed-size, so there the preview shrinks and scrolls instead.
+const PREVIEW_MIN_H := 200.0
 
 @onready var column: VBoxContainer = %CardColumn
 @onready var kind_label: Label = %CardKind
@@ -42,7 +49,9 @@ const CHILDREN_MAX_H := 220.0
 @onready var children_header: Label = %CardChildrenHeader
 @onready var children_scroll: ScrollContainer = %CardChildrenScroll
 @onready var children_box: VBoxContainer = %CardChildren
-@onready var excerpt_label: Label = %CardExcerpt
+@onready var preview_scroll: ScrollContainer = %CardPreviewScroll
+@onready var preview_box: VBoxContainer = %CardPreview
+@onready var meta_spacer: Control = %CardMetaSpacer
 @onready var meta_label: Label = %CardMeta
 
 var _model := {}
@@ -61,9 +70,28 @@ func _ready() -> void:
 	links_btn.pressed.connect(func(): links_opened.emit())
 	tab_content.pressed.connect(func(): _set_tab("content"))
 	tab_children.pressed.connect(func(): _set_tab("children"))
+	# The title doubles as an "open note" affordance, like the circle menu's
+	# Open action; the label needs to stop ignoring the mouse to receive taps.
+	title_label.mouse_filter = Control.MOUSE_FILTER_STOP
+	title_label.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	title_label.gui_input.connect(_on_title_input)
 	apply_theme()
 	GameManager.palette_changed.connect(apply_theme)
 	GameManager.font_changed.connect(apply_theme)
+
+## The title is a tap target: opening the note reuses Main's `_open_graph_note`,
+## the same flow as the circle menu's Open (so a folder companion or the hub
+## opens too). Emits the model's rel so Main never guesses what was focused.
+func _on_title_input(event: InputEvent) -> void:
+	var pressed: bool = (event is InputEventMouseButton
+			and event.button_index == MOUSE_BUTTON_LEFT and event.pressed) \
+		or (event is InputEventScreenTouch and event.pressed)
+	if not pressed:
+		return
+	var rel := String(_model.get("rel", ""))
+	if rel != "":
+		title_opened.emit(rel)
+	accept_event()
 
 # ------------------------------------------------------------------ theming
 
@@ -87,20 +115,19 @@ func apply_theme() -> void:
 		tab.add_theme_color_override("font_disabled_color", c["accent"])
 		tab.add_theme_font_size_override("font_size", 12)
 	children_header.add_theme_color_override("font_color", Color(c["accent2"].r, c["accent2"].g, c["accent2"].b, 0.75))
-	excerpt_label.add_theme_color_override("font_color", Color(c["text"].r, c["text"].g, c["text"].b, 0.85))
 	meta_label.add_theme_color_override("font_color", Color(c["text"].r, c["text"].g, c["text"].b, 0.5))
 	# Header labels are small captions; the title carries the hierarchy.
 	for caption in [links_header, children_header]:
 		caption.add_theme_font_size_override("font_size", maxi(11, GameManager.font_size - 4))
 	meta_label.add_theme_font_size_override("font_size", maxi(11, GameManager.font_size - 3))
-	excerpt_label.add_theme_font_size_override("font_size", maxi(11, GameManager.font_size - 2))
-	_style_children_scrollbar()
+	_style_scrollbar(children_scroll)
+	_style_scrollbar(preview_scroll)
 	if not _model.is_empty():
 		_render()
 
 ## Touch-friendly grabber, matching the preview/tree scrollbars.
-func _style_children_scrollbar() -> void:
-	var vsb := children_scroll.get_v_scroll_bar()
+func _style_scrollbar(scroll: ScrollContainer) -> void:
+	var vsb := scroll.get_v_scroll_bar()
 	vsb.custom_minimum_size = Vector2(14, 0)
 	var c := GameManager.palette()
 	var grabber := StyleBoxFlat.new()
@@ -162,10 +189,32 @@ func _render() -> void:
 		children_scroll.visible = false
 		_clear(children_box)
 
-	excerpt_label.text = String(_model.get("excerpt", ""))
-	excerpt_label.visible = show_body and excerpt_label.text != ""
+	_render_preview(String(_model.get("preview", "")) if show_body else "")
+	# The preview scroll expands to fill the card; the spacer only pushes the
+	# meta line to the bottom when there is no preview to take that space.
+	meta_spacer.visible = not preview_scroll.visible
 	meta_label.text = _meta_text()
 	meta_label.visible = show_body and meta_label.text != ""
+
+## Render the note's opening lines exactly like the note preview, bounded to
+## `GraphDigest.PREVIEW_LINES` source lines (the digest already truncated it).
+## Same parser + builder as the note view, so headings, lists, code, quotes,
+## tables and embeds look identical — just shorter. The build is synchronous
+## because the digest caps the input, so it cannot stall the frame.
+func _render_preview(source: String) -> void:
+	if source.strip_edges() == "":
+		preview_scroll.visible = false
+		_clear(preview_box)
+		return
+	preview_scroll.visible = true
+	preview_scroll.scroll_vertical = 0
+	var doc := MarkdownParser.parse(source)
+	# The card already shows the title, so drop the heading the builder would
+	# otherwise prepend (the body carries no front matter, so it is empty).
+	doc["meta"]["title"] = ""
+	# The card always uses the app palette, never a per-note front-matter theme.
+	PreviewBuilder.pal_override = {}
+	PreviewBuilder.build(doc, preview_box)
 
 func _meta_text() -> String:
 	var parts: Array[String] = []
@@ -282,6 +331,9 @@ func _clear(box: Node) -> void:
 func apply_layout(vp: Vector2 = Vector2.ZERO, mobile := false, portrait := false, top_inset := 44.0) -> void:
 	if vp == Vector2.ZERO:
 		vp = get_parent_area_size()
+	if is_instance_valid(preview_scroll):
+		preview_scroll.custom_minimum_size = Vector2(
+			preview_scroll.custom_minimum_size.x, 0.0 if mobile else PREVIEW_MIN_H)
 
 	var m := SCREEN_MARGIN
 	if mobile and portrait:

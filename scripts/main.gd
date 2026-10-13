@@ -148,6 +148,7 @@ func _phase_theme_layout() -> void:
 	focus_card.child_selected.connect(_focus_card_child)
 	focus_card.tag_selected.connect(_filter_by_tag_from_card)
 	focus_card.links_opened.connect(_open_graph_links_page)
+	focus_card.title_opened.connect(_open_graph_note)
 	links_page.close_requested.connect(_return_to_graph)
 	links_page.link_activated.connect(_graph_link_activated)
 	# The nav chrome is a scene child of GraphView (visually editable); the
@@ -449,6 +450,12 @@ func _on_mobile_changed(_is_mobile: bool) -> void:
 func _on_note_selected(fname: String) -> void:
 	if page_mode != "":
 		_close_page()
+	# Opening a note also leaves the graph map: a tree click must land on the
+	# note, not behind the still-visible map (mirrors _toggle_graph's hide
+	# branch). The editor's own apply_mode() restores the note surfaces.
+	if graph_view.visible:
+		graph_view.visible = false
+		_close_focus_card()
 	# Continue opening the selected note after leaving a page. The previous note
 	# is flushed first (its rel is still current), then GameManager is repointed
 	# and the source handed to the editor component.

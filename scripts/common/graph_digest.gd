@@ -11,6 +11,13 @@ class_name GraphDigest extends RefCounted
 const EXCERPT_MAX := 200
 const EXCERPT_LINES := 2
 
+## How much of the note the focus card renders as a live preview, in source
+## lines. Easy-to-tune knob: the card hands these lines to the same
+## `MarkdownParser` + `PreviewBuilder` pipeline the note view uses, so the
+## preview looks identical — only shorter. Raise it for more context, lower it
+## to keep the graph card light on very large notes.
+const PREVIEW_LINES := 50
+
 const MONTHS := ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
 	"Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
@@ -39,6 +46,7 @@ static func summarize(source: String) -> Dictionary:
 		"title": NoteMetadata.field(source, "title", ""),
 		"tags": tag_list,
 		"excerpt": excerpt_of(body),
+		"preview": preview_of(body),
 		"heading": heading,
 		"words": word_count(body),
 		"checklist_open": count_open_checklist(body),
@@ -69,6 +77,16 @@ static func excerpt_of(body: String) -> String:
 			cut = cut.substr(0, space)
 		out = cut.rstrip(" ,.;:") + "…"
 	return out
+
+## The note body's first PREVIEW_LINES source lines, kept verbatim (front-matter
+## already stripped) so the focus card can render it through the real preview
+## pipeline. Truncation is per-line; a block that runs past the cut is simply
+## cut, which the parser tolerates. Pure and cheap, so it stays worker-safe.
+static func preview_of(body: String) -> String:
+	var all := body.split("\n", true)
+	if all.size() <= PREVIEW_LINES:
+		return body
+	return "\n".join(all.slice(0, PREVIEW_LINES))
 
 ## One body line as readable prose: drop heading/list/quote/checkbox markers,
 ## flatten `[[wiki|label]]` and `[text](url)` to their label, drop emphasis.
@@ -203,6 +221,7 @@ static func note_card(rel: String, digest: Dictionary, resolve_maps: Array = [])
 		"links": outbound,
 		"children": [] as Array[String],
 		"excerpt": String(digest.get("excerpt", "")),
+		"preview": String(digest.get("preview", "")),
 		"created": String(digest.get("created", "")),
 		"updated": String(digest.get("updated", "")),
 		"words": int(digest.get("words", 0)),
@@ -249,6 +268,7 @@ static func folder_card(rel: String, digest: Dictionary) -> Dictionary:
 		"children": children,
 		"child_count": children.size(),
 		"excerpt": String(digest.get("excerpt", "")),
+		"preview": String(digest.get("preview", "")),
 		"created": String(digest.get("created", "")),
 		"updated": String(digest.get("updated", "")),
 		"words": int(digest.get("words", 0)),

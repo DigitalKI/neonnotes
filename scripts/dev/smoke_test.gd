@@ -357,6 +357,15 @@ func _run_smoke() -> void:
 	m._close_settings()
 	GameManager.set_font("Share Tech Mono")
 	GameManager.set_font_size(GameManager.BASE_FONT_SIZE)
+	# Opening a note from the tree leaves the graph: the note lands in front,
+	# not behind the still-visible map. Run last so the selection change cannot
+	# perturb the ordering/placement checks above.
+	m.graph_view.open(GameManager.current_rel)
+	fails += _check(m.graph_view.visible, "graph reopens for the tree-click check")
+	m.vault_tree.select_note("sub/demo.md")
+	await m.get_tree().process_frame
+	fails += _check(not m.graph_view.visible, "tree note click closes the graph view")
+	fails += _check(m.content_host.visible, "tree note click shows the note")
 	print("SMOKE RESULT: %s (%d fails)" % ["FAIL" if fails > 0 else "OK", fails])
 	m.get_tree().quit(1 if fails > 0 else 0)
 

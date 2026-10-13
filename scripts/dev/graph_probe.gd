@@ -45,21 +45,21 @@ func _ready() -> void:
 			_fails += 1
 
 	# 1. open() resets selection
-	check.call("open() resets selection", gv._selected == "" and not gv._menu_open)
+	check.call("open() resets selection", gv._selected == "" and not gv._menu.open)
 
 	# 2. select the companion note node for a/ (folder a has companion a.md)
 	var key: String = gv._key_at(gv._to_screen(gv._pos["a"]))
 	check.call("key_at resolves a node", key != "")
 	gv._select(key)
 	check.call("select sets selection", gv._selected == key)
-	check.call("menu opens", gv._menu_open)
+	check.call("menu opens", gv._menu.open)
 	check.call("menu actions include Enter for folder",
-		gv._menu_actions.has("Open") and gv._menu_actions.has("Delete")
-		and gv._menu_actions.has("Enter"))
+		gv._menu.actions.has("Open") and gv._menu.actions.has("Delete")
+		and gv._menu.actions.has("Enter"))
 
 	# 3. menu hit-test: first button sits at -PI/2 from the node
 	var c: Vector2 = gv._to_screen(gv._pos[key])
-	var hit: String = gv._menu_hit(c + Vector2.from_angle(-PI / 2.0) * gv.MENU_R)
+	var hit: String = gv._menu_hit(c + Vector2.from_angle(-PI / 2.0) * GraphRadialMenu.RADIUS)
 	check.call("menu hit at first button", hit == "Open")
 	check.call("menu miss away", gv._menu_hit(c + Vector2(300, 300)) == "")
 
@@ -90,7 +90,7 @@ func _ready() -> void:
 	check.call("big folder starts collapsed", gv._collapsed.get(big, false))
 	check.call("hidden leaf not in keys", not gv._keys.has(child_note))
 	gv._select(big)
-	check.call("collapsed menu has Enter", gv._menu_actions.has("Enter"))
+	check.call("collapsed menu has Enter", gv._menu.actions.has("Enter"))
 	# A parent over the configured separate-node limit offers a "Group N" action.
 	var grp_note := "grp"
 	var grp_children: Array = []
@@ -102,14 +102,14 @@ func _ready() -> void:
 	gv._children[grp_note] = grp_children
 	gv._select(grp_note)
 	check.call("oversized parent offers Group N",
-		gv._menu_actions.has("Group 60"))
+		gv._menu.actions.has("Group 60"))
 	gv._children.erase(grp_note)
 	gv._collapsed[big] = true
 	gv._select(big)  # restore the Expand-test target
 	# 6. Expand action unfolds: flag cleared AND the leaves re-enter the map
 	gv._activate_menu("Expand")
 	check.call("expand clears collapse flag", not gv._collapsed.get(big, false))
-	check.call("expand closes menu", not gv._menu_open)
+	check.call("expand closes menu", not gv._menu.open)
 	check.call("expand enters group scope", gv._scope == big)
 	check.call("200 cap applies in expanded group", gv._page_children.size() == 40
 		and gv._keys.size() <= 200)
@@ -161,8 +161,8 @@ func _ready() -> void:
 	check.call("parent sibling hidden", not gv._keys.has("root_sibling"))
 	check.call("ancestor is recognized for navigation", gv._is_scope_ancestor("grandparent"))
 	gv._select("grandparent")
-	check.call("ancestor circle menu offers navigation", gv._menu_actions.has("Go")
-		and gv._menu_actions.has("Overview"))
+	check.call("ancestor circle menu offers navigation", gv._menu.actions.has("Go")
+		and gv._menu.actions.has("Overview"))
 	check.call("first child page visible", gv._keys.has("scope/child_000.md"))
 	check.call("last child page hidden", not gv._keys.has("scope/child_204.md"))
 	gv._change_page(1)
@@ -334,7 +334,7 @@ func _ready() -> void:
 	gv.open_cb = func(n: String) -> void: opened_home.append(n)
 	gv._select_hub()
 	check.call("hub menu offers Open only",
-		gv._menu_open and gv._menu_actions == ["Open"])
+		gv._menu.open and gv._menu.actions == ["Open"])
 	gv._activate_menu("Open")
 	check.call("hub Open opens the homepage", opened_home == ["_homepage.md"])
 	# Homepage links (and any cross-section link) route through the hub centre.
@@ -389,6 +389,37 @@ func _ready() -> void:
 	check.call("parent-only leaf centres the node", leaf_center.length() < 40.0)
 	await _focus_scale(gv, "sec")
 	check.call("folder with children zooms out", gv._map_scale < 2.0)
+
+	# 16. A link signal carries the colour of the node it leaves. When the origin
+	#     folds into a collapsed folder aggregate, the signal must take that
+	#     aggregate node's colour, not the hidden note's.
+	var saved_notes3: Array[String] = GameManager.notes
+	var saved_links3: Dictionary = GameManager.links
+	var saved_sep3: int = GameManager.graph_max_separate
+	GameManager.graph_max_separate = 1   # a parent with >1 child collapses
+	GameManager.notes = ["target.md", "big.md", "big/n000.md", "big/n001.md"]
+	GameManager.links = {"big/n000.md": ["target"]}  # raw wiki-link text
+	gv._build_hierarchy()
+	check.call("folded origin resolves to its aggregate node",
+		gv._norm("big/n000.md") == "big")
+	check.call("signal colour folds a hidden origin to its aggregate",
+		gv._link_color("big/n000.md") == gv._node_color("big"))
+	check.call("signal colour equals the origin node colour",
+		gv._link_color("target.md") == gv._node_color("target.md"))
+	gv._resolve_maps = WikiLinks.resolve_maps()
+	gv._layout_points()
+	gv._build_routes()
+	var folded_route := {}
+	for r in gv._routes:
+		if r.get("src", "") == "big":
+			folded_route = r
+	check.call("folded link routes from its aggregate node", not folded_route.is_empty())
+	if not folded_route.is_empty():
+		check.call("route rail uses the origin's colour",
+			gv._route_guide_color(folded_route) == gv._node_color("big"))
+	GameManager.graph_max_separate = saved_sep3
+	GameManager.notes = saved_notes3
+	GameManager.links = saved_links3
 
 	print("PROBE RESULT: %s (%d fails)" % ["OK" if _fails == 0 else "FAIL", _fails])
 	get_tree().quit(_fails)
