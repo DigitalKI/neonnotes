@@ -26,6 +26,52 @@ _Last updated: 2026-10-13 · Godot 4.7 · renderer: gl_compatibility_
 
 ## 2. Current state (present-tense facts — git is the changelog)
 
+- **Mobile drawer dismisses the graph focus card (2026-10-13):** tapping a
+  node then opening the tree left the focus card floating *over* the tree — it
+  is a shell-root child (outside `%Content`), so hiding `%Content` for the
+  full-screen drawer never touched it. `LayoutComponent` now emits a new
+  `drawer_opened` signal from `toggle_sidebar()` (mobile only, only on the
+  open transition) and Main connects it to `_close_focus_card`, so **every**
+  drawer-opening path (the ☰ button, and the tag-filter reveals in
+  `_filter_by_tag_from_card` / `_open_wikilink`) dismisses the card. Desktop
+  does not emit (its sidebar is always visible). `ReproTreeTap` asserts this.
+- **Android keyboard/status bar (2026-10-13):** `LayoutComponent._process()` polls `DisplayServer.virtual_keyboard_get_height()`; Godot has no dedicated Android soft-keyboard-open signal in this path. A reported height > 0 is the open state; when that boolean changes, `%StatusBar` is hidden while the IME is visible and restored when the IME closes. Viewport `size_changed` remains separately connected for layout/inset recalculation, but keyboard detection uses height polling because resize may be absent or delayed.
+- **Mobile selection polish (2026-10-13):** Android text-selection UX in
+  `SelectionOverlay`, iterated twice. The follow-up lowered `SCROLL_MAX_SPEED`
+  260 → 150 px/s and widened the edge band 48 → 56 px (still linear and
+  delta-driven); hides `%ActionBar` for the whole handle drag and reveals it only
+  on release, after the loupe is hidden; loupe is now 156×62 (was 168×82), has
+  30 px finger gap (was 72) and a 4 px screen edge margin. It is now **always
+  above** the finger (flip-below removed) and clamps only to the visible screen,
+  not the editor rect, so it may float past the text box (CodeEdit
+  `clip_contents` is false, so children escape its rect). `%Loupe` has
+  `z_index = 10` so it should render over the editor. Test adds assertions for
+  action-bar/loupe visibility through release. Preview scene `SelectionLoupePreview`
+  (editor inset with room above) was verified over MCP: the loupe floats above
+  the editor rectangle, unclipped. Still confirm final feel/tuning on device.
+  - **Magnifier ("lupa"):** new `scripts/components/selection_loupe.gd` (node
+    `%Loupe` in `selection_overlay.tscn`) shows the caret line under the finger,
+    enlarged (`ZOOM` 1.8×), in a rounded accent-bordered panel placed `LIFT` 72 px
+    **above** the touch point (it flips below near the top edge). Shown only while
+    a handle is dragged. It is a font-scaled re-draw of the editor line (plus the
+    selection band), **not** a framebuffer read-back — `get_texture().get_image()`
+    every frame would be far too costly under `gl_compatibility`.
+  - **Edge auto-scroll:** the old `_auto_scroll()` nudged `scroll_vertical ±1` once
+    per input event (fast and event-rate-dependent). Replaced by a delta-driven
+    `_process()`: speed scales linearly with how far the finger is inside the
+    `SCROLL_EDGE` 48 px band (0 at the band edge → `SCROLL_MAX_SPEED` 260 px/s,
+    capped at 1.5×), and after each scroll the selection re-extends under the
+    stationary finger so rows keep accumulating. Fractional px are carried in
+    `_scroll_accum`; process is on only during a drag.
+  - **Select All:** `ActionBar` gained a `SelectAllBtn` (`%SelectAllBtn`, binds the
+    new `"select_all"` action → `_select_all()`), which selects the whole document
+    and keeps the handles so Cut/Copy/Format follow immediately. The desktop
+    native `TextEdit` menu already had Select All.
+  Covered by `tests/TestSelectionOverlay.tscn` (wired into `run_tests.sh`), which
+  instantiates the otherwise Android-only overlay on a stand-in CodeEdit.
+  `scenes/dev/SelectionLoupePreview.tscn` stands up the same overlay on desktop
+  for a visual eyeball via MCP (`play_scene` → `screenshot`).
+
 - **Graph pager fix (2026-10-11):** the nav-bar pager was stuck at "1/1" with
   dead buttons after expanding/entering a node — `_rebuild_keys()` emitted
   `nav_changed` at its top, before `_page_count` was recomputed, so the bar
@@ -290,6 +336,34 @@ _Last updated: 2026-10-13 · Godot 4.7 · renderer: gl_compatibility_
   worker cache read-through, child/tag/link navigation, blur, link paging,
   phone zoom floor), plus nav-bar mirroring/actions, links-page rows, and
   folder tab switching) — full suite green.
+- **Graph live refresh on delete + view persistence (2026-10-13):** the graph
+  no longer goes stale when a node is removed. `GraphView.refresh_graph()`
+  re-derives the hierarchy/routes/levels from `GameManager.notes` **in place** —
+  scope, page, camera (`_map_scale`/`_map_offset`) and selection survive, so
+  deleting inside a subview updates just that part instead of resetting to the
+  overview fit. A deleted subview falls back to its nearest surviving ancestor
+  via `_resolve_live_scope()` (which also validates a persisted scope against
+  the live hierarchy); `_prune_history()` drops dead `_scope_history` entries;
+  a deleted selected node clears the menu + focus card (`blur_cb`). Main calls
+  it from `_refresh_list()`, the funnel every rescan (delete / move / sync /
+  vault switch) goes through; it no-ops until the map is built (`is_ready()`)
+  and while hidden.
+  **Graph-as-start-page now reopens on the view it was left on:** the new
+  `GraphView.view_state()` snapshots scope/page/`scope_history`/scale/offset/
+  selection; `open_restored(state)` re-applies it (`_restore_view_state()`
+  fits only to compute zoom limits, then restores the exact camera and shows
+  the saved selection without flying). `Main._persist_graph_state()` writes it
+  to `GameManager.graph_view_state` (persisted under `ui/graph_view_state`),
+  debounced 1.5 s from the new `GraphView.state_changed` signal, and on
+  hide/quit (`NOTIFICATION_WM_CLOSE_REQUEST`/`WM_GO_BACK_REQUEST`).
+  `_open_start_page` uses `open_restored()` when `open_start_mode == "graph"`
+  and a saved state exists. Covered by new checks in `tests/TestGraphCard.tscn`
+  (refresh keeps scope/node/camera + subview fallback; view_state round-trip
+  restores scope/zoom/position/selection). **Gotcha:** the two pre-existing
+  phone-fit checks in that test had been dead (an unawaited coroutine that the
+  quit cut off) and were environment-dependent on the live `settings.cfg`
+  `graph_max_separate`; the section now awaits its coroutines and pins a wide
+  separate limit so it is deterministic.
 - **Tree reveal on external selection (2026-10-11):** selecting a note from
   the graph (menu Open) or a wiki-link now always brings the tree row into
   view: `VaultTreeComponent._reveal_tree_item()` expands every collapsed
@@ -460,7 +534,9 @@ _Last updated: 2026-10-13 · Godot 4.7 · renderer: gl_compatibility_
 - Mobile: drawer sidebar, safe-area insets, density-derived canvas scale
   (`GameManager.ui_scale()` → `root.content_scale_factor`; phones disable the
   canvas stretch so rotation cannot resize anything); consistent 10 pt side +
-  bottom margins across orientation (safe-area/keyboard insets added on top),
+  2 pt bottom margins across orientation (safe-area/keyboard insets added on top;
+  mobile bottom margin reduced 10 → 2 on 2026-10-13 after user reported a large
+  gap between editor and keyboard).
   Android content-URI image import, media
   source dialog over `vault/media/`. Tree taps resolve the pressed row once and
   only open it on release when finger displacement stays under 16 px; mobile
@@ -649,7 +725,9 @@ _Last updated: 2026-10-13 · Godot 4.7 · renderer: gl_compatibility_
     graph. Research + phased plan (G1–G4) live in the Next Steps brief §15;
     Neon City is the eventual 3D skin over the same model. Do G1 before the
     visual redesign.
-  - SelectionOverlay (Android handles + Cut/Copy/Paste bar) in progress — wire/test on device.
+  - SelectionOverlay (Android handles + Cut/Copy/Paste bar) — magnifier + proportional
+    edge auto-scroll + Select All added 2026-10-13 (see Current state); confirm the
+    loupe feel on a real device.
   - Parser: per-block preview cache keyed by content hash. (Block/inline
     unification of the editor + viewer is **done** — the highlighter consumes
     `parse()["lines"]` + `line_markers()`, no block rules of its own.) Note the
@@ -874,6 +952,8 @@ _These OVERRIDE the skill's defaults for this project._
 | `res://scripts/markdown/wiki_links.gd` | Link extract/resolve/backlinks/graph |
 | `res://scripts/common/path_remap.gd` | Static move/remap helpers (unit-tested) |
 | `res://scripts/common/text_utils.gd` | Shared `is_word_char` / `word_bounds` used by editor + selection overlay |
+| `res://scripts/components/selection_overlay.gd` | Android selection overlay (handles + Cut/Copy/Paste/Format/Select All bar, edge auto-scroll); scene `selection_overlay.tscn` |
+| `res://scripts/components/selection_loupe.gd` | Magnifier panel shown above the finger during handle drags (font-scaled re-draw, no framebuffer capture) |
 | `res://scripts/common/media_import.gd` | Static media library + image import helpers (magic-byte decode, SAF URIs, dest naming) |
 | `res://scripts/common/note_crud.gd` | Static vault CRUD helpers (rm_dir, erase_note_meta, scrub_order, compute_delete_set, trash move/restore/purge) |
 | `res://scripts/components/trash_page.gd` | Trash page: lists/restores/purges trashed items (scene `trash_page.tscn`) |
@@ -920,7 +1000,11 @@ _These OVERRIDE the skill's defaults for this project._
 - **Mobile drawer invariant**: SidePanel stays an HSplit child; on mobile
   `%Content.visible` must be the inverse of `drawer_open`. Never show/hide
   `%Content` from new code (`content_host` is fine); never reintroduce
-  overlay/`top_level` approaches (explicitly rejected by the user).
+  overlay/`top_level` approaches (explicitly rejected by the user). The drawer
+  is full-screen, so any surface floating outside `%Content` (the graph focus
+  card) must be dismissed when it opens — `LayoutComponent.drawer_opened`
+  (connected to `Main._close_focus_card`) is the hook; route new floating
+  surfaces through it rather than adding per-caller close calls.
 - **Tree drag & drop**: `set_drag_forwarding` registered ONCE (re-registering
   per refresh breaks repeat drags on Android); `DROP_MODE_ON_ITEM |
   DROP_MODE_INBETWEEN` (-1/0/1 = above/on/below); preserve folder+note merged
