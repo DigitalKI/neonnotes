@@ -4,11 +4,18 @@ extends Control
 ## Root ignores mouse so editor scroll/caret still work; only handles and the
 ## action bar capture input (MOUSE_FILTER_STOP).
 
-signal action(id: String) # "cut"|"copy"|"paste"|"format"
+signal action(id: String) # "cut"|"copy"|"paste"|"format"|"select_all"
 
 const HANDLE_SIZE := Vector2(44, 44)
 const HANDLE_RADIUS := 10.0
 const BAR_MARGIN := 8.0
+## Auto-scroll band (px) at the top/bottom of the editor and the fastest scroll
+## speed (px/s) once the finger is at the box edge. Speed scales linearly with
+## how far the finger is inside the band, so a near-edge drag creeps while an
+## at-edge one scrolls at SCROLL_MAX_SPEED — instead of the old fixed 1 px per
+## input event. Kept deliberately slow to make row accumulation easy to stop.
+const SCROLL_EDGE := 56.0
+const SCROLL_MAX_SPEED := 60.0
 
 var _editor: CodeEdit
 
@@ -20,17 +27,26 @@ var _editor: CodeEdit
 @onready var _btn_cut: Button = %CutBtn
 @onready var _btn_copy: Button = %CopyBtn
 @onready var _btn_paste: Button = %PasteBtn
+## Untyped: the loupe script's `class_name` is only in the global cache after the
+## editor rescans, so typing by name would break headless runs.
+@onready var _loupe = %Loupe
 
 ## 0 = none, 1 = start handle, 2 = end handle
 var _drag_which := 0
 ## Fixed selection end while the other handle is dragged (line, column).
 var _anchor := Vector2i.ZERO
 var _connected := false
+## Last finger position during a drag (editor-local); drives edge auto-scroll and
+## the loupe even when no move event arrives (finger held past the edge).
+var _drag_pos := Vector2.ZERO
+## Fractional scroll carried between frames (scroll_vertical is integral px).
+var _scroll_accum := 0.0
 
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	set_process(false)
 	_attach_handle_input(_handle_start, 1)
 	_attach_handle_input(_handle_end, 2)
 	_handle_start.draw.connect(_draw_handle.bind(_handle_start))
@@ -52,6 +68,8 @@ func _draw_handle(h: Control) -> void:
 func bind(editor: CodeEdit) -> void:
 	_disconnect_editor()
 	_editor = editor
+	if _loupe != null:
+		_loupe.bind(editor)
 	if _editor == null:
 		return
 	_editor.caret_changed.connect(_on_editor_layout_changed)
@@ -90,12 +108,17 @@ func show_for_selection() -> void:
 		hide_overlay()
 		return
 	visible = true
+	_action_bar.visible = true
 	_refresh_action_enabled()
 	_reposition()
 
 
 func hide_overlay() -> void:
 	_drag_which = 0
+	_scroll_accum = 0.0
+	set_process(false)
+	if _loupe != null:
+		_loupe.hide_loupe()
 	visible = false
 	# Android: selecting_enabled=false makes TextEdit.select() a no-op and is what
 	# lets tap-drag scroll. Re-disable when the overlay is gone.
@@ -260,23 +283,44 @@ func _begin_drag(which: int) -> void:
 	var ends := _selection_ends()
 	# Vector2i from _selection_ends is (line, column).
 	_anchor = ends["to"] if which == 1 else ends["from"]
-	_drag_to(_editor.get_local_mouse_position())
+	_drag_pos = _editor.get_local_mouse_position()
+	_scroll_accum = 0.0
+	set_process(true)  # drive edge auto-scroll + the loupe while held
+	_apply_drag_from_pos()
 
 
 func _end_drag() -> void:
 	if _drag_which == 0:
 		return
 	_drag_which = 0
+	_scroll_accum = 0.0
+	set_process(false)
+	_loupe.hide_loupe()
 	if visible:
 		_reposition()  # snap handles to glyph rects
+		_action_bar.visible = true  # reveal it only now, once the loupe is gone
 
 
 func _drag_to(editor_local: Vector2) -> void:
 	if _editor == null or _drag_which == 0:
 		return
+	_drag_pos = editor_local
+	_apply_drag_from_pos()
+
+
+## Extend the selection to whatever text sits under `_drag_pos`, keep the gripped
+## handle under the finger, and refresh the bar + loupe. Called on every move
+## event and on each auto-scroll frame (the finger is held still there, but the
+## text slides underneath it).
+func _apply_drag_from_pos() -> void:
+	if _editor == null or _drag_which == 0:
+		return
+	# The action bar would sit on top of the loupe while stretching; keep it
+	# hidden for the whole gesture (revealed again in _end_drag).
+	_action_bar.visible = false
 	# Godot 4.x: get_line_column_at_pos returns Vector2i(column, line) — x=col, y=line.
 	var hit: Vector2i = _editor.get_line_column_at_pos(
-		Vector2i(roundi(editor_local.x), roundi(editor_local.y))
+		Vector2i(roundi(_drag_pos.x), roundi(_drag_pos.y))
 	)
 	var col := hit.x
 	var line := hit.y
@@ -288,13 +332,17 @@ func _drag_to(editor_local: Vector2) -> void:
 	# Live: keep gripped handle under the finger (not only on release).
 	var gripped := _handle_start if _drag_which == 1 else _handle_end
 	var other := _handle_end if _drag_which == 1 else _handle_start
-	gripped.position = editor_local - HANDLE_SIZE * 0.5
+	gripped.position = _drag_pos - HANDLE_SIZE * 0.5
 	other.position = _handle_center_at(_anchor.x, _anchor.y)
 	gripped.queue_redraw()
 	other.queue_redraw()
-	var ends := _selection_ends()
-	_place_action_bar(ends["from"], ends["to"])
-	_auto_scroll(editor_local)
+	_loupe.show_at(_drag_pos, line, col, _screen_rect())
+
+
+## Visible screen area expressed in this overlay's (editor-local) coordinates.
+## Lets the loupe float above the editor's own rectangle yet stay on screen.
+func _screen_rect() -> Rect2:
+	return Rect2(-global_position, get_viewport().get_visible_rect().size)
 
 
 func _cmp_pos(a: Vector2i, b: Vector2i) -> int:
@@ -306,12 +354,35 @@ func _cmp_pos(a: Vector2i, b: Vector2i) -> int:
 	return 0
 
 
-func _auto_scroll(pos_editor_local: Vector2) -> void:
-	var edge := 40.0
-	if pos_editor_local.y < edge:
-		_editor.scroll_vertical -= 1
-	elif pos_editor_local.y > _editor.size.y - edge:
-		_editor.scroll_vertical += 1
+## Frame-driven edge auto-scroll: while a handle is held near/at the top or
+## bottom edge, scroll at a speed proportional to how far the finger is inside
+## the band (0 at the band edge → SCROLL_MAX_SPEED at the box edge and beyond).
+## After scrolling, re-extend the selection so rows keep accumulating under the
+## stationary finger. `delta`-based so the rate is frame-rate independent.
+func _process(delta: float) -> void:
+	if _drag_which == 0 or _editor == null:
+		set_process(false)
+		return
+	var h := _editor.size.y
+	var dir := 0.0
+	var amount := 0.0
+	if _drag_pos.y < SCROLL_EDGE:
+		amount = (SCROLL_EDGE - _drag_pos.y) / SCROLL_EDGE
+		dir = -1.0
+	elif _drag_pos.y > h - SCROLL_EDGE:
+		amount = (_drag_pos.y - (h - SCROLL_EDGE)) / SCROLL_EDGE
+		dir = 1.0
+	if dir == 0.0:
+		_scroll_accum = 0.0
+		return
+	amount = clampf(amount, 0.0, 1.0)
+	_scroll_accum += dir * SCROLL_MAX_SPEED * amount * delta
+	var step := int(_scroll_accum)
+	if step == 0:
+		return
+	_scroll_accum -= float(step)
+	_editor.scroll_vertical += step
+	_apply_drag_from_pos()  # text slid under the finger: grow the selection
 
 
 func _on_action_pressed(id: String) -> void:
@@ -329,6 +400,17 @@ func _on_action_pressed(id: String) -> void:
 		"paste":
 			_editor.paste()
 			hide_overlay()
+		"select_all":
+			_select_all()
 	action.emit(id)
 	if id != "format":
 		_editor.grab_focus.call_deferred()
+
+
+## Select the whole document; keep the overlay (handles land on the first and
+## last characters) so the user can immediately cut/copy/format.
+func _select_all() -> void:
+	var last_line := maxi(0, _editor.get_line_count() - 1)
+	var last_col := _editor.get_line(last_line).length()
+	_apply_selection(0, 0, last_line, last_col)
+	show_for_selection()

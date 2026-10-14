@@ -1,8 +1,9 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene format=3 uid="uid://r5ue1nbk2d15"]
 
-[ext_resource type="Script" path="res://scripts/components/selection_overlay.gd" id="1_sel"]
+[ext_resource type="Script" uid="uid://davaqf02bmunn" path="res://scripts/components/selection_overlay.gd" id="1_sel"]
+[ext_resource type="Script" uid="uid://biw6pncvhjo7f" path="res://scripts/components/selection_loupe.gd" id="2_loupe"]
 
-[node name="SelectionOverlay" type="Control"]
+[node name="SelectionOverlay" type="Control" unique_id=180154271]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -12,52 +13,62 @@ grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("1_sel")
 
-[node name="HandleStart" type="Control" parent="."]
+[node name="HandleStart" type="Control" parent="." unique_id=1166708894]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(44, 44)
-layout_mode = 0
-mouse_filter = 0
+anchors_preset = 0
 
-[node name="HandleEnd" type="Control" parent="."]
+[node name="HandleEnd" type="Control" parent="." unique_id=1105745504]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(44, 44)
-layout_mode = 0
-mouse_filter = 0
+anchors_preset = 0
 
-[node name="ActionBar" type="HBoxContainer" parent="."]
+[node name="ActionBar" type="HBoxContainer" parent="." unique_id=1694702219]
 unique_name_in_owner = true
 layout_mode = 0
 mouse_filter = 0
 theme_override_constants/separation = 6
 
-[node name="CutBtn" type="Button" parent="ActionBar"]
+[node name="CutBtn" type="Button" parent="ActionBar" unique_id=1893943309]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 text = "Cut"
 
-[node name="CopyBtn" type="Button" parent="ActionBar"]
+[node name="CopyBtn" type="Button" parent="ActionBar" unique_id=1785629325]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 text = "Copy"
 
-[node name="PasteBtn" type="Button" parent="ActionBar"]
+[node name="PasteBtn" type="Button" parent="ActionBar" unique_id=1737857943]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 text = "Paste"
 
-[node name="FormatBtn" type="Button" parent="ActionBar"]
+[node name="SelectAllBtn" type="Button" parent="ActionBar" unique_id=830832985]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "Select All"
+
+[node name="FormatBtn" type="Button" parent="ActionBar" unique_id=1823382771]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 text = "/ Format"
 
-[connection signal="pressed" from="ActionBar/CutBtn" to="." method="_on_action_pressed" binds=["cut"]]
+[node name="Loupe" type="Control" parent="." unique_id=1150657311]
+unique_name_in_owner = true
+z_index = 10
+clip_contents = true
+anchors_preset = 0
+mouse_filter = 2
+script = ExtResource("2_loupe")
 
-[connection signal="pressed" from="ActionBar/CopyBtn" to="." method="_on_action_pressed" binds=["copy"]]
-
-[connection signal="pressed" from="ActionBar/PasteBtn" to="." method="_on_action_pressed" binds=["paste"]]
-
-[connection signal="pressed" from="ActionBar/FormatBtn" to="." method="_on_action_pressed" binds=["format"]]
+[connection signal="pressed" from="ActionBar/CutBtn" to="." method="_on_action_pressed" binds= ["cut"]]
+[connection signal="pressed" from="ActionBar/CopyBtn" to="." method="_on_action_pressed" binds= ["copy"]]
+[connection signal="pressed" from="ActionBar/PasteBtn" to="." method="_on_action_pressed" binds= ["paste"]]
+[connection signal="pressed" from="ActionBar/SelectAllBtn" to="." method="_on_action_pressed" binds= ["select_all"]]
+[connection signal="pressed" from="ActionBar/FormatBtn" to="." method="_on_action_pressed" binds= ["format"]]

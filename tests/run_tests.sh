@@ -44,6 +44,9 @@ run_godot_test "REVEAL RESULT: OK" --headless --path . tests/TestTreeReveal.tscn
 # instead of silently creating a note; #tag links filter without creating.
 run_godot_test "LINK RESOLVE RESULT: OK" --headless --path . tests/TestLinkResolve.tscn
 run_godot_test "MOBILE TREE TOUCH RESULT: OK" --headless --path . tests/ReproTreeTap.tscn
+# Mobile selection overlay: select-all action, magnifier placement, proportional
+# edge auto-scroll (overlay is otherwise Android-only).
+run_godot_test "SELECTION RESULT: OK" --headless --path . tests/TestSelectionOverlay.tscn
 # Graph focus card: digest extraction/cache, card rendering, form-factor layout.
 run_godot_test "CARD RESULT: OK" --headless --path . tests/TestGraphCard.tscn
 # Sync delete/move propagation over loopback (real frame protocol + tombstones).
