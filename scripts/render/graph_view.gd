@@ -18,6 +18,10 @@ var blur_cb := Callable()       # focus dropped (tap outside): Main hides the ca
 ## child of this view) mirrors it — navigation visuals live in
 ## scenes/components/graph_nav_bar.tscn, editable like any other UI.
 signal nav_changed
+## Emitted when the navigation/camera state changes (selection, scope, page,
+## pan, zoom). Main debounces this into a settings write so a graph-default
+## app reopens where it was left.
+signal state_changed
 ## Screen space the focus card covers (mobile only — the desktop card floats in
 ## the corner and there is room enough to ignore it). Focus framing centres the
 ## neighbourhood in the free area instead of behind the card.
@@ -76,6 +80,8 @@ var _page_children: Array[String] = []
 var _page_count := 1
 var _scope_history: Array[Dictionary] = []
 var _suspended_state := {}
+## A persisted view state to apply on the next `open()` (graph as start page).
+var _pending_restore := {}
 ## Radial action menu widget (state, geometry, hit-test, drawing). GraphView
 ## only decides *which* actions a node offers and what each one does.
 var _menu := GraphRadialMenu.new()
@@ -130,15 +136,8 @@ func _on_metadata_ready() -> void:
 # ---------------------------------------------------------------- open / build
 
 func open(center_note: String = "") -> void:
-	if _suspended_state.is_empty():
-		_center_note = center_note
-		_selected = ""
-		_scope = ""
-		_scope_active = false
-		_page = 0
-		_page_children.clear()
-		_page_count = 1
-		_scope_history.clear()
+	if _suspended_state.is_empty() and _pending_restore.is_empty():
+		_reset_nav(center_note)
 	_menu.clear()
 	_press_moved = false
 	_pinch_used = false
@@ -152,7 +151,20 @@ func open(center_note: String = "") -> void:
 	# Build the note→path lookup maps once; both passes below resolve every
 	# link against them (WikiLinks.resolve() per link was O(links × notes)).
 	_resolve_maps = WikiLinks.resolve_maps()
+	# A restored/persisted open re-applies its navigation *before* the
+	# hierarchy is keyed, so `_rebuild_keys` (run inside `_build_hierarchy`)
+	# pages the scope the user left instead of a fresh overview.
+	if not _pending_restore.is_empty():
+		_apply_nav_state(_pending_restore)
 	_build_hierarchy()
+	if not _pending_restore.is_empty():
+		# The vault may have changed between sessions: drop a scope/history that
+		# no longer exists before the first layout and route pass.
+		_resolve_live_scope(String(_pending_restore.get("scope", "")),
+			bool(_pending_restore.get("scope_active", false)),
+			int(_pending_restore.get("page", 0)))
+		_prune_history()
+		_rebuild_keys()
 	_build_levels()
 	visible = true
 	mouse_default_cursor_shape = Control.CURSOR_ARROW
@@ -160,12 +172,38 @@ func open(center_note: String = "") -> void:
 	# hidden; defer layout until its container has measured it.
 	call_deferred("_finish_open_layout")
 
+## Reopen on a saved navigation state (settings-persisted graph view) instead of
+## a fresh overview: scope/page, camera and selection all come back.
+func open_restored(state: Dictionary) -> void:
+	_pending_restore = state
+	open()
+
+func _reset_nav(center_note: String) -> void:
+	_center_note = center_note
+	_selected = ""
+	_scope = ""
+	_scope_active = false
+	_page = 0
+	_page_children.clear()
+	_page_count = 1
+	_scope_history.clear()
+
+func _apply_nav_state(state: Dictionary) -> void:
+	_center_note = String(state.get("center_note", _center_note))
+	_scope = String(state.get("scope", ""))
+	_scope_active = bool(state.get("scope_active", _scope != ""))
+	_page = int(state.get("page", 0))
+	_scope_history = _coerce_history(state.get("scope_history", []))
+
 func _finish_open_layout() -> void:
 	_layout_points()
 	_build_routes()
-	if not _suspended_state.is_empty():
+	if not _pending_restore.is_empty():
+		_restore_view_state(_pending_restore)
+		_pending_restore = {}
+	elif not _suspended_state.is_empty():
 		_restore_state(_suspended_state)
-		_suspended_state.clear()
+		_suspended_state = {}
 	else:
 		_fit_to_view()
 	_map_ready = true
@@ -181,25 +219,167 @@ func suspend_for_open(note: String) -> void:
 		"scope_history": _scope_history.duplicate(true),
 		"scale": _map_scale,
 		"offset": _map_offset,
+		"selected": true,
+		"selected_key": _selected,
 		"selected_note": note,
 	}
 
 func _restore_state(state: Dictionary) -> void:
-	_center_note = String(state.get("center_note", ""))
-	_scope = String(state.get("scope", ""))
-	_scope_active = bool(state.get("scope_active", _scope != ""))
-	_page = int(state.get("page", 0))
-	_scope_history = state.get("scope_history", []).duplicate(true)
+	_apply_nav_state(state)
 	_rebuild_keys()
 	_layout_points()
 	_build_routes()
 	_map_scale = float(state.get("scale", _map_scale))
 	_map_offset = state.get("offset", _map_offset)
+	_restore_selection(state, true)
+
+## Restore a persisted view exactly: the saved zoom/offset are re-applied
+## (clamped to the freshly computed limits) and the saved selection is shown
+## without flying the camera, so the app reopens on the same spot.
+func _restore_view_state(state: Dictionary) -> void:
+	var saved_scale := float(state.get("scale", _map_scale))
+	var saved_offset: Vector2 = state.get("offset", _map_offset)
+	_fit_to_view()
+	_map_scale = clampf(saved_scale, _min_zoom, _max_zoom)
+	_map_offset = saved_offset
+	_restore_selection(state, false)
+
+## Reapply a saved selection. `fly` glides the camera to the node (session
+## return); false keeps the camera where it is (persisted restore / refresh).
+func _restore_selection(state: Dictionary, fly: bool) -> void:
+	if not bool(state.get("selected", false)):
+		return
 	var note := String(state.get("selected_note", ""))
-	var key := _key_for_note(note)
-	if key != "":
-		_selected = key
-		_tween_to(key)
+	if _root_home != "" and note == _root_home:
+		_select_hub(fly)
+		return
+	# Prefer the note→node mapping (session return used it and it folds an
+	# off-page leaf onto its visible parent); fall back to the stored key for
+	# selections that have no note of their own (a group marker).
+	var key := ""
+	if note != "":
+		key = _key_for_note(note)
+	if key == "":
+		var stored := String(state.get("selected_key", ""))
+		if stored != "" and _keys.has(stored):
+			key = stored
+	if key != "" and _keys.has(key):
+		_select(key, fly)
+
+## A plain typed scope history from any stored value. ConfigFile hands back an
+## untyped Array; assigning that straight to the typed field would fail.
+func _coerce_history(raw: Variant) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	if raw is Array:
+		for h in raw:
+			if h is Dictionary:
+				out.append(h)
+	return out
+
+## True once the map has finished its first build — the guard for external
+## refreshes that arrive before the graph is ready.
+func is_ready() -> bool:
+	return _map_ready
+
+## Serializable snapshot of the current view, for session persistence.
+func view_state() -> Dictionary:
+	var hist: Array = []
+	for h in _scope_history:
+		hist.append({
+			"scope": String(h.get("scope", "")),
+			"scope_active": bool(h.get("scope_active", false)),
+			"page": int(h.get("page", 0)),
+		})
+	var has_selection := _menu.open
+	return {
+		"center_note": _center_note,
+		"scope": _scope,
+		"scope_active": _scope_active,
+		"page": _page,
+		"scope_history": hist,
+		"scale": _map_scale,
+		"offset": _map_offset,
+		"selected": has_selection,
+		"selected_key": _selected if has_selection else "",
+		"selected_note": String(_open_target.get(_selected, "")) if has_selection else "",
+	}
+
+## Rebuild from the current vault after an external mutation (delete / move /
+## sync). The navigation context — scope, page, camera and selection — is
+## preserved: only the changed part is re-derived and the view is never reset
+## to the overview fit. A scope that no longer exists falls back to its nearest
+## surviving ancestor.
+func refresh_graph() -> void:
+	if not _map_ready or not visible:
+		return
+	var keep_scope := _scope
+	var keep_scope_active := _scope_active
+	var keep_page := _page
+	var keep_scale := _map_scale
+	var keep_offset := _map_offset
+	var keep_selected := _selected
+	var had_selection := _menu.open
+	_resolve_maps = WikiLinks.resolve_maps()
+	_build_hierarchy()
+	_resolve_live_scope(keep_scope, keep_scope_active, keep_page)
+	_prune_history()
+	_rebuild_keys()
+	_layout_points()
+	_build_routes()
+	_build_levels()
+	# Keep the camera exactly where it was — no fit — so the update is invisible
+	# apart from the removed node.
+	_map_scale = clampf(keep_scale, _min_zoom, _max_zoom)
+	_map_offset = keep_offset
+	if had_selection and (keep_selected == "" or _keys.has(keep_selected)):
+		_reselect(keep_selected, false)
+	else:
+		_selected = ""
+		_menu.clear()
+		if blur_cb.is_valid():
+			blur_cb.call()
+	queue_redraw()
+	nav_changed.emit()
+	state_changed.emit()
+
+## Fold a remembered scope onto the freshly built hierarchy: a folder that no
+## longer exists climbs to its nearest surviving ancestor, and the saved page is
+## kept (clamped later by `_rebuild_keys`). Requires `_children` to be current.
+func _resolve_live_scope(keep_scope: String, keep_scope_active: bool, keep_page: int) -> void:
+	var candidates: Array[String] = []
+	var s := keep_scope
+	while true:
+		candidates.append(s)
+		if s == "":
+			break
+		var parent := s.get_base_dir()
+		s = parent if parent != "." else ""
+	var resolved := ""
+	for cand in candidates:
+		if cand == "" or _children.has(cand):
+			resolved = cand
+			break
+	_scope = resolved
+	_scope_active = keep_scope_active and resolved != ""
+	_page = keep_page
+
+## Drop history entries whose scope no longer exists (deleted folders).
+func _prune_history() -> void:
+	var kept: Array[Dictionary] = []
+	for h in _scope_history:
+		var hs := String(h.get("scope", ""))
+		if hs == "" or _children.has(hs):
+			kept.append(h)
+	_scope_history = kept
+
+## Re-show the menu/card for `key` without moving the camera when `fly` is off.
+func _reselect(key: String, fly: bool) -> void:
+	if key == "":
+		if _root_home != "":
+			_select_hub(fly)
+		return
+	if _keys.has(key):
+		_select(key, fly)
 
 func _key_for_note(note: String) -> String:
 	if note == _root_home:
@@ -354,6 +534,7 @@ func _enter_group(key: String) -> void:
 	_build_routes()
 	_tween_to(key)
 	queue_redraw()
+	state_changed.emit()
 
 func _is_scope_ancestor(key: String) -> bool:
 	# Any depth counts: breadcrumbs expose the full chain, so the check must
@@ -382,6 +563,7 @@ func _navigate_back() -> void:
 	else:
 		_fit_to_view()
 	queue_redraw()
+	state_changed.emit()
 
 func _go_overview() -> void:
 	_scope_history.clear()
@@ -395,6 +577,7 @@ func _go_overview() -> void:
 	_build_routes()
 	_fit_to_view()
 	queue_redraw()
+	state_changed.emit()
 
 func _change_page(delta: int) -> void:
 	_set_page(clampi(_page + delta, 0, _page_count - 1))
@@ -413,6 +596,7 @@ func _set_page(page: int) -> void:
 	_build_routes()
 	_fit_to_view()
 	queue_redraw()
+	state_changed.emit()
 
 func _is_leaf(key: String) -> bool:
 	return _children.get(key, []).is_empty()
@@ -960,6 +1144,7 @@ func _navigate_to_ancestor(target: String) -> void:
 	_menu.clear()
 	_tween_to(_selected)
 	queue_redraw()
+	state_changed.emit()
 
 # ---------------------------------------------------------------- input
 
@@ -1020,6 +1205,7 @@ func _gui_input(event: InputEvent) -> void:
 		# Trackpad two-finger pan.
 		_map_offset -= event.delta * 12.0
 		queue_redraw()
+		state_changed.emit()
 	elif event is InputEventScreenTouch:
 		if event.pressed:
 			var tmenu := _menu_hit(event.position)
@@ -1073,6 +1259,7 @@ func _gui_input(event: InputEvent) -> void:
 			if event.position.distance_to(_touch_press) > TAP_SLOP:
 				_press_moved = true
 			queue_redraw()
+			state_changed.emit()
 		accept_event()
 	elif event is InputEventMouseMotion:
 		if _dragging:
@@ -1081,6 +1268,7 @@ func _gui_input(event: InputEvent) -> void:
 			_map_offset += event.position - _drag_last
 			_drag_last = event.position
 			queue_redraw()
+			state_changed.emit()
 		else:
 			_hover = _node_at(event.position)
 			mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if _hover != "" else Control.CURSOR_ARROW
@@ -1091,6 +1279,7 @@ func _zoom_at(anchor: Vector2, factor: float) -> void:
 	_map_scale = clampf(_map_scale * factor, _min_zoom, _max_zoom)
 	_map_offset = anchor - before * _map_scale
 	queue_redraw()
+	state_changed.emit()
 
 ## Nearest node to a point — returns the note to open, not the tree key.
 func _node_at(at: Vector2) -> String:
@@ -1157,7 +1346,7 @@ func focus_note(note: String) -> bool:
 ## Focus a node: camera glides so the node and its immediate neighbours
 ## (children, parent, direct links) fit, the circle menu appears, and Main
 ## shows the focus card. Opening the note is a menu action, never a tap.
-func _select(key: String) -> void:
+func _select(key: String, fly: bool = true) -> void:
 	_selected = key
 	var child_count: int = _children.get(key, []).size()
 	_menu.show_for({
@@ -1169,19 +1358,23 @@ func _select(key: String) -> void:
 	# neighbourhood is framed in the space actually left on screen.
 	if focus_cb.is_valid():
 		focus_cb.call(String(_open_target.get(key, key)))
-	_tween_to(key)
+	if fly:
+		_tween_to(key)
 	queue_redraw()
+	state_changed.emit()
 
 ## Focus the homepage/root hub. It has no tree key (its key is ""), so the menu
 ## is opened directly rather than via `_select`. Only `Open` is offered: the
 ## homepage is the immutable vault root and cannot be deleted or entered.
-func _select_hub() -> void:
+func _select_hub(fly: bool = true) -> void:
 	_selected = ""
 	_menu.show_with(["Open"])
-	_tween_to("")
+	if fly:
+		_tween_to("")
 	if focus_cb.is_valid():
 		focus_cb.call(_root_home)
 	queue_redraw()
+	state_changed.emit()
 
 func _menu_hit(at: Vector2) -> String:
 	if not _pos.has(_selected):

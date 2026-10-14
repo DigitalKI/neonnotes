@@ -111,6 +111,9 @@ var export_crt := true  # apply CRT overlay to exported PNG/JPEG/GIF
 var crt_ui := true  # live CRT overlay on the UI — master switch for CRT FX
 var open_start_mode := "last"  # "last", "homepage" or "graph"
 var last_opened_rel := ""
+## Last graph navigation/camera state (scope, page, selection, zoom, position).
+## Persisted so a graph-default app reopens on the exact view it was left on.
+var graph_view_state := {}
 var vault_dir := VAULT_DIR
 var dev_session := false  # true when this run is editor/MCP-driven (isolated vault)
 var current_file := ""  # absolute path of the open note ("" = none)
@@ -515,6 +518,12 @@ var collapsed_folders: Dictionary = {}
 ## state can never clobber the user's real settings.
 var suppress_settings_save := false
 
+## Remember the graph view so the next launch (with the graph as start page)
+## opens on it. Written by Main after navigation settles, not per frame.
+func set_graph_view_state(state: Dictionary) -> void:
+	graph_view_state = state
+	_save_settings()
+
 func load_order() -> void:
 	order = {}
 	collapsed_folders = {}
@@ -837,6 +846,8 @@ func _load_settings() -> void:
 	var mode := String(cf.get_value("ui", "open_start_mode", open_start_mode))
 	open_start_mode = mode if mode in ["last", "homepage", "graph"] else "last"
 	last_opened_rel = String(cf.get_value("ui", "last_opened_rel", last_opened_rel))
+	var gv_state = cf.get_value("ui", "graph_view_state", graph_view_state)
+	graph_view_state = gv_state if typeof(gv_state) == TYPE_DICTIONARY else {}
 	if not PALETTES.has(palette_name):
 		palette_name = "Synthwave"
 	if not FONTS.has(font_name):
@@ -884,6 +895,7 @@ func _save_settings() -> void:
 	cf.set_value("ui", "graph_max_page", graph_max_page)
 	cf.set_value("ui", "open_start_mode", open_start_mode)
 	cf.set_value("ui", "last_opened_rel", last_opened_rel)
+	cf.set_value("ui", "graph_view_state", graph_view_state)
 	cf.set_value("vault", "dir", vault_dir)
 	cf.set_value("sync", "device_id", device_id)
 	cf.set_value("sync", "pin", sync_pin)

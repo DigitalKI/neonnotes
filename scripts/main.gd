@@ -48,6 +48,10 @@ var _focus_rel := ""
 ## Wiki-link resolve maps for the open card, rebuilt per graph open (or when
 ## the metadata index completes) — never per focus tap.
 var _card_maps: Array = []
+## Debounces graph-state settings writes: navigation (pan/zoom/select) emits
+## often, but the persisted snapshot only needs to be current when the app is
+## left, so writes are coalesced.
+var _graph_state_timer: Timer
 
 var sidebar: PanelContainer
 @onready var new_dialog: NewNoteDialog = %NewNoteDialog
@@ -156,6 +160,13 @@ func _phase_theme_layout() -> void:
 	graph_view.nav_changed.connect(_refresh_graph_nav)
 	graph_nav.nav_action.connect(func(action: String): graph_view._activate_nav(action))
 	graph_view.blur_cb = _close_focus_card
+	# Persist the graph view (graph-as-start-page) — debounced, plus on quit.
+	graph_view.state_changed.connect(_on_graph_state_changed)
+	_graph_state_timer = Timer.new()
+	_graph_state_timer.one_shot = true
+	_graph_state_timer.wait_time = 1.5
+	_graph_state_timer.timeout.connect(_persist_graph_state)
+	add_child(_graph_state_timer)
 	editor.saved_cb = func(rel: String):
 		_digest_store.invalidate(rel)
 		if focus_card.is_open() and String(focus_card.model().get("rel", "")) == rel:
@@ -240,7 +251,12 @@ func _open_start_page() -> void:
 		code_edit.visible = false
 		edit_padding.visible = false
 		content_host.visible = false
-		graph_view.open(GameManager.current_rel)
+		# Reopen on the last graph view (scope, page, selection, zoom, position)
+		# when one was saved; otherwise a fresh overview.
+		if GameManager.graph_view_state.is_empty():
+			graph_view.open(GameManager.current_rel)
+		else:
+			graph_view.open_restored(GameManager.graph_view_state)
 		_boot_mark("first-note")
 		return
 	if GameManager.open_start_mode == "last" and GameManager.last_opened_rel != "" and GameManager.notes.has(GameManager.last_opened_rel):
@@ -260,6 +276,9 @@ func _on_metadata_ready() -> void:
 
 
 func _refresh_list() -> void:
+	# Any rescan (delete / move / sync / vault switch) also invalidates the
+	# graph's node set: rebuild it in place, keeping scope/page/camera.
+	graph_view.refresh_graph()
 	var selected := GameManager.current_rel
 	var mobile_drawer_was_open := layout_component.is_mobile_layout and layout_component.drawer_open
 	vault_tree.refresh()
@@ -454,6 +473,7 @@ func _on_note_selected(fname: String) -> void:
 	# note, not behind the still-visible map (mirrors _toggle_graph's hide
 	# branch). The editor's own apply_mode() restores the note surfaces.
 	if graph_view.visible:
+		_persist_graph_state()
 		graph_view.visible = false
 		_close_focus_card()
 	# Continue opening the selected note after leaving a page. The previous note
@@ -569,6 +589,9 @@ func _open_graph_note(fname: String) -> void:
 	# back restores that navigation context and focuses this note.
 	_close_focus_card()
 	graph_view.suspend_for_open(fname)
+	# Snapshot the view before leaving it: an abrupt kill after this point
+	# (no close notification) must still reopen where the user was.
+	_persist_graph_state()
 	graph_view.visible = false
 	vault_tree.select_note(fname)
 
@@ -659,6 +682,25 @@ func _return_to_graph() -> void:
 ## Mirror the graph's page/scope state into the nav-bar component.
 func _refresh_graph_nav() -> void:
 	graph_nav.update_state(graph_view.nav_state())
+
+## Navigation changed: coalesce the settings write instead of writing on every
+## pan/zoom frame.
+func _on_graph_state_changed() -> void:
+	if _graph_state_timer != null:
+		_graph_state_timer.start()
+
+## Snapshot the graph view into settings so a graph-default app can reopen on
+## it. Ignored until the map has built (no state worth saving yet).
+func _persist_graph_state() -> void:
+	if not is_instance_valid(graph_view) or not graph_view.is_ready():
+		return
+	GameManager.set_graph_view_state(graph_view.view_state())
+
+## Save the graph view when the app is closing (desktop window close / Android
+## back), before the tree teardown frees the components.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_WM_GO_BACK_REQUEST:
+		_persist_graph_state()
 
 ## A tag chip was pressed: same path as a [[#tag]] link — fill the tree search
 ## with "#tag" and show the results there (graph filtering comes later).
@@ -773,6 +815,7 @@ func _toggle_graph() -> void:
 	if page_mode != "" and page_mode != PAGE_SETTINGS:
 		return  # a page owns the screen until it closes
 	if graph_view.visible:
+		_persist_graph_state()
 		graph_view.visible = false
 		_close_focus_card()
 		content_host.visible = not editor.source_mode

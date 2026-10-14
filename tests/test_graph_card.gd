@@ -39,8 +39,11 @@ func _ready() -> void:
 
 	_run_digest_checks(check)
 	_run_view_model_checks(check)
-	_run_card_checks(check)
-	_run_inset_checks(check)
+	# These build graphs over GameManager.notes: await them so their deferred
+	# builds finish before the next section mutates the note list.
+	await _run_card_checks(check)
+	await _run_inset_checks(check)
+	await _run_graph_state_checks(check)
 	await _run_store_checks(check)
 
 	print("CARD RESULT: %s (%d fails)" % ["OK" if _fails == 0 else "FAIL", _fails])
@@ -323,12 +326,20 @@ func _run_inset_checks(check: Callable) -> void:
 	for i in 30:
 		notes2.append("r/n%02d.md" % i)
 	var saved_notes3: Array[String] = GameManager.notes
+	# The live settings.cfg can set a small separate-node limit; pin a wide one
+	# so the folder is not collapsed into a single marker here.
+	var saved_sep: int = GameManager.graph_max_separate
+	GameManager.graph_max_separate = 1000
 	GameManager.notes = notes2
 	gv.size = Vector2(430, 940)
-	gv.mobile_fit = true
 	gv.open("")
 	await get_tree().process_frame
 	await get_tree().process_frame
+	# open() re-derives mobile_fit from the display metrics; a headless run
+	# cannot report a phone, so force the flag and re-fit to exercise the phone
+	# default (the same deferred `_fit_to_view` the app runs on a real phone).
+	gv.mobile_fit = true
+	gv._fit_to_view()
 	check.call("phone overview opens closer than fit-all", gv._map_scale > 1.0)
 	check.call("fit-all stays reachable by zooming out", gv._min_zoom < gv._map_scale)
 	var portrait_scale: float = gv._map_scale
@@ -342,6 +353,7 @@ func _run_inset_checks(check: Callable) -> void:
 	gv._fit_to_view()
 	check.call("desktop still fits everything", absf(gv._map_scale - gv._min_zoom) < 0.0001)
 	GameManager.notes = saved_notes3
+	GameManager.graph_max_separate = saved_sep
 	gv.queue_free()
 
 	# GraphView side of the card: outside taps drop the focus (blur) and the
@@ -371,6 +383,97 @@ func _run_inset_checks(check: Callable) -> void:
 	GameManager.notes = saved_notes2
 	GameManager.links = saved_links2
 	gv2.queue_free()
+
+# ------------------------------------------------------- refresh + restore
+
+## A graph update after a delete must not reset the view: scope/page, camera
+## and selection survive and only the removed node disappears. And the persisted
+## view round-trips through settings so a graph-start app reopens on it.
+func _run_graph_state_checks(check: Callable) -> void:
+	var saved_notes: Array[String] = GameManager.notes
+	var saved_titles: Dictionary = GameManager.titles
+	var saved_links: Dictionary = GameManager.links
+	var full: Array[String] = ["_homepage.md", "sec.md", "sec/one.md", "sec/two.md", "other.md"]
+
+	var gv: GraphView = load("res://scripts/render/graph_view.gd").new()
+	gv.size = Vector2(800, 600)
+	add_child(gv)
+	await get_tree().process_frame
+	GameManager.notes = full
+	GameManager.titles = {"_homepage.md": "Home", "sec.md": "Section"}
+	GameManager.links = {}
+	gv.open("")
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	gv._enter_group("sec")
+	_pin_camera(gv, 1.7, Vector2(123.0, -45.0))
+	check.call("entered subview is the scope", gv._scope == "sec" and gv._scope_active)
+	check.call("subview lists the folder children",
+		gv._page_children.has("sec/one.md") and gv._page_children.has("sec/two.md"))
+
+	# Remove one leaf from inside the subview.
+	GameManager.notes = ["_homepage.md", "sec.md", "sec/one.md", "other.md"]
+	gv.refresh_graph()
+	check.call("refresh keeps the subview scope", gv._scope == "sec")
+	check.call("refresh drops the removed node",
+		not gv._keys.has("sec/two.md") and not gv._page_children.has("sec/two.md"))
+	check.call("refresh keeps the camera position",
+		absf(gv._map_scale - 1.7) < 0.0001 and gv._map_offset == Vector2(123.0, -45.0))
+
+	# Remove the whole entered folder: fall back to the overview, not a reset.
+	GameManager.notes = ["_homepage.md", "other.md"]
+	gv.refresh_graph()
+	check.call("a deleted subview falls back to the overview",
+		gv._scope == "" and not gv._scope_active)
+	check.call("fallback keeps the camera position",
+		absf(gv._map_scale - 1.7) < 0.0001 and gv._map_offset == Vector2(123.0, -45.0))
+	gv.queue_free()
+
+	# Persisted state round-trip: capture, then reopen on it.
+	var src: GraphView = load("res://scripts/render/graph_view.gd").new()
+	src.size = Vector2(800, 600)
+	add_child(src)
+	await get_tree().process_frame
+	GameManager.notes = full
+	src.open("")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	src._enter_group("sec")
+	src._select("sec/one.md")
+	_pin_camera(src, 2.25, Vector2(-80.0, 33.0))
+	var state: Dictionary = src.view_state()
+	check.call("view_state records the subview",
+		String(state["scope"]) == "sec" and bool(state["selected"]))
+	check.call("view_state records the selection key",
+		String(state["selected_key"]) == "sec/one.md")
+
+	var dst: GraphView = load("res://scripts/render/graph_view.gd").new()
+	dst.size = Vector2(800, 600)
+	add_child(dst)
+	await get_tree().process_frame
+	dst.open_restored(state)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	check.call("restore reopens inside the subview", dst._scope == "sec")
+	check.call("restore keeps the zoom", absf(dst._map_scale - 2.25) < 0.0001)
+	check.call("restore keeps the position", dst._map_offset == Vector2(-80.0, 33.0))
+	check.call("restore reapplies the selection",
+		dst._selected == "sec/one.md" and dst._menu.open)
+	src.queue_free()
+	dst.queue_free()
+
+	GameManager.notes = saved_notes
+	GameManager.titles = saved_titles
+	GameManager.links = saved_links
+
+## Stop any in-flight focus glide and place the camera exactly, so a subsequent
+## refresh/restore can be asserted on without waiting on a tween.
+func _pin_camera(gv: GraphView, scale: float, offset: Vector2) -> void:
+	if gv._cam_tween and gv._cam_tween.is_valid():
+		gv._cam_tween.kill()
+	gv._map_scale = scale
+	gv._map_offset = offset
 
 # ------------------------------------------------------------------ store
 
