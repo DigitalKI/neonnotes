@@ -46,6 +46,21 @@ func _ready() -> void:
 		await get_tree().process_frame
 
 	var tree: Tree = vt.side_tree
+	# Opening the mobile drawer must dismiss the graph focus card. The card is a
+	# child of the shell root (outside %Content), so hiding %Content alone used
+	# to leave it floating over the tree. Close then reopen the drawer with a
+	# card showing and confirm the reopen clears it.
+	main.focus_card.show_model({"kind": "note", "title": "Probe", "tags": [],
+			"children": [], "links": [], "preview": "", "created": "", "updated": ""})
+	var card_was_open: bool = main.focus_card.is_open()
+	main.layout_component.toggle_sidebar()  # close
+	await get_tree().process_frame
+	main.layout_component.toggle_sidebar()  # reopen -> must dismiss the card
+	await get_tree().process_frame
+	var drawer_dismisses_card: bool = card_was_open and not main.focus_card.is_open()
+	print("drawer reopens with card shown, card visible before=", card_was_open,
+			" after=", main.focus_card.is_open())
+
 	print("tree global=", tree.global_position, " size=", tree.size,
 			" sidebar visible=", main.layout_component.sidebar.visible)
 	_expand_all(tree.get_root())
@@ -103,9 +118,11 @@ func _ready() -> void:
 		if tapped >= 12:
 			break
 
-	var ok := not _hold_opened
+	var ok: bool = not _hold_opened and drawer_dismisses_card
 	if _hold_opened:
 		print("MISMATCH long hold opened a note")
+	if not drawer_dismisses_card:
+		print("MISMATCH opening the drawer did not dismiss the graph focus card")
 	for rec in _rows:
 		if rec[1] != rec[2]:
 			ok = false

@@ -8,8 +8,14 @@ extends Node
 
 signal mobile_changed(is_mobile: bool)
 
+## Emitted when the mobile drawer is opened. The host uses it to dismiss any
+## floating surface that lives outside %Content (e.g. the graph focus card):
+## on mobile the drawer is full-screen, so the drawer and %Content — and
+## everything hovering over it — are mutually exclusive.
+signal drawer_opened
+
 const MOBILE_MARGIN_SIDE := 10
-const MOBILE_MARGIN_BOTTOM := 10
+const MOBILE_MARGIN_BOTTOM := 2
 
 ## Font points added to every UI/content font (set by update_layout, read by
 ## ThemeComponent/PreviewBuilder/ChartView): a size above the GameManager
@@ -30,8 +36,10 @@ var help_btn: Control
 var backlinks_btn: Control
 var graph_btn: Control
 var export_btn: Control
+var status_bar: Control
 
 var drawer_open := false
+var _keyboard_open := false
 var is_mobile_layout := false
 var _kb_h := -1
 var _caret_adjust_frames := 0
@@ -48,7 +56,14 @@ func _process(_delta: float) -> void:
 	# Poll the Android soft keyboard; re-apply insets when it shows/hides so
 	# the editor resizes and the cursor stays visible at the bottom.
 	if OS.get_name() == "Android":
+		# Android/Godot does not expose a dedicated soft-keyboard-open signal.
+		# Poll its reported height; >0 means the IME is visible.
 		var kb := DisplayServer.virtual_keyboard_get_height()
+		var keyboard_open := kb > 0
+		if keyboard_open != _keyboard_open:
+			_keyboard_open = keyboard_open
+			if status_bar != null:
+				status_bar.visible = not _keyboard_open
 		if kb != _kb_h:
 			_apply_safe_area()
 	# The keyboard reports its height before the final Android viewport/layout
@@ -163,6 +178,11 @@ func toggle_sidebar() -> void:
 	if is_mobile_layout:
 		sidebar.visible = drawer_open
 		content.visible = not drawer_open
+		# The drawer covers the whole screen: tell the host so it can drop any
+		# surface floating above %Content (the graph focus card is a root child
+		# and would otherwise stay visible over the tree).
+		if drawer_open:
+			drawer_opened.emit()
 	elif not sidebar.visible:
 		sidebar.visible = true
 

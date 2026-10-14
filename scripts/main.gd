@@ -109,6 +109,7 @@ func _phase_theme_layout() -> void:
 	layout_component.backlinks_btn = toolbar.backlinks_btn
 	layout_component.graph_btn = toolbar.graph_btn
 	layout_component.export_btn = toolbar.export_btn
+	layout_component.status_bar = status_bar
 	add_child(layout_component)
 	GameManager.palette_changed.connect(func():
 		theme_component.apply()
@@ -155,6 +156,10 @@ func _phase_theme_layout() -> void:
 	focus_card.title_opened.connect(_open_graph_note)
 	links_page.close_requested.connect(_return_to_graph)
 	links_page.link_activated.connect(_graph_link_activated)
+	# On mobile the tree drawer is full-screen; opening it must dismiss the
+	# graph focus card, which floats as a root child outside %Content and would
+	# otherwise remain on top of the tree (see LayoutComponent.drawer_opened).
+	layout_component.drawer_opened.connect(_close_focus_card)
 	# The nav chrome is a scene child of GraphView (visually editable); the
 	# view only publishes state, the bar mirrors it and sends actions back.
 	graph_view.nav_changed.connect(_refresh_graph_nav)
