@@ -15,8 +15,8 @@ const MONO_FONT := preload("res://assets/fonts/ShareTechMono-Regular.ttf")
 @onready var search_row: HBoxContainer = %SearchRow
 @onready var content_body: VBoxContainer = %ContentBody
 @onready var edit_padding: MarginContainer = %EditPadding
-@onready var settings_page: MarginContainer = %SettingsPage
-@onready var settings_component: SettingsComponent = %SettingsPage.get_node("VerticalContainer")
+@onready var settings_page: ScrollContainer = %SettingsPage
+@onready var settings_component: SettingsComponent = %SettingsPage.get_node("MarginContanier/HBoxContainer/VerticalContainer")
 @onready var content_panel: PanelContainer = %Content
 ## The note view (source editor + preview + find bar + mobile selection) is its
 ## own component; Main only routes shell-level events into it.
