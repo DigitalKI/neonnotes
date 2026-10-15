@@ -378,7 +378,9 @@ app's **Share** button can post straight into your Inbox:
   note's `source:` field.
 - An **image** is imported into `vault/media/` and embedded in its note. Sharing
   several images creates one note each.
-- **Text** becomes a plain note.
+- **Text** becomes a plain note, titled from its first line (the browser sends
+  its own "Share with…" label as the subject for a selection, which is not a
+  title — only a shared *link* is titled with the page title).
 
 Videos, audio, PDFs and other documents are **not** offered: the share sheet only
 lists NeonNotes for links and images it can actually store, so it never promises

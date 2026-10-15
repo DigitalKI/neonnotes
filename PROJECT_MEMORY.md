@@ -54,6 +54,13 @@ _Last updated: 2026-10-15 · Godot 4.7 · renderer: gl_compatibility_
   device: `SEND` resolves NeonNotes for text/plain and image/jpeg (9 filters
   each) and returns 0 for video/mp4, application/pdf and SEND_MULTIPLE video/mp4.
   Re-apply this trim when upgrading the addon.
+  **EXTRA_SUBJECT caveat (2026-10-15):** the subject is a page title only for a
+  **link** share. A **text-selection** share carries the share sheet's own label
+  ("Share with…") there, so trusting it titled notes "share with". The intake now
+  uses the subject **only when the payload is a URL**, and titles text from its
+  first line and images from the file name (a shared file's subject is just as
+  unreliable). Reported by the user after a real browser share; covered by
+  `tests/TestShareIntake.tscn`.
   **Gotcha:** the plugin declares `class_name Share`, which collided with our
   `scripts/export/share.gd` — that is now `class_name OutboundShare` (4 call
   sites in `export_component.gd`); do not rename it back. Requires

@@ -65,7 +65,7 @@ func handle_payload(data) -> String:
 	# share often carries no text at all.
 	if data.has_files():
 		for path in data.get_file_paths():
-			var rel_file := _capture_file(String(path), str(data.get_subject()))
+			var rel_file := _capture_file(String(path))
 			if rel_file != "":
 				made.append(rel_file)
 	if data.has_text():
@@ -83,14 +83,17 @@ func handle_payload(data) -> String:
 	return made[made.size() - 1]
 
 
-## A shared link arrives as EXTRA_TEXT (the URL) with EXTRA_SUBJECT carrying the
-## page title, so the subject becomes the note title. capture_link() falls back
-## to plain text for anything that is not a URL.
+## A LINK share arrives as EXTRA_TEXT (the URL) with EXTRA_SUBJECT carrying the
+## page title, so the subject becomes the note title. A TEXT-SELECTION share does
+## NOT: Android/Chrome put the share-sheet label ("Share with…") in EXTRA_SUBJECT,
+## so trusting it would title the note with that junk. Only use the subject when
+## the payload is a URL; otherwise capture_link() derives a title from the text.
 func _capture_text(text: String, subject: String) -> String:
 	var opts := {}
-	var title := subject.strip_edges()
-	if title != "":
-		opts["title"] = title
+	if text.begins_with("http://") or text.begins_with("https://"):
+		var title := subject.strip_edges()
+		if title != "":
+			opts["title"] = title
 	return Capture.capture_link(text, opts)
 
 
@@ -101,13 +104,13 @@ func _capture_text(text: String, subject: String) -> String:
 ## path the OS may delete at any time. The manifest no longer advertises those
 ## types (see addons/SharePlugin/SharePlugin.gd), so this is the safety net for a
 ## sender that forces one through.
-func _capture_file(path: String, subject: String) -> String:
+## The received file name titles an image: Android's EXTRA_SUBJECT for a shared
+## file is the same unreliable share-sheet label, so it is not trusted.
+func _capture_file(path: String) -> String:
 	if path == "":
 		return ""
 	var name := path.get_file()
-	var title := subject.strip_edges()
-	if title == "":
-		title = name.get_basename()
+	var title := name.get_basename()
 	if path.get_extension().to_lower() in MediaImport.IMAGE_EXTS:
 		var rel := Capture.capture_image(path, {"title": title})
 		if rel == "":

@@ -63,6 +63,19 @@ func _ready() -> void:
 	}))
 	_check("plain text share captured", text_rel.begins_with("Inbox/"))
 
+	# A text-selection share puts the share sheet's label in EXTRA_SUBJECT, not a
+	# title; the note must be titled from the selected text, not "Share with".
+	var sel_rel := intake.handle_payload(ReceivedScript.new({
+		"mime_type": "text/plain",
+		"text": "A meaningful highlighted sentence",
+		"subject": "Share with",
+		"file_paths": PackedStringArray(),
+	}))
+	var sel_text := FileAccess.open(vault.path_join(sel_rel), FileAccess.READ).get_as_text()
+	_check("selection share titled from the text", sel_rel.begins_with("Inbox/") \
+		and sel_text.contains('title: "A meaningful highlighted sentence"') \
+		and not sel_text.contains('title: "Share with"'))
+
 	# An IMAGE is copied into vault/media/ and embedded.
 	var img_src := "user://neonnotes-share-src.png"
 	var img := Image.create(2, 2, false, Image.FORMAT_RGBA8)
@@ -102,8 +115,8 @@ func _ready() -> void:
 	_check("empty share refused", empty_rel == "" and GameManager.inbox_notes().size() == before)
 	_check("empty share reports a message", not msgs.is_empty() and String(msgs[msgs.size() - 1]).begins_with("✗"))
 
-	_check("received fired once per usable payload", seen.size() == 3)
-	_check("badge counts every stored share", GameManager.inbox_notes().size() == 3)
+	_check("received fired once per usable payload", seen.size() == 4)
+	_check("badge counts every stored share", GameManager.inbox_notes().size() == 4)
 
 	intake.queue_free()
 	await get_tree().process_frame
