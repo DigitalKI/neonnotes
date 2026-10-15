@@ -30,7 +30,7 @@ window/handheld/orientation=6
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/godot-mcp/plugin.cfg")
+enabled=PackedStringArray("res://addons/godot-mcp/plugin.cfg", "res://addons/SharePlugin/plugin.cfg")
 
 [gui]
 
