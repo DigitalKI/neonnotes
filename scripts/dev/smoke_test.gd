@@ -228,6 +228,10 @@ func _run_smoke() -> void:
 	# could pick a row that swallows the new note into the folder.
 	GameManager.write_note("anchor_note.md", "# anchor")
 	GameManager.scan_notes()
+	# The anchor's row only exists after a rescan; without a refresh select_note()
+	# silently finds nothing and the selection stays on the Vault root, so the
+	# note was appended and this check failed for reasons unrelated to placement.
+	m._refresh_list()
 	var anchor_note := "anchor_note.md"
 	m.vault_tree.select_note(anchor_note, false)
 	m.new_dialog.name_field.text = "placed_test"
