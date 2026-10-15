@@ -22,7 +22,7 @@ fit move into **⋮**.
 | **⬇ Export** | Save or share the current note |
 | **🔗 Links** | Show backlinks for the open note |
 | **🕸 Graph** | Show the vault's link graph |
-| **⋮** | Save Now, Delete Note…, Capture to Inbox…, Help, Backlinks, Graph, the export actions, and Open Trash… |
+| **⋮** | Save Now, Move…, Delete Note…, Capture to Inbox…, Help, Backlinks, Graph, the export actions, and Open Trash… |
 
 The sidebar contains the search field, an **📥 Inbox** button, the vault tree,
 an optional backlinks panel, and **⚙ Settings**. The status bar at the bottom shows short messages and
@@ -200,8 +200,10 @@ opens the platform's default browser.
 **🕸 Graph** renders a radial map of the vault, with folders forming the
 hierarchy and notes branching from them. Click a node to open its note. Drag to
 pan, scroll the wheel or pinch to zoom; hover highlights a node, and note labels
-appear as you zoom in. **⚙ Settings → Graph neighbor levels** (1–10) controls how
-many hops out from the current note the map expands.
+appear as you zoom in. Selecting a node opens a radial menu with **Open**,
+**Move** and **Delete** (plus **Enter** on a folder); **Move** relocates that
+note or folder and re-focuses it. **⚙ Settings → Graph neighbor levels** (1–10)
+controls how many hops out from the current note the map expands.
 
 ## 10. Callouts
 
@@ -264,6 +266,15 @@ tags: project, reference
 Folders without a companion Markdown file receive a folder note automatically. A
 folder and a same-named note appear as one merged tree item. The tree supports
 moving, reordering, and deleting notes or folders.
+
+Besides dragging a row, **⋮ → 📁 Move…** relocates the **selected note or
+folder** through a dedicated page: type a destination folder (a missing path is
+created), or pick one from a folder tree shaped like the sidebar. Moving a folder
+takes its whole subtree — children, companion note and embedded media. The note
+you had open stays open where it lands, and the `[[wiki-links]]` that pointed
+at any moved note are rewritten automatically. From the graph, the focused
+node's radial menu offers the same **Move** action; there the map updates and
+re-focuses the moved node.
 
 The vault root has a protected homepage note, `_homepage.md`. It has no leaf row
 of its own — open it by selecting the **Vault** root item. The homepage cannot be
@@ -366,8 +377,9 @@ Use **⋮ → 📥 Capture to Inbox…** to capture without leaving the app:
 The Inbox is an ordinary folder in your vault (`Inbox/`, plus its companion
 `Inbox.md`), so it searches, formats and syncs exactly like the rest of your
 notes — a capture made on one device appears on the others. To file a capture,
-drag it out of Inbox into the folder it belongs to; the badge drops back to zero
-when nothing is waiting. The Inbox itself cannot be deleted.
+drag it out of Inbox into the folder it belongs to, or select it and use **⋮ →
+📁 Move…**; the badge drops back to zero when nothing is waiting. The Inbox
+itself cannot be deleted.
 
 ### Sharing into NeonNotes
 

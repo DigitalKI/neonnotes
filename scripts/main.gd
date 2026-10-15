@@ -38,6 +38,7 @@ const PAGE_VAULT := "vault"
 const PAGE_MEDIA := "media"
 const PAGE_TRASH := "trash"
 const PAGE_CAPTURE := "capture"
+const PAGE_MOVE := "move"
 const PAGE_LINK_RESOLVE := "link_resolve"
 const PAGE_GRAPH_LINKS := "graph_links"
 
@@ -46,6 +47,9 @@ const PAGE_GRAPH_LINKS := "graph_links"
 var _digest_store: GraphDigestStore
 ## The note the card currently describes (digest results arrive by rel).
 var _focus_rel := ""
+## True while the open Move page was launched from the graph circle menu, so
+## finishing the move returns to the graph and re-focuses the moved node.
+var _move_from_graph := false
 ## Wiki-link resolve maps for the open card, rebuilt per graph open (or when
 ## the metadata index completes) — never per focus tap.
 var _card_maps: Array = []
@@ -60,6 +64,7 @@ var sidebar: PanelContainer
 @onready var vault_picker: VaultPicker = %VaultPicker
 @onready var trash_page: TrashPage = %TrashPage
 @onready var capture_page: CapturePage = %CapturePage
+@onready var move_dialog: MoveDialog = %MoveDialog
 @onready var link_dialog: LinkResolveDialog = %LinkResolveDialog
 var sync_service: SyncService
 var share_intake: ShareIntake
@@ -150,6 +155,7 @@ func _phase_theme_layout() -> void:
 	settings_component.close_requested.connect(_close_settings)
 	graph_view.open_cb = _open_graph_note
 	graph_view.delete_cb = _delete_graph_note
+	graph_view.move_cb = _move_graph_note
 	graph_view.focus_cb = _focus_graph_node
 	_digest_store = GraphDigestStore.new()
 	_digest_store.name = "GraphDigestStore"
@@ -447,6 +453,9 @@ func _build_dynamic_ui() -> void:
 	# pages (new note, vault picker, media picker, sync) are scene-authored
 	# instances inside %Content; only their signals are connected here.
 	new_dialog.bind(vault_tree, editor, _refresh_list, _flash)
+	move_dialog.bind(vault_tree, _flash)
+	move_dialog.close_requested.connect(_close_page)
+	move_dialog.moved.connect(_on_note_moved)
 	vault_picker.folder_chosen.connect(_on_vault_selected)
 	media_dialog.bind(editor, func(rel: String): sync_service.note_saved(rel), _flash)
 	media_dialog.close_requested.connect(_close_page)
@@ -597,7 +606,7 @@ func _show_settings() -> void:
 ## Every page is a scene instance inside %Content, so all of them are sized
 ## like an open note. Sharing one helper keeps the hide/show rules identical.
 func _pages() -> Array[Control]:
-	return [settings_page, sync_page, new_dialog, vault_picker, media_dialog, trash_page, link_dialog, links_page, capture_page]
+	return [settings_page, sync_page, new_dialog, vault_picker, media_dialog, trash_page, link_dialog, links_page, capture_page, move_dialog]
 
 func _open_page(mode: String, page: Control) -> void:
 	editor.flush()
@@ -954,6 +963,89 @@ func _on_captured(rel: String) -> void:
 	vault_tree.select_note(rel)
 
 
+# ------------------------------------------------------------ move note / folder
+
+## The ⋮ menu's Move action: relocate the selected tree row — a note OR a whole
+## folder with its children — and, with nothing selected, the open note. The
+## note view stays open: move_path repoints GameManager (and Main remaps it when
+## a folder move carried the open note), then only the tree and graph rebuild.
+func _move_selected() -> void:
+	if editor.is_help():
+		_flash("Nothing to move")
+		return
+	var rel := ""
+	var it := vault_tree.selected_item()
+	if it != null and it != vault_tree.side_tree.get_root():
+		rel = vault_tree.node_rel(it)
+	if rel == "":
+		# No row selected: act on the open note, as before.
+		rel = GameManager.current_rel
+		rel = "" if rel == "_homepage.md" else rel
+	if rel == "":
+		_flash("Select a note or folder to move")
+		return
+	_move_from_graph = false
+	_open_page(PAGE_MOVE, move_dialog)
+	move_dialog.begin(rel)
+
+
+## The graph circle menu's Move action: relocate the focused node (a note or a
+## whole folder); when it finishes the graph returns and re-focuses the target.
+func _move_graph_note(rel: String) -> void:
+	if rel == "" or rel == "_homepage.md":
+		status_bar.flash("⌂ The homepage cannot be moved")
+		return
+	_move_from_graph = true
+	_open_page(PAGE_MOVE, move_dialog)
+	move_dialog.begin(rel)
+
+
+## A move completed. The page never touched the editor buffer, so "keep the note
+## open" is simply leaving it be; the tree and graph are rebuilt once here, then
+## the view that started the move is restored.
+func _on_note_moved(old_rel: String, new_rel: String) -> void:
+	var from_graph := _move_from_graph
+	_move_from_graph = false
+	# A folder move carries the open note along, but move_path only repoints
+	# current_rel when the note itself was the target — remap it here so the
+	# editor keeps saving to the note's new path.
+	var cur := GameManager.current_rel
+	if cur != "" and not GameManager.notes.has(cur):
+		var remapped := PathRemap.moved(cur, old_rel, new_rel)
+		if GameManager.notes.has(remapped):
+			GameManager.current_rel = remapped
+			GameManager.current_file = GameManager.vault_abs() + "/" + remapped
+	# Same housekeeping a drag does: drop directories the move emptied and
+	# re-run an active search before the tree is rebuilt.
+	vault_tree.after_external_move(old_rel)
+	_refresh_list()
+	if from_graph:
+		_return_to_graph()
+		graph_view.refresh_graph()
+		if not graph_view.focus_note(new_rel):
+			# Off-page or folded into a group: open the note, or climb to the
+			# nearest visible ancestor scope for a folder.
+			if new_rel.ends_with(".md"):
+				_open_graph_note(new_rel)
+			else:
+				graph_view.focus_note(new_rel.get_base_dir())
+	else:
+		_close_page()
+		# Keep the note view as it was; move the tree selection to the moved
+		# node (a merged folder row carries its companion as metadata).
+		vault_tree.select_note(_selection_rel_after_move(new_rel), false)
+	_flash("Moved → " + new_rel)
+
+
+## The tree row to select after a move: a note's own path, or a folder's
+## companion note (merged folder rows are matched by their companion metadata).
+func _selection_rel_after_move(new_rel: String) -> String:
+	if new_rel.ends_with(".md"):
+		return new_rel
+	var companion := new_rel + ".md"
+	return companion if GameManager.notes.has(companion) else new_rel
+
+
 # ------------------------------------------------------------ trash
 
 ## Open the Trash page, purging expired items first so the list is honest.
@@ -1004,6 +1096,8 @@ func _on_more_action(id: int) -> void:
 		MoreMenuComponent.ID_DELETE_NOTE:
 			if not vault_tree.side_tree.get_selected() == vault_tree.side_tree.get_root():
 				_delete_current_note()
+		MoreMenuComponent.ID_MOVE:
+			_move_selected()
 		MoreMenuComponent.ID_TRASH:
 			_open_trash()
 		MoreMenuComponent.ID_HELP:

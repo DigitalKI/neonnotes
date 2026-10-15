@@ -845,6 +845,15 @@ func _perform_drop(src: String, it: TreeItem, section: int) -> void:
 		select_note(new_rel)
 	flash_cb.call("Moved → " + new_rel)
 
+## Housekeeping after a move performed OUTSIDE the drag path (the Move page
+## from the ⋮ menu / graph circle menu): drop directories the move emptied
+## and re-run any active search so the filtered tree is not left stale. The drag
+## path does the same inside _perform_drop.
+func after_external_move(old_rel: String) -> void:
+	prune_empty_ancestors(old_rel)
+	if _search_showing_results:
+		_restart_search()
+
 ## Invalidate cached results and re-run the current query immediately
 ## (used after moves/reorders change note paths).
 func _restart_search() -> void:

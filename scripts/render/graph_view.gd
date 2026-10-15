@@ -12,6 +12,7 @@ class_name GraphView extends Control
 
 var open_cb := Callable()       # circle menu: open the node's note
 var delete_cb := Callable()     # circle menu: delete the node's note
+var move_cb := Callable()       # circle menu: move the node (note or folder)
 var focus_cb := Callable()      # node selected: Main shows the focus card
 var blur_cb := Callable()       # focus dropped (tap outside): Main hides the card
 ## Emitted whenever page/scope state changes: the nav-bar component (a scene
@@ -1353,6 +1354,7 @@ func _select(key: String, fly: bool = true) -> void:
 		"children": child_count,
 		"oversized": child_count > max(1, GameManager.graph_max_separate),
 		"ancestor": _scope != "" and _is_scope_ancestor(key),
+		"cluster": _cluster_nodes.has(key),
 	})
 	# The card first: its mobile inset is part of the camera fit, so the
 	# neighbourhood is framed in the space actually left on screen.
@@ -1403,11 +1405,25 @@ func _activate_menu(action: String) -> void:
 		_enter_group(_selected)
 		return
 	_menu.clear()
-	if action == "Open" and open_cb.is_valid() and note != "":
+	if action == "Move":
+		var target := _move_target_rel()
+		if move_cb.is_valid() and target != "":
+			move_cb.call(target)
+	elif action == "Open" and open_cb.is_valid() and note != "":
 		open_cb.call(note)
 	elif action == "Delete" and delete_cb.is_valid() and note != "":
 		delete_cb.call(note)
 	queue_redraw()
+
+## The vault path the circle menu's Move acts on: a container node moves the
+## whole folder (its companion note travels with it), a leaf moves the note.
+## Virtual group markers and the homepage hub have no path, so they return "".
+func _move_target_rel() -> String:
+	if _selected == "" or _cluster_nodes.has(_selected):
+		return ""
+	if not _children.get(_selected, []).is_empty():
+		return _selected
+	return String(_open_target.get(_selected, ""))
 
 ## Glide the camera so the node plus its immediate neighbourhood (children,
 ## parent, direct links) fits the view — fit, not magnify: the zoom lands so

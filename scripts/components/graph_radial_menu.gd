@@ -26,6 +26,10 @@ var actions: Array[String] = []
 ## Keeps every menu label in one place rather than scattered through GraphView.
 func show_for(ctx: Dictionary) -> void:
 	var list: Array[String] = ["Open", "Delete"]
+	# "Move" relocates a real note or folder; virtual group markers have no
+	# path to move, so they keep the plain Open/Delete pair.
+	if not bool(ctx.get("cluster", false)):
+		list.insert(1, "Move")
 	var kids := int(ctx.get("children", 0))
 	if kids > 0:
 		list.append("Group %d" % kids if bool(ctx.get("oversized", false)) else "Enter")

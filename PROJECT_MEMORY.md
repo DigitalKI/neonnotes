@@ -89,6 +89,37 @@ _Last updated: 2026-10-15 · Godot 4.7 · renderer: gl_compatibility_
   `⋮ → 📥 Capture to Inbox…`, and `vault_tree.inbox_requested` →
   `Main._open_inbox`. Covered by `tests/TestCapture.tscn` (in `run_tests.sh`).
   **Not yet done:** *receiving* the OS share sheet — see §3 "Next up".
+- **Move page + graph Move (2026-10-15):** filing a note no longer needs a
+  precise drag. `scripts/components/move_dialog.gd` (+ scene
+  `scenes/components/move_dialog.tscn`) is a scene page inside `%Content`
+  (`PAGE_MOVE`, in `Main._pages()`) that relocates a note **or folder**: the
+  destination is either **typed** into a LineEdit (a missing folder path is
+  created by `move_path`) or **explored** in a Tree built from the vault's real
+  folders (dot-folders hidden; the source folder and its descendants, and a
+  note's own companion folder, are omitted so a move can never nest into
+  itself). It **reuses `VaultTreeComponent.move_path()`**, so wiki-link
+  rewriting, the ordering remap, sync tombstones and folder-companion travel
+  are byte-identical to a drop — a **whole folder moves with its children,
+  companion note and embedded media**, and every `[[link]]` into the subtree is
+  rewritten. Entry points: `⋮ → 📁 Move…` (`MoreMenuComponent.ID_MOVE=34`,
+  item authored in `toolbar.tscn`) targets the **selected tree row — a note OR a
+  whole folder** — and falls back to the open note when nothing is selected
+  (`Main._move_selected`); and a **Move** button in the graph radial menu
+  (`GraphRadialMenu.show_for` adds it for real nodes only;
+  `GraphView.move_cb`/`_move_target_rel()` resolve the node — a container
+  moves the whole folder, a leaf moves the note, and virtual group
+  markers/hub are skipped). Aftermath is origin-specific in
+  `Main._on_note_moved`: a **⋮** move keeps the open note (the page never
+  touches the editor buffer; `move_path` repoints `current_rel`, and a folder
+  move that carried the open note is remapped via `PathRemap.moved`), while a
+  **graph** move returns to the map and re-focuses the moved node. Both paths
+  run the same post-move housekeeping a drag does
+  (`VaultTreeComponent.after_external_move`: prune emptied dirs + restart an
+  active search) and re-select the moved node in the tree
+  (`Main._selection_rel_after_move` maps a folder to its companion row).
+  Covered by `tests/TestMoveDialog.tscn` (in `run_tests.sh`; notes AND whole
+  folders, via ⋮ and the radial menu). `docs/help.md` stays a single document
+  (still ~400 lines); split it only if it grows past comfortable scrolling.
 - **Smoke ordering check repaired (2026-10-15):** "new note is ordered directly
   below the selected note" had been failing since `d2bdcfe` (2026-10-11). That
   commit switched the anchor to a freshly written `anchor_note.md` but never
@@ -1074,6 +1105,7 @@ _These OVERRIDE the skill's defaults for this project._
 | `res://scripts/main.gd` | Shell wiring only: boot phases, page router, control handlers → components; smoke test |
 | `res://scripts/components/share_intake.gd` | OS share-sheet intake (`ShareIntake`): creates the addons/SharePlugin `Share` node only where its singleton exists, routes payloads into `Capture`; `handle_payload()` is plugin-free and testable off-platform |
 | `res://scripts/common/capture.gd` | Inbox capture API (`capture_text/link/image`) — shared by the Capture page and the share intake; the one entry point for new capture sources |
+| `res://scripts/components/move_dialog.gd` | Move page (scene `move_dialog.tscn`): relocate a note/folder by typing a path or exploring a folder tree; reuses `VaultTreeComponent.move_path()` |
 | `res://scripts/components/note_editor.gd` | Note view (script on `%Content`): editor+preview, find bar, mobile selection, autosave/save, title/tags, mode/help, reload-on-sync |
 | `res://scripts/common/GameManager.gd` | Autoload — global state, scan, palettes, settings, link index |
 | `res://scripts/common/dev_session.gd` | Static editor/MCP dev-session detection (isolates agent runs from the real vault) |
@@ -1149,6 +1181,14 @@ _These OVERRIDE the skill's defaults for this project._
   `get_drop_section_at_position()` — Godot's `Tree` already adds
   `v_scroll`/`h_scroll` internally, so doing it again breaks hit-testing as
   soon as the list is scrolled (regression fixed 2026-09-24).
+- **Move always goes through `move_path()`**: the ⋮ Move page and the graph
+  circle-menu Move must both call `VaultTreeComponent.move_path()` so link
+  rewriting, the order remap and sync tombstones stay identical to a drop — and
+  the page must never touch the editor buffer (a ⋮ move keeps the open note on
+  screen; a graph move returns to the map and re-focuses). A move done outside
+  the drag path must also call `VaultTreeComponent.after_external_move(old_rel)`
+  (prune emptied dirs + restart the active search). Never reimplement a move
+  with `DirAccess.rename_absolute` directly.
 - **Link index consistency**: anything changing note files without
   `write_note()` must call `scan_notes()` after, or moves can miss links.
 - **The homepage has no tree leaf row.** `_homepage.md` is opened through the

@@ -7,6 +7,7 @@ extends PopupMenu
 ## MoreBtn.pressed (same pattern as export_menu.tscn).
 
 const ID_SAVE_NOW := 30
+const ID_MOVE := 34
 const ID_DELETE_NOTE := 31
 const ID_TRASH := 32
 const ID_CAPTURE := 33

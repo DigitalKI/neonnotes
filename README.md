@@ -86,6 +86,15 @@ documents are not offered, since NeonNotes cannot store them. Toggle the
 `Share to NeonNotes` entry in **⚙ Settings**.
 
 
+### 📁 Moving notes
+**⋮ → 📁 Move…** relocates the **selected note or folder** without leaving the
+page: type a destination folder (a missing path is created on the spot) or pick
+one from a folder tree. Moving a folder takes its whole subtree — children,
+companion note and embedded media. The note you had open stays open where it
+lands. In the **🕸 Graph**, a node's radial menu offers the same **Move** action;
+the map updates and re-focuses the moved node. Every moved note has the
+`[[wiki-links]]` that point at it rewritten automatically.
+
 ### 📡 LAN sync — local, per-vault, no cloud
 Pair two devices over your local network and they keep a vault in step:
 discovery over **UDP 47770**, transfers over **TCP 47771**, eight-word pairing

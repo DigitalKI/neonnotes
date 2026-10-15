@@ -42,6 +42,9 @@ run_godot_test "CAPTURE RESULT: OK" --headless --path . tests/TestCapture.tscn
 run_godot_test "SHARE INTAKE RESULT: OK" --headless --path . tests/TestShareIntake.tscn
 # Trash: recoverable deletes, dot-hidden, sync-excluded, collision restore, purge.
 run_godot_test "TRASH RESULT: OK" --headless --path . tests/TestTrash.tscn
+# Move page: relocate a note from the ⋮ menu (stays open) and the graph circle
+# menu (returns + re-focuses), rewriting wiki-links and guarding self-nesting.
+run_godot_test "MOVE RESULT: OK" --headless --path . tests/TestMoveDialog.tscn
 # Dev/MCP session isolation: NEONNOTES_DEV=1 must redirect the boot to the
 # disposable dev vault and never persist it (keeps agent runs off the real vault).
 NEONNOTES_DEV=1 run_godot_test "DEV ISOLATION RESULT: OK" --headless --path . tests/TestDevIsolation.tscn
