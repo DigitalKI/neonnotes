@@ -26,6 +26,30 @@ _Last updated: 2026-10-15 · Godot 4.7 · renderer: gl_compatibility_
 
 ## 2. Current state (present-tense facts — git is the changelog)
 
+- **OS share-sheet intake (2026-10-15):** incoming shares are handled by
+  `addons/SharePlugin` (cengiz-pz, v2 EditorExportPlugin) + `addons/GMPShared`;
+  both are enabled in `project.godot [editor_plugins]`. New
+  `scripts/components/share_intake.gd` (`ShareIntake`, wired in a new
+  `main.gd _phase_share()`) instantiates the plugin's `Share` node **only where
+  `Engine.has_singleton("SharePlugin")`** — desktop builds construct nothing, so
+  no plugin error is logged and the test suite stays plugin-free — then calls
+  `set_share_target(GameManager.share_target_enabled)`. Received payloads route
+  through `handle_payload()` (untyped duck-typing on the plugin's
+  ReceivedSharedData, so it is hermetically testable) into `Capture`:
+  EXTRA_TEXT + EXTRA_SUBJECT → `capture_link()` (the subject becomes the title,
+  `source:` keeps the URL), images → `capture_image()` into `vault/media/`, and
+  any other file → a note naming it (a cache copy cannot be embedded). main
+  unifies the whole payload into ONE rescan + `_refresh_list()` and opens the
+  newest capture. `GameManager.share_target_enabled` (persisted `[share] target`)
+  drives it, with a **⚙ Settings ▸ Share to NeonNotes** row (disabled off-platform)
+  and a `share_target_changed` signal that re-toggles the activity live.
+  **Gotcha:** the plugin declares `class_name Share`, which collided with our
+  `scripts/export/share.gd` — that is now `class_name OutboundShare` (4 call
+  sites in `export_component.gd`); do not rename it back. Requires
+  `gradle_build/use_gradle_build=true` (set in both Android presets) plus a
+  one-time *Project ▸ Install Android Build Template…*, because Godot only dexes a
+  plugin AAR through Gradle. Covered by `tests/TestShareIntake.tscn`.
+  **Not yet verified on a device.**
 - **Inbox + capture (2026-10-15):** the Inbox is `vault/Inbox/` + companion
   `Inbox.md` — an **ordinary vault folder, not a virtual view**, so the existing
   per-vault sync ships captures between devices with no extra plumbing (it is
@@ -746,16 +770,18 @@ _Last updated: 2026-10-15 · Godot 4.7 · renderer: gl_compatibility_
   `vault_tree_component.gd` (1327 lines) into tree_builder + drag_handler
   behind the facade.
 - **Next up:**
-  - **Inbox / Share-to Phase 2 (Android share sheet):** receive `ACTION_SEND`
-    (`text/plain`, `image/*`) and `ACTION_VIEW` (`http(s)`) from the OS share
-    sheet and feed them straight into `Capture.capture_text/link/image()`. Godot
-    4.7 core does **not** surface inbound intents, so this needs
-    `gradle_build/use_gradle_build=true` plus a minimal Android plugin (a Java
-    activity hook capturing `getIntent()`/`onNewIntent` and exposing the
-    payload to GDScript) and matching `intent-filter`s in the merged
-    `AndroidManifest.xml`; `JavaClassWrapper`/`AndroidRuntime` (already used by
-    `scripts/export/share.gd`) only call *out*. Phase 1 — folder, capture,
-    pinned/badged row, capture page — is in place.
+  - **Share-to leftovers (2026-10-15):** the intake is wired but **unverified
+    on a device** — export a debug APK (needs the Gradle build template), share a
+    link from Chrome and an image from Photos, and confirm both land in the Inbox.
+    The plugin's `ACTION_SEND` filters cover text/image/video/audio/application
+    and `SEND_MULTIPLE`; `ACTION_VIEW` (`http(s)` from a browser's "open with")
+    is **not** registered. iOS only gains "Open With" document types
+    (`CFBundleDocumentTypes` via the plugin's `share_target/enable_share_target`
+    export option, with `ios/plugins/SharePlugin.*.xcframework` already in the
+    repo) — appearing in the iOS *share sheet* needs a separate Share Extension
+    target. Consolidate the two outbound paths when convenient:
+    `scripts/export/share.gd` (`OutboundShare`, JNI/MediaStore) now overlaps the
+    plugin's `share_text/share_file`.
   - **Graph-first direction (proposed 2026-09-29):** make the graph the center
     of the app rather than a toggle — semantic-zoom node cards/digests
     ("what's inside"), tag + content search filters, explicit folder
@@ -969,6 +995,10 @@ _These OVERRIDE the skill's defaults for this project._
   © 2026 LuoHan; bundled fonts (Orbitron/ShareTechMono/VT323) are SIL OFL but
   ship without their OFL notices in-repo — include them if fonts are
   redistributed.
+- **`addons/SharePlugin` owns `class_name Share`** (2026-10-15): our
+  outbound helper in `scripts/export/share.gd` had the same name, which is a
+  fatal duplicate global class. Ours is `OutboundShare`; renaming it back (or
+  adding another `Share` class) breaks the whole project load.
 - **godot-mcp/godot_ai addons are AI tooling drivers** — keep installed; the
   `McpRuntime` autoload in project.godot is required for runtime eval. The
   autoload is (re)written by the plugin on enable, so it need not be committed
@@ -982,6 +1012,8 @@ _These OVERRIDE the skill's defaults for this project._
 |---|---|
 | `res://scenes/main/Main.tscn` | Authored UI shell; instances component subscenes |
 | `res://scripts/main.gd` | Shell wiring only: boot phases, page router, control handlers → components; smoke test |
+| `res://scripts/components/share_intake.gd` | OS share-sheet intake (`ShareIntake`): creates the addons/SharePlugin `Share` node only where its singleton exists, routes payloads into `Capture`; `handle_payload()` is plugin-free and testable off-platform |
+| `res://scripts/common/capture.gd` | Inbox capture API (`capture_text/link/image`) — shared by the Capture page and the share intake; the one entry point for new capture sources |
 | `res://scripts/components/note_editor.gd` | Note view (script on `%Content`): editor+preview, find bar, mobile selection, autosave/save, title/tags, mode/help, reload-on-sync |
 | `res://scripts/common/GameManager.gd` | Autoload — global state, scan, palettes, settings, link index |
 | `res://scripts/common/dev_session.gd` | Static editor/MCP dev-session detection (isolates agent runs from the real vault) |
