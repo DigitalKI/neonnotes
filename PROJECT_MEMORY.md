@@ -5,7 +5,7 @@
 > decisions, gotchas) — history lives in git, `git log` is the changelog.
 > Size budget ~250 lines: compact in-session if exceeded.
 
-_Last updated: 2026-10-13 · Godot 4.7 · renderer: gl_compatibility_
+_Last updated: 2026-10-15 · Godot 4.7 · renderer: gl_compatibility_
 
 ---
 
@@ -26,6 +26,34 @@ _Last updated: 2026-10-13 · Godot 4.7 · renderer: gl_compatibility_
 
 ## 2. Current state (present-tense facts — git is the changelog)
 
+- **Inbox + capture (2026-10-15):** the Inbox is `vault/Inbox/` + companion
+  `Inbox.md` — an **ordinary vault folder, not a virtual view**, so the existing
+  per-vault sync ships captures between devices with no extra plumbing (it is
+  neither a dot-name nor `exports/`, so `_valid_sync_path` accepts it; captured
+  images land in `vault/media/` per the media invariant). Only its
+  **presentation** is special: `VaultTreeComponent.refresh()` creates the row
+  first and pre-registers `folders[INBOX_DIR]` so pass 1 nests captures inside
+  it instead of duplicating, labels it `📥 Inbox (N)` from
+  `GameManager.inbox_notes()`, and re-asserts pin/expand/badge after the
+  recursive passes. `GameManager.ensure_inbox()` (called from `scan_paths()`)
+  mints the folder + companion on an empty vault, and `delete_node()` protects
+  both names. New `scripts/common/capture.gd` (`Capture.capture_text/link/
+  image`) writes the note, registers the path in `GameManager.notes`
+  (`write_note()` only refreshes *metadata*, never the path list), and returns
+  the rel path — it is the single entry point an Android share intent will call
+  later. UI: `%InboxBtn` in `side_panel.tscn` (opens the mobile drawer, then
+  `vault_tree.open_inbox()` reveals the row), a scene-authored `%CapturePage`
+  inside `%Content` like the other pages, reachable from
+  `⋮ → 📥 Capture to Inbox…`, and `vault_tree.inbox_requested` →
+  `Main._open_inbox`. Covered by `tests/TestCapture.tscn` (in `run_tests.sh`).
+  **Not yet done:** *receiving* the OS share sheet — see §3 "Next up".
+- **Smoke ordering check repaired (2026-10-15):** "new note is ordered directly
+  below the selected note" had been failing since `d2bdcfe` (2026-10-11). That
+  commit switched the anchor to a freshly written `anchor_note.md` but never
+  refreshed the tree, so `select_note()` silently found no row, the selection
+  stayed on the Vault root, and `_apply_order()` appended the new note at the
+  end. The check now calls `m._refresh_list()` after the anchor write, so it
+  validates placement again (smoke is green).
 - **Mobile drawer dismisses the graph focus card (2026-10-13):** tapping a
   node then opening the tree left the focus card floating *over* the tree — it
   is a shell-root child (outside `%Content`), so hiding `%Content` for the
@@ -718,6 +746,16 @@ _Last updated: 2026-10-13 · Godot 4.7 · renderer: gl_compatibility_
   `vault_tree_component.gd` (1327 lines) into tree_builder + drag_handler
   behind the facade.
 - **Next up:**
+  - **Inbox / Share-to Phase 2 (Android share sheet):** receive `ACTION_SEND`
+    (`text/plain`, `image/*`) and `ACTION_VIEW` (`http(s)`) from the OS share
+    sheet and feed them straight into `Capture.capture_text/link/image()`. Godot
+    4.7 core does **not** surface inbound intents, so this needs
+    `gradle_build/use_gradle_build=true` plus a minimal Android plugin (a Java
+    activity hook capturing `getIntent()`/`onNewIntent` and exposing the
+    payload to GDScript) and matching `intent-filter`s in the merged
+    `AndroidManifest.xml`; `JavaClassWrapper`/`AndroidRuntime` (already used by
+    `scripts/export/share.gd`) only call *out*. Phase 1 — folder, capture,
+    pinned/badged row, capture page — is in place.
   - **Graph-first direction (proposed 2026-09-29):** make the graph the center
     of the app rather than a toggle — semantic-zoom node cards/digests
     ("what's inside"), tag + content search filters, explicit folder
