@@ -576,6 +576,15 @@ _Last updated: 2026-10-15 · Godot 4.7 · renderer: gl_compatibility_
   so `_ready` (and therefore the enable) never runs — that is what blocked the
   first device verification attempt, not a code fault. Godot's plugin registry
   logging `Initializing Godot plugin SharePlugin` confirms the AAR loads.
+  `ShareIntake.start()` used to **return silently** when it could not enable the
+  target — the same early-exit that keeps desktop quiet also hid this failure (no
+  warning, no log). It now warns on Android/iOS when the singleton is missing and
+  prints the **effective** state after toggling
+  (`[share] target active=true (requested true)`), so it can never fail quietly
+  again. Verified on the SM-A165M 2026-10-15: with the app open,
+  `adb shell cmd package query-activities -a android.intent.action.SEND -t text/plain`
+  resolves `com.neonnotes.app` (9 filters), same for `image/jpeg`, `video/mp4`
+  and `application/pdf`, and for `SEND_MULTIPLE`.
 - **Android export gotcha (2026-10-08):** the "Android (Release)" preset (preset.1)
   had `permissions/internet=false` while "Android" (preset.0) had it true — a
   release APK exported without `android.permission.INTERNET` makes every
@@ -797,10 +806,10 @@ _Last updated: 2026-10-15 · Godot 4.7 · renderer: gl_compatibility_
 - **Next up:**
   - **Share-to leftovers (2026-10-15):** the intake is wired and the debug APK
     builds with the plugin correctly packaged, but the end-to-end share has **not
-    been observed on a device yet** (the first attempt hit a dozing, locked phone,
-    so the app never rendered a frame and never enabled the share target). Next:
-    unlock the phone, open NeonNotes once, then share a link from Chrome and an
-    image from Photos and confirm both land in the Inbox.
+    been observed on a device yet**, but the enablement half is now verified on
+    device (see the share-target bullet in §7). Next: with the phone awake, share
+    a link from Chrome and an image from Photos at NeonNotes and confirm both land
+    in the Inbox and sync to the desktop.
     The plugin's `ACTION_SEND` filters cover text/image/video/audio/application
     and `SEND_MULTIPLE`; `ACTION_VIEW` (`http(s)` from a browser's "open with")
     is **not** registered. iOS only gains "Open With" document types

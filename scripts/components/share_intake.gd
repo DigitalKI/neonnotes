@@ -31,6 +31,10 @@ func is_available() -> bool:
 ## Create (once) and enable/disable the share-target. No-op off-platform.
 func start(enabled: bool) -> void:
 	if not is_available():
+		# A mobile build is expected to ship the singleton. Without this warning a
+		# plugin that failed to package would silently never appear in the sheet.
+		if OS.get_name() in ["Android", "iOS"]:
+			push_warning("ShareIntake: SharePlugin singleton missing — enable addons/SharePlugin and export with the Gradle build")
 		return
 	if share_node == null:
 		share_node = SharePluginScript.new()
@@ -38,6 +42,9 @@ func start(enabled: bool) -> void:
 		add_child(share_node)
 		share_node.share_received.connect(_on_share_received)
 	share_node.set_share_target(enabled)
+	# The share target is toggled through PackageManager, so the *effective*
+	# state is what matters: a mismatch here means no share-sheet entry.
+	print("[share] target active=%s (requested %s)" % [share_node.is_share_target(), enabled])
 
 
 func set_enabled(enabled: bool) -> void:
