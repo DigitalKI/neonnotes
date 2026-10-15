@@ -8,9 +8,11 @@ extends PanelContainer
 
 signal note_requested(fname: String)
 signal delete_requested
+signal inbox_requested
 
 @onready var side_tree: Tree = %SideTree
 @onready var tree_delete_btn: Button = %TreeDeleteBtn
+@onready var inbox_btn: Button = %InboxBtn
 @onready var backlinks_panel: PanelContainer = %BacklinksPanel
 @onready var backlinks_box: VBoxContainer = %BacklinksBox
 @onready var config_btn: Button = %ConfigBtn
@@ -101,6 +103,7 @@ func build() -> void:
 	search.text_changed.connect(_on_search_changed)
 	_setup_tag_suggest()
 	tag_browse_btn.pressed.connect(_on_tag_browse_pressed)
+	inbox_btn.pressed.connect(func(): inbox_requested.emit())
 	if _tree_uses_builtin_activation():
 		side_tree.item_activated.connect(_on_tree_selected)
 	# Match the editor's touch-friendly scrollbar width. Tree exposes its
@@ -535,8 +538,20 @@ func refresh() -> void:
 		_search_render_index = 0
 		_render_search_batch()
 		return
-	# build folder hierarchy from relative paths
+	# The Inbox is a SPECIAL folder by presentation only: a plain vault folder
+	# (GameManager.INBOX_DIR) pinned first and always visible, even when empty.
+	# Pre-register it in `folders` so pass 1 nests captures inside this row
+	# instead of creating a duplicate.
 	var folders := {}
+	var inbox_rel: String = GameManager.INBOX_DIR
+	var inbox_item := side_tree.create_item(root)
+	inbox_item.set_text(0, _inbox_label())
+	inbox_item.set_tooltip_text(0, "Inbox — captured links, images and text")
+	inbox_item.set_metadata(0, inbox_rel + ".md")  # clicking opens the companion note
+	inbox_item.set_selectable(0, true)
+	# Inbox starts expanded; a user's collapse choice persists once made.
+	inbox_item.collapsed = bool(GameManager.collapsed_folders.get(inbox_rel, false))
+	folders[inbox_rel] = inbox_item
 	# pass 1: folders first, so a note + folder sharing a name merge into one
 	# node (e.g. "medic.md" + "medic/" -> one row that opens the note)
 	for n in visible_notes():
@@ -585,6 +600,14 @@ func refresh() -> void:
 			if DirAccess.dir_exists_absolute(folder_abs):
 				continue
 			_add_note_leaf(root, n)
+	# Pinned + badged: the recursive passes above can re-set the row's collapse
+	# state from a saved folder path, so normalize the Inbox row last.
+	if is_instance_valid(inbox_item):
+		inbox_item.collapsed = bool(GameManager.collapsed_folders.get(inbox_rel, false))
+		inbox_item.set_text(0, _inbox_label())
+		var first := root.get_first_child()
+		if first != null and first != inbox_item:
+			inbox_item.move_before(first)
 ## Search results keep their real folder hierarchy (folders along the paths of
 ## matched notes only), so rows remain valid drag targets within the tree.
 ## Folder-as-note companions are merged into their folder row exactly like the
@@ -1121,6 +1144,17 @@ func _open_tree_item(item: TreeItem) -> void:
 	if fname != "":
 		note_requested.emit(fname)
 
+## Badge text for the pinned Inbox row: how many captures are unreviewed.
+func _inbox_label() -> String:
+	var n := GameManager.inbox_notes().size()
+	return "📥 Inbox" if n == 0 else "📥 Inbox (%d)" % n
+
+
+## Jump to the Inbox: reveal its row and open the companion note. The host
+## opens the mobile drawer first — a hidden tree cannot show a reveal.
+func open_inbox() -> void:
+	select_note(GameManager.INBOX_DIR + ".md", true)
+
 func select_note(fname: String, open_note := true) -> void:
 	# The homepage has no leaf row — it is opened through the Vault root item
 	# (see _refresh_list). Matching on metadata alone would miss it, so a graph
@@ -1224,6 +1258,9 @@ func delete_selected_node() -> void:
 func delete_node(rel: String = "", keep_children: bool = false, confirm: bool = true) -> void:
 	if rel == "_homepage.md":
 		flash_cb.call("⌂ The homepage cannot be deleted")
+		return
+	if rel == GameManager.INBOX_DIR or rel == GameManager.INBOX_DIR + ".md":
+		flash_cb.call("📥 The Inbox cannot be deleted — drag captures out to file them")
 		return
 	if rel == "":
 		var it := selected_item()

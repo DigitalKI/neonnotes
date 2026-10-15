@@ -22,10 +22,10 @@ fit move into **⋮**.
 | **⬇ Export** | Save or share the current note |
 | **🔗 Links** | Show backlinks for the open note |
 | **🕸 Graph** | Show the vault's link graph |
-| **⋮** | Save Now, Delete Note…, Help, Backlinks, Graph, the export actions, and Open Trash… |
+| **⋮** | Save Now, Delete Note…, Capture to Inbox…, Help, Backlinks, Graph, the export actions, and Open Trash… |
 
-The sidebar contains the search field, the vault tree, an optional backlinks
-panel, and **⚙ Settings**. The status bar at the bottom shows short messages and
+The sidebar contains the search field, an **📥 Inbox** button, the vault tree,
+an optional backlinks panel, and **⚙ Settings**. The status bar at the bottom shows short messages and
 a small sync indicator (grey = not paired, red = paired/error, gold = syncing,
 green = up to date).
 
@@ -345,3 +345,26 @@ drag it. Rotate to landscape when working with wide tables or charts.
 
 The Help page is built into the application and is not part of your vault, so it
 is never synchronized.
+
+## 18. Inbox and capture
+
+**📥 Inbox** is where captured material lands before you file it. The button
+sits at the top of the sidebar next to the search field; it opens the Inbox row,
+which is pinned to the top of the vault tree and shows how many captures are
+waiting.
+
+Use **⋮ → 📥 Capture to Inbox…** to capture without leaving the app:
+
+- **📋 Paste** pulls in the clipboard, then **✓ Capture** saves it. A pasted URL
+  becomes a link note (the URL is kept in the note's `source:` field); anything
+  else becomes a plain note.
+- **🖼 Image…** imports a picture — the file is stored under `vault/media/` and
+  the new note embeds it.
+- A title is optional; without one, the first line (or the link's host) names the
+  note.
+
+The Inbox is an ordinary folder in your vault (`Inbox/`, plus its companion
+`Inbox.md`), so it searches, formats and syncs exactly like the rest of your
+notes — a capture made on one device appears on the others. To file a capture,
+drag it out of Inbox into the folder it belongs to; the badge drops back to zero
+when nothing is waiting. The Inbox itself cannot be deleted.

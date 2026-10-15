@@ -70,6 +70,15 @@ be baked into exported images (`Apply CRT FX on export` in Settings). On Android
 you also get system sharing; on desktop, Share falls back to the clipboard and
 the OS file manager.
 
+### 📥 Inbox and capture
+**📥** at the top of the sidebar opens the **Inbox** — a pinned, badged row at
+the top of the vault tree that collects material before you file it. **⋮ → 📥
+Capture to Inbox…** pastes a link or text, or imports an image into
+`vault/media/`; a captured link keeps its URL in the note's `source:` field.
+The Inbox is simply a folder (`Inbox/`) inside your vault, so captures sync
+between paired devices like any other note — drag one out to file it. Receiving
+the Android system share sheet directly is the next step.
+
 ### 📡 LAN sync — local, per-vault, no cloud
 Pair two devices over your local network and they keep a vault in step:
 discovery over **UDP 47770**, transfers over **TCP 47771**, eight-word pairing

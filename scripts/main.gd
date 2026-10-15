@@ -37,6 +37,7 @@ const PAGE_NEW_NOTE := "new_note"
 const PAGE_VAULT := "vault"
 const PAGE_MEDIA := "media"
 const PAGE_TRASH := "trash"
+const PAGE_CAPTURE := "capture"
 const PAGE_LINK_RESOLVE := "link_resolve"
 const PAGE_GRAPH_LINKS := "graph_links"
 
@@ -58,6 +59,7 @@ var sidebar: PanelContainer
 @onready var media_dialog: MediaDialog = %MediaDialog
 @onready var vault_picker: VaultPicker = %VaultPicker
 @onready var trash_page: TrashPage = %TrashPage
+@onready var capture_page: CapturePage = %CapturePage
 @onready var link_dialog: LinkResolveDialog = %LinkResolveDialog
 var sync_service: SyncService
 var help_folder := "Help"  # sidebar folder items get this metadata
@@ -138,6 +140,9 @@ func _phase_theme_layout() -> void:
 	_update_delete_controls(0)
 	vault_tree.build()
 	vault_tree.config_btn.pressed.connect(_toggle_settings)
+	capture_page.bind(_flash)
+	capture_page.captured.connect(_on_captured)
+	vault_tree.inbox_requested.connect(_open_inbox)
 	settings_component.vault_cb = _on_open_vault
 	settings_component.sync_cb = _on_sync
 	settings_component.close_requested.connect(_close_settings)
@@ -562,7 +567,7 @@ func _show_settings() -> void:
 ## Every page is a scene instance inside %Content, so all of them are sized
 ## like an open note. Sharing one helper keeps the hide/show rules identical.
 func _pages() -> Array[Control]:
-	return [settings_page, sync_page, new_dialog, vault_picker, media_dialog, trash_page, link_dialog, links_page]
+	return [settings_page, sync_page, new_dialog, vault_picker, media_dialog, trash_page, link_dialog, links_page, capture_page]
 
 func _open_page(mode: String, page: Control) -> void:
 	editor.flush()
@@ -809,6 +814,7 @@ func _on_image_click(src: String) -> void:
 ## every other surface is a page that inherits the shell styling directly.
 func _theme_dialogs() -> void:
 	media_dialog.apply_theme()
+	capture_page.apply_theme()
 
 func _toggle_backlinks() -> void:
 	vault_tree.toggle_backlinks()
@@ -889,6 +895,35 @@ func _on_sync_identity_changed() -> void:
 	if status_bar:
 		status_bar.set_sync_service(sync_service)
 
+# ------------------------------------------------------------ inbox / capture
+
+## The Inbox button: bring the pinned Inbox row into view and open it. On mobile
+## the tree lives in a drawer, so open it first — a hidden tree would swallow the
+## reveal (LayoutComponent.drawer_opened also dismisses the graph focus card).
+func _open_inbox() -> void:
+	if page_mode != "":
+		_close_page()
+	if layout_component.is_mobile_layout and not layout_component.drawer_open:
+		layout_component.toggle_sidebar()
+	vault_tree.open_inbox()
+
+
+## The Capture page: paste a link/text or pick an image without leaving the app.
+func _open_capture() -> void:
+	capture_page.begin()
+	_open_page(PAGE_CAPTURE, capture_page)
+
+
+## A capture landed on disk: close the page, rescan, rebuild the tree, then open
+## the new note so the user sees exactly what was captured.
+func _on_captured(rel: String) -> void:
+	if page_mode == PAGE_CAPTURE:
+		_close_page()
+	GameManager.scan_notes()
+	_refresh_list()
+	vault_tree.select_note(rel)
+
+
 # ------------------------------------------------------------ trash
 
 ## Open the Trash page, purging expired items first so the list is honest.
@@ -947,5 +982,7 @@ func _on_more_action(id: int) -> void:
 			_toggle_backlinks()
 		MoreMenuComponent.ID_GRAPH:
 			_toggle_graph()
+		MoreMenuComponent.ID_CAPTURE:
+			_open_capture()
 		_:
 			export_component.handle_action(id)

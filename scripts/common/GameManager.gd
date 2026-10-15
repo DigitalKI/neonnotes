@@ -21,6 +21,7 @@ const VAULT_DIR := "user://vault"
 const SETTINGS := "user://settings.cfg"
 const FRONT_MATTER_SCAN_MAX_LINES := 200  # bound the per-keystroke front-matter scan
 const EXPORTS_SUBDIR := "exports"  # vault/exports/ — rendered PNG/GIF/HTML, hidden from the tree
+const INBOX_DIR := "Inbox"  # vault/Inbox/ — captured links/text/images; a PLAIN vault folder, so per-vault sync ships it between devices for free
 ## Non-secret vault id stored in the vault folder (never synced). Binds a
 ## folder to its device-local sync phrase + trusted peers.
 const VAULT_ID_FILE := ".neonnotes-id"
@@ -564,6 +565,7 @@ func scan_paths() -> void:
 	tags.clear()
 	links.clear()
 	_scan_dir("")
+	ensure_inbox()  # keep the pinned Inbox row present even on an empty vault
 	_ensure_folder_notes()
 	notes.sort()
 	links_ready = false
@@ -663,6 +665,31 @@ func _ensure_folder_notes() -> void:
 					title, [] as Array[String], Time.get_datetime_string_from_system(true, false)))
 				notes.append(comp)
 			dir = dir.get_base_dir() if dir.contains("/") else ""
+
+## Ensure the Inbox folder and its companion note exist. The Inbox is an
+## ordinary vault folder (`Inbox/` + `Inbox.md`), so the existing per-vault
+## sync ships it between devices with no extra plumbing. _ensure_folder_notes()
+## only mints companions for non-empty folders, so make it here to keep the
+## pinned tree row visible on a fresh/empty vault too.
+func ensure_inbox() -> void:
+	if not DirAccess.dir_exists_absolute(vault_abs().path_join(INBOX_DIR)):
+		DirAccess.make_dir_recursive_absolute(vault_abs().path_join(INBOX_DIR))
+	var companion := INBOX_DIR + ".md"
+	if not FileAccess.file_exists(vault_abs().path_join(companion)):
+		write_note(companion, FOLDER_NOTE_TEMPLATE % ["Inbox", "Inbox"])
+	if not notes.has(companion):
+		notes.append(companion)
+
+## Notes under the Inbox folder (any depth), sorted. Drives the tree badge;
+## "reviewed" simply means the user dragged the capture back out of Inbox.
+func inbox_notes() -> Array[String]:
+	var out: Array[String] = []
+	var prefix := INBOX_DIR + "/"
+	for n in notes:
+		if String(n).begins_with(prefix):
+			out.append(n)
+	out.sort()
+	return out
 
 ## Collect tags from front-matter across all notes (deduplicated, sorted).
 func all_tags() -> Array[String]:
