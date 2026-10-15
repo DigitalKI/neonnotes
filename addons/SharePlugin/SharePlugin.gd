@@ -44,6 +44,9 @@ const PROVIDER_TAG = """
 ## Android's share sheet. Persist the preference across launches and restore on startup.
 ##
 ## Substitution: [PLUGIN_PACKAGE]
+##
+## NeonNotes trim (2026-10-15): only text/plain + image/* (single and multiple)
+## are registered — see the removal note inside the tag.
 const SHARE_TARGET_ACTIVITY_TAG = """
 <activity
 		android:name="%s.ShareTargetActivity"
@@ -64,41 +67,15 @@ const SHARE_TARGET_ACTIVITY_TAG = """
 		<category android:name="android.intent.category.DEFAULT" />
 		<data android:mimeType="image/*" />
 	</intent-filter>
-	<!-- Single-item video -->
-	<intent-filter>
-		<action android:name="android.intent.action.SEND" />
-		<category android:name="android.intent.category.DEFAULT" />
-		<data android:mimeType="video/*" />
-	</intent-filter>
-	<!-- Single-item audio -->
-	<intent-filter>
-		<action android:name="android.intent.action.SEND" />
-		<category android:name="android.intent.category.DEFAULT" />
-		<data android:mimeType="audio/*" />
-	</intent-filter>
-	<!-- Single-item generic file (PDF, ZIP, etc.) -->
-	<intent-filter>
-		<action android:name="android.intent.action.SEND" />
-		<category android:name="android.intent.category.DEFAULT" />
-		<data android:mimeType="application/*" />
-	</intent-filter>
+	<!-- NeonNotes trim (2026-10-15): video/*, audio/*, application/* (and the
+	     SEND_MULTIPLE */* catch-all) are deliberately NOT registered. The app can
+	     only store links, text and images, so advertising the rest would offer a
+	     share that ends in a refusal. -->
 	<!-- Multiple images -->
 	<intent-filter>
 		<action android:name="android.intent.action.SEND_MULTIPLE" />
 		<category android:name="android.intent.category.DEFAULT" />
 		<data android:mimeType="image/*" />
-	</intent-filter>
-	<!-- Multiple videos -->
-	<intent-filter>
-		<action android:name="android.intent.action.SEND_MULTIPLE" />
-		<category android:name="android.intent.category.DEFAULT" />
-		<data android:mimeType="video/*" />
-	</intent-filter>
-	<!-- Multiple mixed files -->
-	<intent-filter>
-		<action android:name="android.intent.action.SEND_MULTIPLE" />
-		<category android:name="android.intent.category.DEFAULT" />
-		<data android:mimeType="*/*" />
 	</intent-filter>
 </activity>
 """

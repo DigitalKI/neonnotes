@@ -73,7 +73,10 @@ func handle_payload(data) -> String:
 		if rel_text != "":
 			made.append(rel_text)
 	if made.is_empty():
-		intake_message.emit("✗ Nothing to capture from the share")
+		# A refused file already explained itself; only a genuinely empty payload
+		# needs the generic message.
+		if not data.has_files() and not data.has_text():
+			intake_message.emit("✗ Nothing to capture from the share")
 		return ""
 	received.emit(made)
 	intake_message.emit("📥 Shared into Inbox (%d)" % made.size() if made.size() > 1 else "📥 Shared into Inbox")
@@ -91,10 +94,13 @@ func _capture_text(text: String, subject: String) -> String:
 	return Capture.capture_link(text, opts)
 
 
-## Images are imported into vault/media/ and embedded; other files cannot be
-## embedded, so a note records what arrived instead of dropping it silently.
-## (The plugin copies received files into the app cache, so their path is
-## temporary — hence no `source:`.)
+## Images are imported into vault/media/ and embedded. Everything else is
+## REFUSED rather than noted: the plugin copies a received file into the app's
+## cache (getCacheDir()/share_received/), not into the vault, so a note that only
+## named it would be a phantom — it looks saved, never syncs, and points at a
+## path the OS may delete at any time. The manifest no longer advertises those
+## types (see addons/SharePlugin/SharePlugin.gd), so this is the safety net for a
+## sender that forces one through.
 func _capture_file(path: String, subject: String) -> String:
 	if path == "":
 		return ""
@@ -103,5 +109,9 @@ func _capture_file(path: String, subject: String) -> String:
 	if title == "":
 		title = name.get_basename()
 	if path.get_extension().to_lower() in MediaImport.IMAGE_EXTS:
-		return Capture.capture_image(path, {"title": title})
-	return Capture.capture_text("Shared file: **%s**" % name, {"title": title})
+		var rel := Capture.capture_image(path, {"title": title})
+		if rel == "":
+			intake_message.emit("✗ Couldn't read the image %s" % name)
+		return rel
+	intake_message.emit("✗ %s can't be stored — NeonNotes takes links, text and images" % name)
+	return ""

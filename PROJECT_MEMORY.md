@@ -43,6 +43,17 @@ _Last updated: 2026-10-15 · Godot 4.7 · renderer: gl_compatibility_
   newest capture. `GameManager.share_target_enabled` (persisted `[share] target`)
   drives it, with a **⚙ Settings ▸ Share to NeonNotes** row (disabled off-platform)
   and a `share_target_changed` signal that re-toggles the activity live.
+  **Filter trim (2026-10-15):** the vendored `SharePlugin.gd` manifest tag was
+  cut from 8 intent-filters to 3 — `SEND text/plain`, `SEND image/*`,
+  `SEND_MULTIPLE image/*` — dropping `video/*`, `audio/*`, `application/*` and
+  the `SEND_MULTIPLE */*` catch-all. Advertising a type we cannot store only
+  offers a share that ends in a refusal. **The app never keeps non-image bytes:**
+  the plugin copies received files to `getCacheDir()/share_received/` (app cache,
+  not the vault), so the old "Shared file: **name**" note was a phantom — it
+  looked saved, never synced, and pointed at a path the OS may evict. Verified on
+  device: `SEND` resolves NeonNotes for text/plain and image/jpeg (9 filters
+  each) and returns 0 for video/mp4, application/pdf and SEND_MULTIPLE video/mp4.
+  Re-apply this trim when upgrading the addon.
   **Gotcha:** the plugin declares `class_name Share`, which collided with our
   `scripts/export/share.gd` — that is now `class_name OutboundShare` (4 call
   sites in `export_component.gd`); do not rename it back. Requires
@@ -804,6 +815,11 @@ _Last updated: 2026-10-15 · Godot 4.7 · renderer: gl_compatibility_
   `vault_tree_component.gd` (1327 lines) into tree_builder + drag_handler
   behind the facade.
 - **Next up:**
+  - **Attachments (proposed, not built):** non-image shares (PDF, video, audio)
+    are refused rather than stored. Supporting them properly means a real
+    attachment concept — import the bytes into the vault (e.g. `vault/media/` or a
+    `vault/files/`), render a link/placeholder in the preview, and sync the bytes
+    — which is a bigger design decision than widening the share filters.
   - **Share-to leftovers (2026-10-15):** the intake is wired and the debug APK
     builds with the plugin correctly packaged, but the end-to-end share has **not
     been observed on a device yet**, but the enablement half is now verified on

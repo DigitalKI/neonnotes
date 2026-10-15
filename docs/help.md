@@ -378,8 +378,11 @@ app's **Share** button can post straight into your Inbox:
   note's `source:` field.
 - An **image** is imported into `vault/media/` and embedded in its note. Sharing
   several images creates one note each.
-- **Text** becomes a plain note; other files (PDF and so on) become a note naming
-  the file, since they cannot be embedded.
+- **Text** becomes a plain note.
+
+Videos, audio, PDFs and other documents are **not** offered: the share sheet only
+lists NeonNotes for links and images it can actually store, so it never promises
+something it would have to refuse.
 
 Turn the entry on or off with **⚙ Settings ▸ Share to NeonNotes** (the row is
 disabled on desktop, where there is no system share sheet).

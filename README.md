@@ -81,8 +81,9 @@ between paired devices like any other note — drag one out to file it.
 On Android and iOS the system **share sheet** can post straight into the Inbox:
 share a link, an image or a piece of text to **NeonNotes** and it appears as an
 Inbox note (a shared link keeps the page title and its URL; shared images are
-imported into `vault/media/`). Toggle the `Share to NeonNotes` entry in
-**⚙ Settings**.
+imported into `vault/media/`). Links, images and text only — video, audio and
+documents are not offered, since NeonNotes cannot store them. Toggle the
+`Share to NeonNotes` entry in **⚙ Settings**.
 
 
 ### 📡 LAN sync — local, per-vault, no cloud

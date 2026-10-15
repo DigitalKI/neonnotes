@@ -77,17 +77,22 @@ func _ready() -> void:
 	_check("image embedded from media/", img_note.contains("](media/"))
 	_check("image bytes stored in media/", DirAccess.get_files_at(vault.path_join("media")).size() == 1)
 
-	# A non-image file cannot be embedded but must not vanish.
+	# A non-image file is REFUSED: only images can be embedded, and the plugin's
+	# copy lives in the app cache (never the vault), so a note naming it would be a
+	# phantom that looks saved but never syncs.
 	var pdf_src := "user://neonnotes-share-src.pdf"
 	var pf := FileAccess.open(pdf_src, FileAccess.WRITE)
 	pf.store_string("%PDF-1.4 fake")
 	pf.close()
+	var inbox_before := GameManager.inbox_notes().size()
 	var pdf_rel := intake.handle_payload(ReceivedScript.new({
 		"mime_type": "application/pdf", "text": "", "subject": "",
 		"file_paths": PackedStringArray([ProjectSettings.globalize_path(pdf_src)]),
 	}))
-	_check("other file recorded as a note", pdf_rel.begins_with("Inbox/") \
-		and FileAccess.open(vault.path_join(pdf_rel), FileAccess.READ).get_as_text().contains("neonnotes-share-src.pdf"))
+	_check("unsupported file refused without a phantom note",
+		pdf_rel == "" and GameManager.inbox_notes().size() == inbox_before)
+	_check("refusal names the file", not msgs.is_empty()
+		and String(msgs[msgs.size() - 1]).contains("neonnotes-share-src.pdf"))
 
 	# An empty payload is refused and counted nowhere.
 	var before := GameManager.inbox_notes().size()
@@ -97,8 +102,8 @@ func _ready() -> void:
 	_check("empty share refused", empty_rel == "" and GameManager.inbox_notes().size() == before)
 	_check("empty share reports a message", not msgs.is_empty() and String(msgs[msgs.size() - 1]).begins_with("✗"))
 
-	_check("received fired once per usable payload", seen.size() == 4)
-	_check("badge counts every share", GameManager.inbox_notes().size() == 4)
+	_check("received fired once per usable payload", seen.size() == 3)
+	_check("badge counts every stored share", GameManager.inbox_notes().size() == 3)
 
 	intake.queue_free()
 	await get_tree().process_frame
