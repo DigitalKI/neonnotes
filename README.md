@@ -164,6 +164,13 @@ AAR into the APK through Gradle. Install the build template once from the editor
 (**Project ▸ Install Android Build Template…**); after that the export commands
 above pick it up. The first Gradle export is noticeably slower than a plain one.
 
+Gradle also needs a **complete** Android SDK: Godot's configured SDK path
+(Editor Settings ▸ Export ▸ Android ▸ Android SDK Path) must contain
+`platforms;android-36`, `build-tools;36.1.0` and accepted licences, otherwise the
+build dies with *"some licences have not been accepted"*. Install them with
+`sdkmanager "platforms;android-36" "build-tools;36.1.0"` after
+`sdkmanager --licenses` — or point the setting at a complete SDK.
+
 The release build signs with the **dev keystore** (the project release
 keystore's password is unknown), configured in the editor-owned, gitignored
 `.godot/export_credentials.cfg`:

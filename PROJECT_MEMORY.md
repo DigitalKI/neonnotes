@@ -551,6 +551,31 @@ _Last updated: 2026-10-15 · Godot 4.7 · renderer: gl_compatibility_
   (renderer-agnostic; user wants a "neon city" redesign eventually).
   **Follow-up:** when the graph gains filtering, reuse the tree search's
   `keywords + #tag` grammar so the vocabulary behaves identically everywhere.
+- **Gradle export needs a COMPLETE Android SDK (2026-10-15):** enabling
+  `use_gradle_build` (required for the SharePlugin AAR) makes the SDK the build
+  bottleneck. Godot's editor setting pointed at `/home/toshiwo/tools/android-sdk`,
+  which held only `build-tools/34.0.0` + `platform-tools` — no `platforms/` and
+  no `licenses/` — so Gradle failed with *"licences have not been accepted"* for
+  `platforms;android-36` + `build-tools;36.1.0`. The complete SDK (incl. the
+  already-accepted 7 licence files and `cmdline-tools/latest`) is
+  `/home/toshiwo/Projects/Godot/.android-tools/android-sdk`. **Local stopgap:**
+  that tree is symlinked into the configured SDK — `platforms`, `licenses`,
+  `cmdline-tools` (whole dirs) and `build-tools/36.1.0` — so nothing was
+  installed or accepted on the user's behalf and the change is reversible
+  (`rm` the four symlinks). The clean fix is to repoint the editor setting at a
+  complete SDK. Verified: `build/NeonNotes-debug.apk` (84 MB) builds and its
+  merged manifest carries the ShareTarget filters + `ShareFileProvider`, with
+  `SharePlugin`/`ShareTargetActivity`/`ShareFileProvider` present in
+  `classes.dex`.
+- **Share-target enable requires one rendered frame (2026-10-15):** the manifest
+  ships `ShareTargetActivity android:enabled="false"`; `ShareIntake.start()`
+  flips it on at boot, so **the app must be opened once after install before it
+  appears in the share sheet**. On-device check: launch once, then
+  `adb shell cmd package query-activities -a android.intent.action.SEND -t text/plain`
+  should list `com.neonnotes.app`. A **dozing/locked** phone never draws a frame,
+  so `_ready` (and therefore the enable) never runs — that is what blocked the
+  first device verification attempt, not a code fault. Godot's plugin registry
+  logging `Initializing Godot plugin SharePlugin` confirms the AAR loads.
 - **Android export gotcha (2026-10-08):** the "Android (Release)" preset (preset.1)
   had `permissions/internet=false` while "Android" (preset.0) had it true — a
   release APK exported without `android.permission.INTERNET` makes every
@@ -770,9 +795,12 @@ _Last updated: 2026-10-15 · Godot 4.7 · renderer: gl_compatibility_
   `vault_tree_component.gd` (1327 lines) into tree_builder + drag_handler
   behind the facade.
 - **Next up:**
-  - **Share-to leftovers (2026-10-15):** the intake is wired but **unverified
-    on a device** — export a debug APK (needs the Gradle build template), share a
-    link from Chrome and an image from Photos, and confirm both land in the Inbox.
+  - **Share-to leftovers (2026-10-15):** the intake is wired and the debug APK
+    builds with the plugin correctly packaged, but the end-to-end share has **not
+    been observed on a device yet** (the first attempt hit a dozing, locked phone,
+    so the app never rendered a frame and never enabled the share target). Next:
+    unlock the phone, open NeonNotes once, then share a link from Chrome and an
+    image from Photos and confirm both land in the Inbox.
     The plugin's `ACTION_SEND` filters cover text/image/video/audio/application
     and `SEND_MULTIPLE`; `ACTION_VIEW` (`http(s)` from a browser's "open with")
     is **not** registered. iOS only gains "Open With" document types
