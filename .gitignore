@@ -9,6 +9,10 @@ export/
 # scripts/export/ (Exporter/GifWriter/HtmlExporter/OutboundShare) — re-include
 # it so a fresh clone can compile.
 !scripts/export/
+
+# Godot's Android build template is machine-local (android/build/ is already
+# covered by the build/ rule above); ignore the generated marker too.
+android/.build_version
 *.apk
 *.aab
 *.idsig
