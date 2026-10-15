@@ -100,7 +100,7 @@ func handle_action(id: int) -> void:
 				await Exporter.export_gif(get_parent(), _export_width(), dest, doc)
 				_hide_loading()
 			var saved_msg := "Saved %s: %s" % [ext.to_upper(), dest.get_file()]
-			var gallery_saved := Share.save_to_gallery(dest)
+			var gallery_saved := OutboundShare.save_to_gallery(dest)
 			if gallery_saved and OS.get_name() != "Android":
 				saved_msg += "  (also in Pictures/NeonNotes)"
 			elif gallery_saved:
@@ -122,10 +122,10 @@ func _share(kind: int) -> void:
 	if doc == null:
 		return
 	if kind == 2:
-		Share.share_text(GameManager.current_rel.get_file().trim_suffix(".md"), get_code.call())
+		OutboundShare.share_text(GameManager.current_rel.get_file().trim_suffix(".md"), get_code.call())
 		return
 	if kind == 3:
-		Share.share_text(GameManager.current_rel.get_file().trim_suffix(".md") + " (HTML)", HtmlExporter.to_html(MarkdownParser.parse(get_code.call())))
+		OutboundShare.share_text(GameManager.current_rel.get_file().trim_suffix(".md") + " (HTML)", HtmlExporter.to_html(MarkdownParser.parse(get_code.call())))
 		return
 	var dest := _destination("png" if kind == 0 else "gif")
 	if kind == 0:
@@ -135,4 +135,4 @@ func _share(kind: int) -> void:
 		await Exporter.export_gif(get_parent(), _export_width(), dest, doc)
 		_hide_loading()
 	# PNG/GIF: images are the social-friendly format — share them directly
-	Share.share_image(dest)
+	OutboundShare.share_image(dest)

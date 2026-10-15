@@ -5,6 +5,10 @@
 # Builds
 build/
 export/
+# ...but `export/` above also matches the engine-side source directory
+# scripts/export/ (Exporter/GifWriter/HtmlExporter/OutboundShare) — re-include
+# it so a fresh clone can compile.
+!scripts/export/
 *.apk
 *.aab
 *.idsig
