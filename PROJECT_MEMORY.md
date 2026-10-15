@@ -88,6 +88,19 @@ _Last updated: 2026-10-15 · Godot 4.7 · renderer: gl_compatibility_
   inside `%Content` like the other pages, reachable from
   `⋮ → 📥 Capture to Inbox…`, and `vault_tree.inbox_requested` →
   `Main._open_inbox`. Covered by `tests/TestCapture.tscn` (in `run_tests.sh`).
+  **Presentation-only exclusions (2026-10-15):** the Inbox is a *temporary
+  landing pad*, so it is never a **move destination** and never a **graph node**,
+  while staying a plain syncable/tree/searchable folder. One predicate,
+  `GameManager.is_inbox_path()` (folder, companion, or anything under `Inbox/`),
+  is asked by all three: `GraphView._build_hierarchy`/`_build_levels` drop Inbox
+  notes (so no node, no route, and a level walk never steps *through* a capture),
+  `MoveDialog` omits the destination row and `_blocks()` refuses a typed path,
+  and `VaultTreeComponent` refuses a section-0 drag INTO the Inbox (reordering
+  captures above/below stays allowed). Knocked out of both `⋮ → Move…` (tree)
+  and the graph radial **Move** since they share `MoveDialog`; `Main._move_selected`
+  also refuses the Inbox as a *source* (system-managed, like the delete guard).
+  Verified in `tests/TestMoveDialog.tscn` (dialog row + typed path + drop +
+  source + graph keys) and `tests/unit_tests.gd _check_inbox_path`.
   **Not yet done:** *receiving* the OS share sheet — see §3 "Next up".
 - **Move page + graph Move (2026-10-15):** filing a note no longer needs a
   precise drag. `scripts/components/move_dialog.gd` (+ scene
@@ -95,9 +108,9 @@ _Last updated: 2026-10-15 · Godot 4.7 · renderer: gl_compatibility_
   (`PAGE_MOVE`, in `Main._pages()`) that relocates a note **or folder**: the
   destination is either **typed** into a LineEdit (a missing folder path is
   created by `move_path`) or **explored** in a Tree built from the vault's real
-  folders (dot-folders hidden; the source folder and its descendants, and a
-  note's own companion folder, are omitted so a move can never nest into
-  itself). It **reuses `VaultTreeComponent.move_path()`**, so wiki-link
+  folders (dot-folders hidden; the Inbox, the source folder and its
+  descendants, and a note's own companion folder, are omitted so a move can
+  never nest into itself). It **reuses `VaultTreeComponent.move_path()`**, so wiki-link
   rewriting, the ordering remap, sync tombstones and folder-companion travel
   are byte-identical to a drop — a **whole folder moves with its children,
   companion note and embedded media**, and every `[[link]]` into the subtree is

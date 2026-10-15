@@ -83,6 +83,8 @@ func _add_child_dirs(parent: TreeItem, dir: String) -> void:
 	subdirs.sort()
 	for name in subdirs:
 		var rel := (dir + "/" if dir != "" else "") + name
+		if GameManager.is_inbox_path(rel):
+			continue  # the Inbox is a temporary landing pad, never a destination
 		if _blocks(rel):
 			continue
 		var it := folder_tree.create_item(parent)
@@ -94,10 +96,15 @@ func _add_child_dirs(parent: TreeItem, dir: String) -> void:
 		_add_child_dirs(it, rel)
 
 
-## True when `dest` is not a valid destination: the source folder itself, a
-## folder inside it, or (for a note) its own companion folder — all of which
+## True when `dest` is not a valid destination: the Inbox (captures land there
+## on their own — filing INTO it is never the intent), the source folder itself,
+## a folder inside it, or (for a note) its own companion folder — the last three
 ## would be a no-op or would nest the item inside itself.
 func _blocks(dest: String) -> bool:
+	# The Inbox is a temporary landing pad: block it whatever the source is, so
+	# a typed "Inbox" path cannot slip past the omitted tree row.
+	if GameManager.is_inbox_path(dest):
+		return true
 	if _target == "":
 		return false
 	if _target.ends_with(".md"):

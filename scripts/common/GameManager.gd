@@ -694,6 +694,15 @@ func ensure_inbox() -> void:
 	if not notes.has(companion):
 		notes.append(companion)
 
+## True when `rel` names the Inbox folder, its companion note, or anything
+## inside it. The Inbox is a temporary landing pad for captures — never a filing
+## destination (move) and never a node in the vault graph — so the move page,
+## the tree's drag/drop and GraphView all ask this one question.
+static func is_inbox_path(rel: String) -> bool:
+	if rel == INBOX_DIR or rel == INBOX_DIR + ".md":
+		return true
+	return rel.begins_with(INBOX_DIR + "/")
+
 ## Notes under the Inbox folder (any depth), sorted. Drives the tree badge;
 ## "reviewed" simply means the user dragged the capture back out of Inbox.
 func inbox_notes() -> Array[String]:

@@ -984,6 +984,11 @@ func _move_selected() -> void:
 	if rel == "":
 		_flash("Select a note or folder to move")
 		return
+	# The Inbox is system-managed (auto-created, protected from deletion like a
+	# dot-folder), so it is neither a destination nor a thing to relocate.
+	if GameManager.is_inbox_path(rel):
+		_flash("📥 The Inbox cannot be moved")
+		return
 	_move_from_graph = false
 	_open_page(PAGE_MOVE, move_dialog)
 	move_dialog.begin(rel)

@@ -198,8 +198,10 @@ opens the platform's default browser.
 ### The graph
 
 **🕸 Graph** renders a radial map of the vault, with folders forming the
-hierarchy and notes branching from them. Click a node to open its note. Drag to
-pan, scroll the wheel or pinch to zoom; hover highlights a node, and note labels
+hierarchy and notes branching from them. The **📥 Inbox** is left out — it is a
+temporary landing pad for captures, not part of the knowledge map. Click a node
+to open its note. Drag to pan, scroll the wheel or pinch to zoom; hover
+highlights a node, and note labels
 appear as you zoom in. Selecting a node opens a radial menu with **Open**,
 **Move** and **Delete** (plus **Enter** on a folder); **Move** relocates that
 note or folder and re-focuses it. **⚙ Settings → Graph neighbor levels** (1–10)
@@ -274,7 +276,8 @@ takes its whole subtree — children, companion note and embedded media. The not
 you had open stays open where it lands, and the `[[wiki-links]]` that pointed
 at any moved note are rewritten automatically. From the graph, the focused
 node's radial menu offers the same **Move** action; there the map updates and
-re-focuses the moved node.
+re-focuses the moved node. The **Inbox** is never a destination — file it out of
+the Inbox, not back into it.
 
 The vault root has a protected homepage note, `_homepage.md`. It has no leaf row
 of its own — open it by selecting the **Vault** root item. The homepage cannot be
@@ -379,7 +382,9 @@ The Inbox is an ordinary folder in your vault (`Inbox/`, plus its companion
 notes — a capture made on one device appears on the others. To file a capture,
 drag it out of Inbox into the folder it belongs to, or select it and use **⋮ →
 📁 Move…**; the badge drops back to zero when nothing is waiting. The Inbox
-itself cannot be deleted.
+itself cannot be deleted or moved, is never offered as a destination when moving
+(by drag, **⋮ → 📁 Move…**, or the graph's radial **Move**), and never appears
+in the graph.
 
 ### Sharing into NeonNotes
 

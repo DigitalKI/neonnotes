@@ -150,6 +150,54 @@ func _ready() -> void:
 	_check("graph re-focuses the moved folder",
 		String(main.graph_view.view_state().get("selected_note", "")) == "Final/Proj.md")
 
+	# ---- the Inbox is not a move destination and not a graph node ----------
+	# Captures land in the Inbox on their own; filing a note INTO it is never the
+	# intent, and the Inbox is not part of the vault's knowledge map.
+	var capture_rel := Capture.capture_text("remember the milk", {"title": "Milk"})
+	GameManager.scan_notes()
+	main._refresh_list()
+	_check("capture landed in the Inbox", capture_rel.begins_with("Inbox/"))
+
+	md.begin("Final/Proj/One.md")
+	_check("inbox row absent from move destinations", md._find_row("Inbox") == null)
+	_check("typing the inbox is refused", md._blocks("Inbox"))
+	_check("typing an inbox subpath is refused", md._blocks("Inbox/Sub"))
+	_check("a real folder is still a valid destination", not md._blocks("Archive"))
+
+	# The tree's own drag gesture refuses a drop INTO the Inbox as well.
+	var inbox_item: TreeItem = null
+	for child in main.vault_tree.side_tree.get_root().get_children():
+		if str(child.get_metadata(0)) == "Inbox.md":
+			inbox_item = child
+			break
+	_check("inbox row exists in the tree", inbox_item != null)
+	_check("Linker.md is at the root before the drop", GameManager.notes.has("Linker.md"))
+	main.vault_tree._perform_drop("Linker.md", inbox_item, 0)
+	await get_tree().process_frame
+	_check("dropping a note into the inbox is refused",
+		GameManager.notes.has("Linker.md") and not GameManager.notes.has("Inbox/Linker.md"))
+
+	# The Inbox itself is system-managed: it cannot be relocated either.
+	main._close_page()
+	main.vault_tree.side_tree.set_selected(inbox_item, 0)
+	main._move_selected()
+	_check("the inbox cannot be moved",
+		main.page_mode != main.PAGE_MOVE and GameManager.notes.has("Inbox.md"))
+
+	main.graph_view.open("")
+	await get_tree().process_frame
+	var inbox_keys := 0
+	var final_key := false
+	for k in main.graph_view._keys:
+		var key := String(k)
+		if key == "Inbox" or key.begins_with("Inbox/"):
+			inbox_keys += 1
+		if key == "Final":
+			final_key = true
+	_check("no inbox node in the graph", inbox_keys == 0)
+	_check("inbox is not a graph group", not main.graph_view._children.has("Inbox"))
+	_check("normal folders stay in the graph", final_key)
+
 	GameManager.vault_dir = original_vault
 	print("MOVE RESULT: %s (%d fails)" % ["OK" if _fails == 0 else "FAIL", _fails])
 	get_tree().quit(_fails)

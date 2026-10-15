@@ -405,7 +405,13 @@ func _build_hierarchy() -> void:
 	_open_target.clear(); _collapsed.clear(); _cluster_nodes.clear(); _keys.clear()
 	_root_home = ""
 	_children[""] = []
-	var notes: Array[String] = GameManager.notes
+	# The Inbox is a temporary landing pad for captures, not part of the
+	# knowledge map: its companion and every capture under `Inbox/` stay out of
+	# the hierarchy, so no Inbox node is ever created (and no link routes to it).
+	var notes: Array[String] = []
+	for raw in GameManager.notes:
+		if not GameManager.is_inbox_path(raw):
+			notes.append(raw)
 	for n in notes:
 		var chain: Array[String] = []
 		var f := n.get_base_dir()
@@ -640,7 +646,14 @@ func _norm(k: String) -> String:
 func _build_levels() -> void:
 	_levels = {}
 	var resolved := {}
+	# Same Inbox exclusion as `_build_hierarchy`: the level walk must not step
+	# through an Inbox capture to reach a real note, or brightness would imply a
+	# connection the map does not draw.
+	var notes: Array[String] = []
 	for n in GameManager.notes:
+		if GameManager.is_inbox_path(n):
+			continue
+		notes.append(n)
 		var out: Array[String] = []
 		for t in GameManager.links.get(n, []):
 			var r := WikiLinks.resolve_with(t, _resolve_maps)
@@ -648,7 +661,7 @@ func _build_levels() -> void:
 				out.append(r)
 		resolved[n] = out
 	var m := GraphModel.build(_center_note, GameManager.graph_levels,
-		GameManager.notes, resolved, GameManager.titles, 100000)
+		notes, resolved, GameManager.titles, 100000)
 	_levels = m.level_of
 
 # ---------------------------------------------------------------- link routes

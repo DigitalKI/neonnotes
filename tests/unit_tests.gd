@@ -18,6 +18,7 @@ func _init() -> void:
 	_check_html_exporter()
 	_check_move_path_remap()
 	_check_graph_model()
+	_check_inbox_path()
 	_check_media_import()
 	_check_dev_session_detection()
 	_check_font_settings()
@@ -47,6 +48,19 @@ func _check_metadata_header() -> void:
 	_check(saved.contains("custom: keep") and NoteMetadataHelper.body(saved) == "# Body\ntext", "unknown fields and note body preserved")
 	_check(NoteMetadataHelper.preview("Body text", "New title").begins_with("# New title\n\n"), "metadata title appears as preview H1")
 	_check(NoteMetadataHelper.preview("# New title\n\nBody text", "New title") == "# New title\n\nBody text", "existing matching H1 is not duplicated")
+
+func _check_inbox_path() -> void:
+	# The Inbox is a temporary landing pad: one predicate decides what counts as
+	# "in the Inbox" for the graph nodes, the move destinations and drag/drop.
+	_check(GameManagerScript.is_inbox_path("Inbox"), "inbox folder path")
+	_check(GameManagerScript.is_inbox_path("Inbox.md"), "inbox companion note")
+	_check(GameManagerScript.is_inbox_path("Inbox/Capture.md"), "capture inside the inbox")
+	_check(GameManagerScript.is_inbox_path("Inbox/Sub/Deep.md"), "capture in a nested inbox folder")
+	_check(not GameManagerScript.is_inbox_path(""), "vault root is not the inbox")
+	_check(not GameManagerScript.is_inbox_path("Inboxed.md"), "a name starting with Inbox is not the inbox")
+	_check(not GameManagerScript.is_inbox_path("Notes/Inbox.md"), "a nested Inbox-named note is not the inbox")
+	_check(not GameManagerScript.is_inbox_path("Notes/Inbox/Capture.md"), "a nested Inbox-named folder is not the inbox")
+
 
 func _check_media_import() -> void:
 	# decode_image dispatches by magic bytes, not by name/extension.

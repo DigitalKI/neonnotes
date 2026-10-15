@@ -772,15 +772,24 @@ func _mark_drop_hint(it: TreeItem, section: int = 0) -> void:
 		flash_cb.call("Ready")
 		return
 	var c := GameManager.color("accent")
+	var target := str(it.get_metadata(0)).trim_suffix(".md")
+	if target == "":
+		target = "Vault"
+	# Dropping INTO the Inbox is refused (captures land there on their own), so
+	# the tint turns to a warning instead of the "MOVE INTO" accent. Reordering
+	# above/below stays free, so captures can still be arranged inside it.
+	var blocked := section == 0 and GameManager.is_inbox_path(target)
 	# inside = solid bright row; above/below = thinner directional tint
 	# Inside is a brighter palette accent; before/after use a darker tint.
 	var tint := c.lightened(0.22) if section == 0 else c.darkened(0.28)
 	var alpha := 0.62 if section == 0 else 0.42
+	if blocked:
+		tint = Color(1.0, 0.32, 0.38)
+		alpha = 0.55
 	it.set_custom_bg_color(0, Color(tint.r, tint.g, tint.b, alpha))
-	var target := str(it.get_metadata(0)).trim_suffix(".md")
-	if target == "":
-		target = "Vault"
-	if section == 0:
+	if blocked:
+		flash_cb.call("✗ Inbox is for captures only")
+	elif section == 0:
 		flash_cb.call("MOVE INTO › " + target)
 	elif section < 0:
 		flash_cb.call("PLACE ABOVE › " + target)
@@ -820,6 +829,12 @@ func _perform_drop(src: String, it: TreeItem, section: int) -> void:
 				target_dir = meta.trim_suffix(".md")
 		else:
 			target_dir = meta.get_base_dir() if meta.contains("/") else ""
+	# The Inbox is a capture landing pad, not a filing target: refuse a drop
+	# INTO it (only section 0 actually inserts; above/below just reorders).
+	if section == 0 and GameManager.is_inbox_path(target_dir):
+		_clear_drop_hint()
+		flash_cb.call("✗ Inbox is for captures only")
+		return
 	save_cb.call()
 	var new_rel := move_path(src, target_dir)
 	_clear_drop_hint()
