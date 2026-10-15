@@ -19,6 +19,7 @@ signal close_requested
 @onready var crt_ui: CheckButton = %CrtUi
 @onready var crt_export: CheckButton = %CrtExport
 @onready var open_start: OptionButton = %OpenStart
+@onready var share_target: CheckButton = %ShareTarget
 
 var vault_cb: Callable
 var sync_cb: Callable
@@ -33,6 +34,10 @@ func _ready() -> void:
 	open_start.add_item("Homepage")
 	open_start.add_item("Graph map")
 	open_start.item_selected.connect(_on_open_start_selected)
+	share_target.toggled.connect(_on_share_target_toggled)
+	# The share target only exists in an exported Android/iOS build; on desktop the
+	# row stays visible but disabled so the setting is discoverable and honest.
+	share_target.disabled = not Engine.has_singleton("SharePlugin")
 	graph_separate.value_changed.connect(_on_graph_separate_changed)
 	graph_page.value_changed.connect(_on_graph_page_changed)
 	for p in GameManager.PALETTES.keys():
@@ -67,6 +72,7 @@ func refresh() -> void:
 	crt_ui.set_pressed_no_signal(GameManager.crt_ui)
 	_sync_crt_export_row()
 	open_start.select(["last", "homepage", "graph"].find(GameManager.open_start_mode))
+	share_target.set_pressed_no_signal(GameManager.share_target_enabled)
 
 func _on_auto_ui_scale_toggled(pressed: bool) -> void:
 	GameManager.set_auto_ui_scale(pressed)
@@ -105,6 +111,10 @@ func _sync_crt_export_row() -> void:
 func _on_open_start_selected(index: int) -> void:
 	GameManager.open_start_mode = ["last", "homepage", "graph"][clampi(index, 0, 2)]
 	GameManager._save_settings()
+
+func _on_share_target_toggled(pressed: bool) -> void:
+	GameManager.set_share_target_enabled(pressed)
+
 
 func _on_graph_separate_changed(value: float) -> void:
 	GameManager.graph_max_separate = maxi(1, int(value))

@@ -62,6 +62,7 @@ var sidebar: PanelContainer
 @onready var capture_page: CapturePage = %CapturePage
 @onready var link_dialog: LinkResolveDialog = %LinkResolveDialog
 var sync_service: SyncService
+var share_intake: ShareIntake
 var help_folder := "Help"  # sidebar folder items get this metadata
 var theme_component := ThemeComponent.new()
 var layout_component := LayoutComponent.new()
@@ -82,6 +83,7 @@ func _ready() -> void:
 	_phase_build_ui()
 	_phase_theme_layout()
 	_phase_vault()
+	_phase_share()
 	_phase_sync()
 	_phase_smoke()
 
@@ -218,6 +220,34 @@ func _phase_vault() -> void:
 	_boot_mark("layout")
 	_open_start_page.call_deferred()
 	GameManager.load_metadata_async()
+
+
+func _phase_share() -> void:
+	# OS share-sheet intake (addons/SharePlugin). Exported Android/iOS builds get
+	# the plugin singleton; desktop runs build nothing, so no plugin noise. The
+	# node's own _ready re-emits any cold-start payload one frame later, which is
+	# after this wiring — a "share to NeonNotes" launch lands in the Inbox.
+	share_intake = ShareIntake.new()
+	share_intake.name = "ShareIntake"
+	add_child(share_intake)
+	share_intake.received.connect(_on_share_received)
+	share_intake.intake_message.connect(_flash)
+	GameManager.share_target_changed.connect(func(on: bool): share_intake.set_enabled(on))
+	share_intake.start(GameManager.share_target_enabled)
+	_boot_mark("share-intake")
+
+
+## A share landed in the Inbox (possibly while the app was backgrounded on any
+## page): close whatever page is open, rescan once for the whole payload, and
+## show the newest capture so the user sees it arrived.
+func _on_share_received(rels: Array[String]) -> void:
+	if rels.is_empty():
+		return
+	if page_mode != "":
+		_close_page()
+	GameManager.scan_notes()
+	_refresh_list()
+	vault_tree.select_note(rels[rels.size() - 1])
 
 
 func _phase_sync() -> void:

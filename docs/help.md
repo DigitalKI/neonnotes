@@ -368,3 +368,18 @@ The Inbox is an ordinary folder in your vault (`Inbox/`, plus its companion
 notes — a capture made on one device appears on the others. To file a capture,
 drag it out of Inbox into the folder it belongs to; the badge drops back to zero
 when nothing is waiting. The Inbox itself cannot be deleted.
+
+### Sharing into NeonNotes
+
+On Android and iOS, **NeonNotes** can appear in the system share sheet, so any
+app's **Share** button can post straight into your Inbox:
+
+- A **link** becomes a note titled with the page title, with the URL kept in the
+  note's `source:` field.
+- An **image** is imported into `vault/media/` and embedded in its note. Sharing
+  several images creates one note each.
+- **Text** becomes a plain note; other files (PDF and so on) become a note naming
+  the file, since they cannot be embedded.
+
+Turn the entry on or off with **⚙ Settings ▸ Share to NeonNotes** (the row is
+disabled on desktop, where there is no system share sheet).

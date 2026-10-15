@@ -189,6 +189,21 @@ layout_mode = 2
 text = "Adds the CRT scanline/grille look to exported images. Off = clean export."
 autowrap_mode = 2
 
+[node name="ShareTargetLabel" type="Label" parent="MarginContanier/HBoxContainer/VerticalContainer"]
+layout_mode = 2
+text = "Receiving shares"
+
+[node name="ShareTarget" type="CheckButton" parent="MarginContanier/HBoxContainer/VerticalContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Show NeonNotes in the system share sheet so links, images and text can be shared straight into your Inbox."
+text = "Share to NeonNotes"
+
+[node name="ShareTargetHint" type="Label" parent="MarginContanier/HBoxContainer/VerticalContainer"]
+layout_mode = 2
+text = "Adds NeonNotes to the system share sheet; shared links, images and text land in your Inbox. Android and iOS only."
+autowrap_mode = 2
+
 [node name="Container" type="Control" parent="MarginContanier/HBoxContainer/VerticalContainer" unique_id=929210684]
 custom_minimum_size = Vector2(0, 25)
 layout_mode = 2

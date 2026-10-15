@@ -37,6 +37,9 @@ run_godot_test "ALL DRAG TESTS PASSED SUCCESSFULLY!" --headless --path . tests/T
 # Inbox + capture: pinned/badged Inbox folder, text/link/image captures land
 # as ordinary markdown (Inbox is a plain vault folder, so sync ships it).
 run_godot_test "CAPTURE RESULT: OK" --headless --path . tests/TestCapture.tscn
+# Share-sheet intake: a received link/image/file/text payload lands in Inbox
+# through Capture (plugin-free routing, so it runs off-platform).
+run_godot_test "SHARE INTAKE RESULT: OK" --headless --path . tests/TestShareIntake.tscn
 # Trash: recoverable deletes, dot-hidden, sync-excluded, collision restore, purge.
 run_godot_test "TRASH RESULT: OK" --headless --path . tests/TestTrash.tscn
 # Dev/MCP session isolation: NEONNOTES_DEV=1 must redirect the boot to the

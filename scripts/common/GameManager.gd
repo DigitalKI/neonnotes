@@ -16,6 +16,8 @@ signal crt_ui_changed(enabled: bool)
 ## Emitted when the density-derived UI scale or its manual override changes, so
 ## the shell re-applies it to the window and re-runs the responsive layout.
 signal ui_scale_changed
+## Emitted when the OS share-sheet opt-in changes (see set_share_target_enabled).
+signal share_target_changed(enabled: bool)
 
 const VAULT_DIR := "user://vault"
 const SETTINGS := "user://settings.cfg"
@@ -110,6 +112,7 @@ var graph_max_separate := 48
 var graph_max_page := 200
 var export_crt := true  # apply CRT overlay to exported PNG/JPEG/GIF
 var crt_ui := true  # live CRT overlay on the UI — master switch for CRT FX
+var share_target_enabled := true  # appear in the OS share sheet (addons/SharePlugin)
 var open_start_mode := "last"  # "last", "homepage" or "graph"
 var last_opened_rel := ""
 ## Last graph navigation/camera state (scope, page, selection, zoom, position).
@@ -236,6 +239,17 @@ func set_crt_ui(on: bool) -> void:
 
 ## True when exports should composite the CRT overlay: the UI overlay must be on
 ## (master switch) and the export-only toggle must be on.
+## Toggle this app's entry in the OS share sheet ("share to NeonNotes"). The
+## addons/SharePlugin share-target activity is enabled/disabled to match, and the
+## choice persists so it survives restarts.
+func set_share_target_enabled(on: bool) -> void:
+	if on == share_target_enabled:
+		return
+	share_target_enabled = on
+	share_target_changed.emit(on)
+	_save_settings()
+
+
 func crt_export_allowed() -> bool:
 	return crt_ui and export_crt
 
@@ -862,6 +876,7 @@ func _load_settings() -> void:
 	palette_name = cf.get_value("ui", "palette", palette_name)
 	export_crt = bool(cf.get_value("export", "crt", export_crt))
 	crt_ui = bool(cf.get_value("ui", "crt_ui", crt_ui))
+	share_target_enabled = bool(cf.get_value("share", "target", share_target_enabled))
 	font_name = String(cf.get_value("ui", "font", font_name))
 	font_size = clampi(int(cf.get_value("ui", "font_size", font_size)), MIN_FONT_SIZE, MAX_FONT_SIZE)
 	auto_ui_scale = bool(cf.get_value("ui", "auto_ui_scale", auto_ui_scale))
@@ -913,6 +928,7 @@ func _save_settings() -> void:
 	cf.set_value("ui", "palette", palette_name)
 	cf.set_value("export", "crt", export_crt)
 	cf.set_value("ui", "crt_ui", crt_ui)
+	cf.set_value("share", "target", share_target_enabled)
 	cf.set_value("ui", "font", font_name)
 	cf.set_value("ui", "font_size", font_size)
 	cf.set_value("ui", "auto_ui_scale", auto_ui_scale)

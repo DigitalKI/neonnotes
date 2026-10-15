@@ -76,8 +76,14 @@ the top of the vault tree that collects material before you file it. **⋮ → �
 Capture to Inbox…** pastes a link or text, or imports an image into
 `vault/media/`; a captured link keeps its URL in the note's `source:` field.
 The Inbox is simply a folder (`Inbox/`) inside your vault, so captures sync
-between paired devices like any other note — drag one out to file it. Receiving
-the Android system share sheet directly is the next step.
+between paired devices like any other note — drag one out to file it.
+
+On Android and iOS the system **share sheet** can post straight into the Inbox:
+share a link, an image or a piece of text to **NeonNotes** and it appears as an
+Inbox note (a shared link keeps the page title and its URL; shared images are
+imported into `vault/media/`). Toggle the `Share to NeonNotes` entry in
+**⚙ Settings**.
+
 
 ### 📡 LAN sync — local, per-vault, no cloud
 Pair two devices over your local network and they keep a vault in step:
@@ -151,6 +157,12 @@ adb logcat | grep '\[boot\]'
 rewrite the file and can drop CLI edits. Change presets in the editor UI. Note
 that the **release preset currently has `permissions/internet=false`**, so a
 release build will fail at LAN sync — set it to `true` there as well.
+
+Both Android presets use the **Gradle build** because `addons/SharePlugin`
+(incoming share sheet) is a v2 Android plugin and Godot only compiles a plugin's
+AAR into the APK through Gradle. Install the build template once from the editor
+(**Project ▸ Install Android Build Template…**); after that the export commands
+above pick it up. The first Gradle export is noticeably slower than a plain one.
 
 The release build signs with the **dev keystore** (the project release
 keystore's password is unknown), configured in the editor-owned, gitignored
