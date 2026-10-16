@@ -149,7 +149,12 @@ func _phase_theme_layout() -> void:
 	vault_tree.config_btn.pressed.connect(_toggle_settings)
 	capture_page.bind(_flash)
 	capture_page.captured.connect(_on_captured)
-	vault_tree.inbox_requested.connect(_open_inbox)
+	# ✕ Close must leave the capture page like any other page's close; without
+	# this wiring the page could only be dismissed by capturing (the reported
+	# "dialog never closes" bug).
+	capture_page.close_requested.connect(_close_page)
+	# The sidebar 📥 button beside the 🏷 tag browser opens capture directly.
+	vault_tree.capture_requested.connect(_open_capture)
 	settings_component.vault_cb = _on_open_vault
 	settings_component.sync_cb = _on_sync
 	settings_component.close_requested.connect(_close_settings)
@@ -936,18 +941,9 @@ func _on_sync_identity_changed() -> void:
 
 # ------------------------------------------------------------ inbox / capture
 
-## The Inbox button: bring the pinned Inbox row into view and open it. On mobile
-## the tree lives in a drawer, so open it first — a hidden tree would swallow the
-## reveal (LayoutComponent.drawer_opened also dismisses the graph focus card).
-func _open_inbox() -> void:
-	if page_mode != "":
-		_close_page()
-	if layout_component.is_mobile_layout and not layout_component.drawer_open:
-		layout_component.toggle_sidebar()
-	vault_tree.open_inbox()
-
-
 ## The Capture page: paste a link/text or pick an image without leaving the app.
+## Opened by the sidebar 📥 button beside the 🏷 tag browser (its only entry
+## point), and the landing surface an Android share intent feeds.
 func _open_capture() -> void:
 	capture_page.begin()
 	_open_page(PAGE_CAPTURE, capture_page)
@@ -984,9 +980,10 @@ func _move_selected() -> void:
 	if rel == "":
 		_flash("Select a note or folder to move")
 		return
-	# The Inbox is system-managed (auto-created, protected from deletion like a
-	# dot-folder), so it is neither a destination nor a thing to relocate.
-	if GameManager.is_inbox_path(rel):
+	# Only the Inbox folder/companion is system-managed (auto-created, protected
+	# from deletion like a dot-folder) and never relocatable; a capture inside it
+	# is an ordinary note, so filing it out with ⋮ Move stays possible.
+	if GameManager.is_inbox_root(rel):
 		_flash("📥 The Inbox cannot be moved")
 		return
 	_move_from_graph = false
@@ -1111,7 +1108,5 @@ func _on_more_action(id: int) -> void:
 			_toggle_backlinks()
 		MoreMenuComponent.ID_GRAPH:
 			_toggle_graph()
-		MoreMenuComponent.ID_CAPTURE:
-			_open_capture()
 		_:
 			export_component.handle_action(id)

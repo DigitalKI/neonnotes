@@ -177,12 +177,50 @@ func _ready() -> void:
 	_check("dropping a note into the inbox is refused",
 		GameManager.notes.has("Linker.md") and not GameManager.notes.has("Inbox/Linker.md"))
 
-	# The Inbox itself is system-managed: it cannot be relocated either.
+	# The Inbox itself is system-managed: it cannot be relocated from ANY entry
+	# point — the ⋮ Move page, the MoveDialog, a typed/dragged path, or a drag.
 	main._close_page()
 	main.vault_tree.side_tree.set_selected(inbox_item, 0)
 	main._move_selected()
-	_check("the inbox cannot be moved",
+	_check("the inbox cannot be moved from ⋮ Move",
 		main.page_mode != main.PAGE_MOVE and GameManager.notes.has("Inbox.md"))
+	md.begin("Inbox")
+	md.dest_field.text = "Final"
+	md._do_move()
+	_check("the MoveDialog refuses the inbox as a source",
+		GameManager.notes.has("Inbox.md") and not GameManager.notes.has("Final/Inbox.md"))
+	_check("move_path refuses the inbox folder", main.vault_tree.move_path("Inbox", "Final") == "")
+	_check("move_path refuses the inbox companion", main.vault_tree.move_path("Inbox.md", "Final") == "")
+
+	# A drag that starts on the Inbox row is refused at the drop; the row is
+	# left untouched in the tree.
+	var final_item: TreeItem = null
+	for child in main.vault_tree.side_tree.get_root().get_children():
+		if main.vault_tree._tree_item_drag_path(child) == "Final":
+			final_item = child
+			break
+	_check("a folder row is available as a drop target", final_item != null)
+	main.vault_tree._perform_drop("Inbox", final_item, 0)
+	await get_tree().process_frame
+	_check("dragging the inbox out is refused",
+		GameManager.notes.has("Inbox.md") and not GameManager.notes.has("Final/Inbox.md"))
+
+	# A capture INSIDE the Inbox is an ordinary note: filing it out stays allowed.
+	var cap_item: TreeItem = null
+	for sub in inbox_item.get_children():
+		if str(sub.get_metadata(0)) == capture_rel:
+			cap_item = sub
+			break
+	_check("the capture row exists under the inbox", cap_item != null)
+	main.vault_tree.side_tree.set_selected(cap_item, 0)
+	main._move_selected()
+	_check("a capture can still be filed with ⋮ Move", main.page_mode == main.PAGE_MOVE)
+	md.dest_field.text = "Filed"
+	md._do_move()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_check("the capture filed out of the inbox",
+		GameManager.notes.has("Filed/" + capture_rel.get_file()))
 
 	main.graph_view.open("")
 	await get_tree().process_frame

@@ -341,7 +341,7 @@ func _ready() -> void:
 	var saved_links: Dictionary = GameManager.links
 	GameManager.notes = home_notes
 	GameManager.links = {"sec/s1.md": ["other"], "_homepage.md": ["other"]}
-	gv._resolve_maps = WikiLinks.resolve_maps()
+	gv._rebuild_resolve_maps()
 	gv._build_routes()
 	var min_hub_d := 9999.0
 	for r in gv._routes:
@@ -406,7 +406,7 @@ func _ready() -> void:
 		gv._link_color("big/n000.md") == gv._node_color("big"))
 	check.call("signal colour equals the origin node colour",
 		gv._link_color("target.md") == gv._node_color("target.md"))
-	gv._resolve_maps = WikiLinks.resolve_maps()
+	gv._rebuild_resolve_maps()
 	gv._layout_points()
 	gv._build_routes()
 	var folded_route := {}

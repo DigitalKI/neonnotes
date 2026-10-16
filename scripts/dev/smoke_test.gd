@@ -361,6 +361,16 @@ func _run_smoke() -> void:
 	m._close_settings()
 	GameManager.set_font("Share Tech Mono")
 	GameManager.set_font_size(GameManager.BASE_FONT_SIZE)
+	# Capture entry point: the sidebar 📥 button opens the capture page, its ✕
+	# Close returns to the note view (Main wires the page's close signal), and
+	# the old ⋮ item is gone.
+	fails += _check(m.toolbar.more_menu.get_item_index(33) == -1,
+		"⋮ no longer offers Capture to Inbox")
+	m.vault_tree.capture_requested.emit()
+	await m.get_tree().process_frame
+	fails += _check(m.page_mode == m.PAGE_CAPTURE, "sidebar 📥 opens the capture page")
+	m.capture_page.close_btn.pressed.emit()
+	fails += _check(m.page_mode == "", "capture ✕ Close returns to the note view")
 	# Opening a note from the tree leaves the graph: the note lands in front,
 	# not behind the still-visible map. Run last so the selection change cannot
 	# perturb the ordering/placement checks above.

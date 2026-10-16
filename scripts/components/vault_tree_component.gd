@@ -8,11 +8,11 @@ extends PanelContainer
 
 signal note_requested(fname: String)
 signal delete_requested
-signal inbox_requested
+signal capture_requested
 
 @onready var side_tree: Tree = %SideTree
 @onready var tree_delete_btn: Button = %TreeDeleteBtn
-@onready var inbox_btn: Button = %InboxBtn
+@onready var capture_btn: Button = %CaptureBtn
 @onready var backlinks_panel: PanelContainer = %BacklinksPanel
 @onready var backlinks_box: VBoxContainer = %BacklinksBox
 @onready var config_btn: Button = %ConfigBtn
@@ -103,7 +103,7 @@ func build() -> void:
 	search.text_changed.connect(_on_search_changed)
 	_setup_tag_suggest()
 	tag_browse_btn.pressed.connect(_on_tag_browse_pressed)
-	inbox_btn.pressed.connect(func(): inbox_requested.emit())
+	capture_btn.pressed.connect(func(): capture_requested.emit())
 	if _tree_uses_builtin_activation():
 		side_tree.item_activated.connect(_on_tree_selected)
 	# Match the editor's touch-friendly scrollbar width. Tree exposes its
@@ -199,7 +199,10 @@ func _handle_tree_press(pos: Vector2) -> void:
 	_mobile_hold_ready = false
 	_mobile_hold_timer.stop()
 	_touch_src_path = _tree_item_drag_path(_press_item)
-	if _touch_src_path != "" and OS.get_name() == "Android":
+	# Android arms a drag on long-press. The Inbox cannot move, so never arm it
+	# (no misleading "DRAG READY" on a row that refuses to move).
+	if _touch_src_path != "" and OS.get_name() == "Android" \
+			and not GameManager.is_inbox_root(_touch_src_path):
 		_mobile_touch_candidate = true
 		_mobile_hold_timer.start()
 
@@ -695,6 +698,11 @@ func _tree_get_drag(at_position: Vector2) -> Variant:
 	var meta := _tree_item_drag_path(it)
 	if meta == "":
 		return null
+	# The Inbox is system-managed: no drag starts from its row, so it can never
+	# be relocated (captures inside it remain draggable out to file them).
+	if GameManager.is_inbox_root(meta):
+		flash_cb.call("📥 The Inbox cannot be moved — drag captures out to file them")
+		return null
 	_drag_just_happened = true
 	_is_touch_dragging = true
 
@@ -810,6 +818,11 @@ func _notification(what: int) -> void:
 func _perform_drop(src: String, it: TreeItem, section: int) -> void:
 	if src == "":
 		_clear_drop_hint()
+		return
+	# The Inbox itself is never a move source (a capture inside it is).
+	if GameManager.is_inbox_root(src):
+		_clear_drop_hint()
+		flash_cb.call("📥 The Inbox cannot be moved")
 		return
 	# target folder: the parent folder of the row under the cursor
 	var target_dir := ""
@@ -967,6 +980,10 @@ func _apply_order(rel: String, dir: String, neighbor: String, before: bool) -> v
 ## Move a note or folder (vault-relative) into `dst_dir` ("" = vault root).
 ## Auto-renames on collision. Returns the new relative path ("" on failure).
 func move_path(src_rel: String, dst_dir: String) -> String:
+	# The Inbox folder/companion is system-managed and never relocatable — the
+	# single choke point every move path (drag, Move page, graph) funnels through.
+	if GameManager.is_inbox_root(src_rel):
+		return ""
 	var old_paths := _paths_under(src_rel)
 	var vault := GameManager.vault_abs()
 	var src := vault.path_join(src_rel)
@@ -1173,11 +1190,6 @@ func _inbox_label() -> String:
 	var n := GameManager.inbox_notes().size()
 	return "📥 Inbox" if n == 0 else "📥 Inbox (%d)" % n
 
-
-## Jump to the Inbox: reveal its row and open the companion note. The host
-## opens the mobile drawer first — a hidden tree cannot show a reveal.
-func open_inbox() -> void:
-	select_note(GameManager.INBOX_DIR + ".md", true)
 
 func select_note(fname: String, open_note := true) -> void:
 	# The homepage has no leaf row — it is opened through the Vault root item

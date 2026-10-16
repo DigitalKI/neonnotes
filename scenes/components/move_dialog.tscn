@@ -1,68 +1,82 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene format=3 uid="uid://b3mljc6qcvcef"]
 
-[ext_resource type="Script" path="res://scripts/components/move_dialog.gd" id="1_mvd"]
+[ext_resource type="Script" uid="uid://7gdv5ripewup" path="res://scripts/components/move_dialog.gd" id="1_mvd"]
 
-[node name="MoveDialog" type="MarginContainer"]
+[node name="MoveDialog" type="MarginContainer" unique_id=418959688]
 unique_name_in_owner = true
-visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 theme_override_constants/margin_left = 10
-theme_override_constants/margin_right = 10
 theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
 theme_override_constants/margin_bottom = 10
 script = ExtResource("1_mvd")
 
-[node name="Root" type="VBoxContainer" parent="."]
+[node name="Root" type="VBoxContainer" parent="." unique_id=197354431]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="TitleRow" type="HBoxContainer" parent="Root"]
+[node name="TitleRow" type="HBoxContainer" parent="Root" unique_id=343079799]
 layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="Title" type="Label" parent="Root/TitleRow"]
+[node name="Title" type="Label" parent="Root/TitleRow" unique_id=1042420516]
 layout_mode = 2
+size_flags_vertical = 0
 theme_override_font_sizes/font_size = 20
 text = "📁 MOVE"
 
-[node name="TargetLabel" type="Label" parent="Root/TitleRow"]
+[node name="TargetLabel" type="Label" parent="Root/TitleRow" unique_id=271619008]
 unique_name_in_owner = true
+custom_minimum_size = Vector2(100, 60)
 layout_mode = 2
 size_flags_horizontal = 3
-clip_text = true
+size_flags_vertical = 1
 text = "Moving"
+horizontal_alignment = 3
+autowrap_mode = 1
+clip_text = true
 
-[node name="CloseButton" type="Button" parent="Root/TitleRow"]
+[node name="CloseButton" type="Button" parent="Root/TitleRow" unique_id=733200645]
 unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 35)
+custom_maximum_size = Vector2(-1, 35)
 layout_mode = 2
+size_flags_vertical = 0
 text = "✕ Close"
 
-[node name="DestRow" type="HBoxContainer" parent="Root"]
+[node name="DestRow" type="HBoxContainer" parent="Root" unique_id=1285548908]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="DestField" type="LineEdit" parent="Root/DestRow"]
+[node name="DestField" type="LineEdit" parent="Root/DestRow" unique_id=1309849206]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "destination folder (blank = vault root)"
-autocorrect = false
 
-[node name="MoveBtn" type="Button" parent="Root/DestRow"]
+[node name="MoveBtn" type="Button" parent="Root/DestRow" unique_id=884958342]
 unique_name_in_owner = true
 layout_mode = 2
 text = "✓ Move"
 
-[node name="Hint" type="Label" parent="Root"]
+[node name="Hint" type="Label" parent="Root" unique_id=377800486]
 unique_name_in_owner = true
 layout_mode = 2
 text = "Type a folder path, or pick one below. Blank moves it to the vault root."
+autowrap_mode = 3
 
-[node name="FolderTree" type="Tree" parent="Root"]
+[node name="FolderTree" type="Tree" parent="Root" unique_id=904281590]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="Preview" type="Label" parent="Root"]
+[node name="Preview" type="Label" parent="Root" unique_id=942765349]
 unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 40)
 layout_mode = 2
+autowrap_mode = 1
 clip_text = true

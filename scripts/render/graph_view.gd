@@ -102,10 +102,46 @@ var _collapsed := {}
 var _cluster_nodes := {}          # virtual group key -> parent key
 var _keys: Array[String] = []
 var _routes: Array = []          # {"samples": PackedVector2Array, "bidir": bool}
+## Static map-space geometry, flattened into the batched draw calls. Rebuilt only
+## when the layout/routes change, so the per-frame pass issues a handful of draw
+## calls (one per batch) instead of one per node/edge/rail — the difference
+## between ~10 k draw calls and ~10 at thousands-of-nodes scale.
+var _edge_pts := PackedVector2Array()   # parent→child line segment pairs
+var _rail_pts := PackedVector2Array()   # route guide-rail segment pairs
+var _rail_cols := PackedColorArray()
+## Draw layers, split so the animated light is the *only* thing repainted each
+## frame. The static map (spine, guide rails, nodes) and the overlay (labels +
+## circle menu) live in child CanvasItems repainted only when the map changes
+## (`_map_dirty`); `_draw` itself now emits just the travelling lights.
+##   _bg      drawn behind `_draw`   → hierarchy spine + guide rails (map space)
+##   _nodes   drawn after `_draw`    → node markers (screen space)
+##   _overlay drawn after `_nodes`   → labels + circle menu
+var _bg: Control
+## Node markers, one MultiMesh per marker class (a `canvas_item` shader gets no
+## per-instance data beyond COLOR, so the shape lives in the material uniforms).
+var _mm_leaf: MultiMeshInstance2D
+var _mm_folder: MultiMeshInstance2D
+var _mm_ring: MultiMeshInstance2D
+var _overlay: Control
+## Node-marker halos: each quad is sized to radius + halo so the shader can fade
+## the glow out to the quad edge. Leaves get a tight halo, folders a broad one.
+const NODE_HALO_PX := 3.0
+const FOLDER_HALO_PX := 9.0
+const RING_PAD_PX := 7.0          # quad half-size beyond the collapsed ring
+const NODE_HALO_A := 0.08
+const FOLDER_HALO_A := 0.10
+const FOLDER_R_PX := FOLDER_R + 1.5
+var _map_dirty := true
+var _last_scale := -1.0
+var _last_offset := Vector2(INF, INF)
 # Resolve maps (full-path + basename) built once per open(). Reused by the
 # level and route passes — resolving each link via WikiLinks.resolve() rebuilt
 # them per call, which was O(links × notes): ~7 s at docs-vault scale.
 var _resolve_maps: Array = []
+## Resolved-link index cache shared by the level and route passes; invalidated
+## whenever `_resolve_maps` is rebuilt.
+var _resolved := {}
+var _resolved_valid := false
 var _root_home := ""            # homepage note path when it exists (root hub)
 ## Phone-shaped overview default (see MOBILE_FIT_FLOOR). A var, not a constant
 ## check, so headless probes can exercise both behaviours.
@@ -118,7 +154,64 @@ func _ready() -> void:
 	_font = load("res://assets/fonts/Orbitron.ttf")
 	mouse_default_cursor_shape = Control.CURSOR_ARROW
 	set_process(false)
+	_build_layers()
 	GameManager.metadata_ready.connect(_on_metadata_ready)
+
+## Create the three map layers (see the member docs). They are inserted *before*
+## the authored nav bar so the chrome still draws on top of the map.
+func _build_layers() -> void:
+	_bg = _make_layer("MapBg", _draw_bg)
+	_bg.show_behind_parent = true
+	add_child(_bg)
+	# Node markers: filled leaf discs, folder diamond outlines, and the ring that
+	# marks a collapsed folder. Each is a single MultiMesh, so its whole class is
+	# one draw call whatever the node count (see shaders/graph_nodes.gdshader).
+	_mm_leaf = _make_node_layer("NodeLeaves", 0,
+		NODE_R / (NODE_R + NODE_HALO_PX), NODE_HALO_A, 0.0)
+	_mm_folder = _make_node_layer("NodeFolders", 1,
+		FOLDER_R_PX / (FOLDER_R_PX + FOLDER_HALO_PX), FOLDER_HALO_A, 0.0)
+	_mm_ring = _make_node_layer("NodeRings", 2,
+		FOLDER_R_PX / (FOLDER_R_PX + RING_PAD_PX), 0.0, 1.0 + 5.0 / FOLDER_R_PX)
+	_overlay = _make_layer("Overlay", _draw_overlay)
+	add_child(_overlay)
+	move_child(_bg, 0)
+	move_child(_mm_leaf, 1)
+	move_child(_mm_folder, 2)
+	move_child(_mm_ring, 3)
+	move_child(_overlay, 4)
+
+## One node-marker layer: a MultiMeshInstance2D with a QuadMesh and this
+## shader's material, its shape parameters baked into the uniforms.
+func _make_node_layer(layer_name: String, mode: int, radius_frac: float,
+		halo_alpha: float, ring_t: float) -> MultiMeshInstance2D:
+	var n := MultiMeshInstance2D.new()
+	n.name = layer_name
+	var mat := ShaderMaterial.new()
+	mat.shader = load("res://shaders/graph_nodes.gdshader")
+	mat.set_shader_parameter("mode", mode)
+	mat.set_shader_parameter("radius_frac", radius_frac)
+	mat.set_shader_parameter("halo_alpha", halo_alpha)
+	mat.set_shader_parameter("ring_t", ring_t)
+	n.material = mat
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_2D
+	mm.use_colors = true
+	mm.mesh = QuadMesh.new()
+	n.multimesh = mm
+	add_child(n)
+	return n
+
+func _make_layer(layer_name: String, cb: Callable) -> Control:
+	var c := Control.new()
+	c.name = layer_name
+	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	c.set_anchors_preset(Control.PRESET_FULL_RECT)
+	c.draw.connect(cb)
+	return c
+
+## Request a repaint of the static layers on the next frame.
+func _mark_map_dirty() -> void:
+	_map_dirty = true
 
 
 ## The fast boot path indexes titles/links asynchronously after the shell is
@@ -129,7 +222,7 @@ func _ready() -> void:
 func _on_metadata_ready() -> void:
 	if not visible or not _map_ready:
 		return
-	_resolve_maps = WikiLinks.resolve_maps()
+	_rebuild_resolve_maps()
 	_build_levels()
 	_build_routes()
 	queue_redraw()
@@ -151,7 +244,7 @@ func open(center_note: String = "") -> void:
 	_text = GameManager.color("text")
 	# Build the note→path lookup maps once; both passes below resolve every
 	# link against them (WikiLinks.resolve() per link was O(links × notes)).
-	_resolve_maps = WikiLinks.resolve_maps()
+	_rebuild_resolve_maps()
 	# A restored/persisted open re-applies its navigation *before* the
 	# hierarchy is keyed, so `_rebuild_keys` (run inside `_build_hierarchy`)
 	# pages the scope the user left instead of a fresh overview.
@@ -320,7 +413,7 @@ func refresh_graph() -> void:
 	var keep_offset := _map_offset
 	var keep_selected := _selected
 	var had_selection := _menu.open
-	_resolve_maps = WikiLinks.resolve_maps()
+	_rebuild_resolve_maps()
 	_build_hierarchy()
 	_resolve_live_scope(keep_scope, keep_scope_active, keep_page)
 	_prune_history()
@@ -463,6 +556,7 @@ func _detect_collapsed() -> void:
 ## Recompute the visible node list from hierarchy + current scope/page. The
 ## overview stays unpaged; entering a group pages that parent's immediate nodes.
 func _rebuild_keys() -> void:
+	_mark_map_dirty()
 	_keys.clear()
 	_page_children.clear()
 	_page_count = 1
@@ -645,7 +739,6 @@ func _norm(k: String) -> String:
 ## bright there and dims elsewhere (focus + context).
 func _build_levels() -> void:
 	_levels = {}
-	var resolved := {}
 	# Same Inbox exclusion as `_build_hierarchy`: the level walk must not step
 	# through an Inbox capture to reach a real note, or brightness would imply a
 	# connection the map does not draw.
@@ -654,21 +747,29 @@ func _build_levels() -> void:
 		if GameManager.is_inbox_path(n):
 			continue
 		notes.append(n)
-		var out: Array[String] = []
-		for t in GameManager.links.get(n, []):
-			var r := WikiLinks.resolve_with(t, _resolve_maps)
-			if r != "" and not out.has(r):
-				out.append(r)
-		resolved[n] = out
+	# Reuse the resolved link index the route pass also needs: resolving every
+	# link twice was a large slice of the graph open/build time at vault scale.
 	var m := GraphModel.build(_center_note, GameManager.graph_levels,
-		notes, resolved, GameManager.titles, 100000)
+		notes, _resolved_links(), GameManager.titles, 100000)
 	_levels = m.level_of
+	_mark_map_dirty()
 
 # ---------------------------------------------------------------- link routes
 
+## Rebuild the note→path resolve maps and drop the resolved-link cache that is
+## derived from them. The single entry point for both, so the cache can never go
+## stale against a fresh map (callers used to assign `_resolve_maps` directly).
+func _rebuild_resolve_maps() -> void:
+	_resolve_maps = WikiLinks.resolve_maps()
+	_resolved_valid = false
+
 ## Resolved outbound links per note (raw index values are targets, not paths).
+## Cached until `_resolve_maps` is rebuilt — both the level pass and the route
+## pass consume it, and resolving every link is what dominated their build time.
 func _resolved_links() -> Dictionary:
-	var out := {}
+	if _resolved_valid:
+		return _resolved
+	_resolved = {}
 	for src in GameManager.links.keys():
 		var lst: Array[String] = []
 		for dst in GameManager.links[src]:
@@ -676,13 +777,16 @@ func _resolved_links() -> Dictionary:
 			if r != "" and not lst.has(r):
 				lst.append(r)
 		if not lst.is_empty():
-			out[src] = lst
-	return out
+			_resolved[src] = lst
+	_resolved_valid = true
+	return _resolved
 
 ## Route a link from its source up to the lowest common ancestor and back down,
 ## then resample so the travelling light needs no per-frame search.
 func _build_routes() -> void:
 	_routes.clear()
+	_rail_pts = PackedVector2Array()
+	_rail_cols = PackedColorArray()
 	var links := _resolved_links()
 	# Collect the directed pairs first. Marking the reverse as "seen" while adding
 	# the first route hid the second direction entirely, so a mutually-linked pair
@@ -716,7 +820,7 @@ func _build_routes() -> void:
 			done[b] = {}
 		done[b][a] = true
 		if _routes.size() >= MAX_ROUTES:
-			return
+			break
 		var samples := _route_samples(a, b)
 		if samples.size() >= 2:
 			var back: bool = directed.has(b) and directed[b].has(a)
@@ -733,6 +837,22 @@ func _build_routes() -> void:
 			# aggregate node — the signal inherits the aggregate's colour.
 			_routes.append({"samples": samples, "bidir": back, "speed": speed,
 				"src": a, "dst": b})
+	_build_rail_geometry()
+
+## Flatten every route's guide rail into one coloured segment list: the whole
+## set of rails then renders as a single `draw_multiline_colors` call. The rail
+## is static in map space (only the travelling light animates), so it is built
+## here, once, rather than re-emitted every frame.
+func _build_rail_geometry() -> void:
+	for route in _routes:
+		var samples: PackedVector2Array = route["samples"]
+		var col := Color(_route_guide_color(route), 0.09)
+		# `draw_multiline_colors` wants one colour per *segment*, not per vertex.
+		for i in samples.size() - 1:
+			_rail_pts.append(samples[i])
+			_rail_pts.append(samples[i + 1])
+			_rail_cols.append(col)
+	_mark_map_dirty()
 
 ## Deterministic integer mix (32-bit avalanche). String.hash() barely changes
 ## in its low bits when only the last character differs, which gave links out
@@ -844,6 +964,18 @@ func _layout_points() -> void:
 	for k in _keys:
 		if not _pos.has(k):
 			_pos[k] = center
+	_build_edge_geometry()
+
+## Flatten the hierarchy edges into one segment list, so the whole spine is a
+## single `draw_multiline` call rather than one `draw_line` per edge.
+func _build_edge_geometry() -> void:
+	_edge_pts = PackedVector2Array()
+	for k in _keys:
+		var p := String(_parent.get(k, ""))
+		if p != "" and _pos.has(p):
+			_edge_pts.append(_pos[p])
+			_edge_pts.append(_pos[k])
+	_mark_map_dirty()
 
 func _visible_leaf_weight(key: String) -> int:
 	if not _keys.has(key) or _collapsed.get(key, false):
@@ -922,6 +1054,17 @@ func _process(delta: float) -> void:
 	if not visible or not _map_ready:
 		return
 	_time += delta
+	# Any camera move (pan, zoom, the focus tween) invalidates the static layers.
+	if _map_scale != _last_scale or _map_offset != _last_offset:
+		_last_scale = _map_scale
+		_last_offset = _map_offset
+		_map_dirty = true
+	if _map_dirty:
+		_map_dirty = false
+		_bg.queue_redraw()
+		_sync_nodes()
+		_overlay.queue_redraw()
+	# Only the travelling lights animate, so the per-frame repaint is just them.
 	queue_redraw()
 
 # ---------------------------------------------------------------- drawing
@@ -935,26 +1078,73 @@ func _draw() -> void:
 	# magnify the nodes or the type. Geometry goes through the transform with
 	# widths divided by the scale so strokes stay constant on screen; nodes and
 	# labels are then drawn in screen space at a fixed size.
+	# Every frame this pass emits only the animated light; the spine, rails,
+	# nodes and labels are painted by the layer CanvasItems on demand.
 	var inv := 1.0 / maxf(_map_scale, 0.001)
 	draw_set_transform(_map_offset, 0.0, Vector2(_map_scale, _map_scale))
-	for k in _keys:
-		var p := String(_parent.get(k, ""))
-		if p != "" and _pos.has(p):
-			draw_line(_pos[p], _pos[k], Color(_accent, 0.14), 1.0 * inv, true)
-	for route in _routes:
+	_draw_flows(self, inv)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+## Background layer (`_bg`, painted behind `_draw`): the hierarchy spine and the
+## guide rails, each flattened into a single batched call. Repainted only when
+## the map changes — panning or zooming, not every animated frame. Draw commands
+## must target the layer that owns this draw pass, hence the explicit `_bg`.
+func _draw_bg() -> void:
+	if _keys.is_empty():
+		return
+	# Zoom keeps geometry in map space but strokes a constant width on screen, so
+	# widths are divided by the scale.
+	var inv := 1.0 / maxf(_map_scale, 0.001)
+	_bg.draw_set_transform(_map_offset, 0.0, Vector2(_map_scale, _map_scale))
+	if not _edge_pts.is_empty():
+		_bg.draw_multiline(_edge_pts, Color(_accent, 0.14), 1.0 * inv, true)
+	if not _rail_pts.is_empty():
 		# The faint guide rail shares the signal's colour so a link reads as one
 		# object; for a mutually-linked pair (two origins, one rail) the two
 		# origin hues are blended.
-		draw_polyline(route["samples"], Color(_route_guide_color(route), 0.09),
-			1.0 * inv, true)
-	for route in _routes:
-		_draw_flow(route, inv)
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		_bg.draw_multiline_colors(_rail_pts, _rail_cols, 1.0 * inv, true)
+
+## Rebuild the node MultiMesh from the visible nodes. Markers live in screen
+## space (constant size as the map zooms), so this runs whenever the map — not
+## the animation — changes, exactly like the other static layers.
+func _sync_nodes() -> void:
+	if _mm_leaf == null:
+		return
+	var leaves: Array[String] = []
+	var folders: Array[String] = []
+	var rings: Array[String] = []
 	for k in _keys:
-		_draw_node(k)
-	_draw_labels()
+		if not _pos.has(k):
+			continue
+		var folder: bool = not _children.get(k, []).is_empty() or _collapsed.get(k, false)
+		if not folder:
+			leaves.append(k)
+		else:
+			folders.append(k)
+			if _collapsed.get(k, false):
+				rings.append(k)
+	_fill_nodes(_mm_leaf, leaves, NODE_R + NODE_HALO_PX)
+	_fill_nodes(_mm_folder, folders, FOLDER_R_PX + FOLDER_HALO_PX)
+	_fill_nodes(_mm_ring, rings, FOLDER_R_PX + RING_PAD_PX)
+
+## Write `keys` into one marker MultiMesh. Instances are screen-space quads of
+## `quad_half` half-size, tinted per node.
+func _fill_nodes(mm_node: MultiMeshInstance2D, keys: Array[String], quad_half: float) -> void:
+	var mm := mm_node.multimesh
+	mm.instance_count = keys.size()
+	for i in keys.size():
+		mm.set_instance_transform_2d(i, Transform2D(0.0,
+			Vector2(quad_half, quad_half) * 2.0, 0.0, _to_screen(_pos[keys[i]])))
+		mm.set_instance_color(i, _node_color(keys[i]))
+
+## Overlay layer (`_overlay`, painted above the nodes): labels and the circle
+## menu. Repainted when the map changes (labels are screen-space and follow pan;
+## the menu follows selection).
+func _draw_overlay() -> void:
+	_overlay.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	_draw_labels(_overlay)
 	if _menu.open and _pos.has(_selected):
-		_menu.draw(self, _to_screen(_pos[_selected]), _font, _accent, _accent2,
+		_menu.draw(_overlay, _to_screen(_pos[_selected]), _font, _accent, _accent2,
 			_text, GameManager.color("bg"))
 
 ## Colour a link signal by the node it originates from. The origin is folded to
@@ -971,8 +1161,25 @@ func _route_guide_color(route: Dictionary) -> Color:
 		return src
 	return src.lerp(_link_color(String(route.get("dst", ""))), 0.5)
 
-## Light travelling from the linking note to the linked one.
-func _draw_flow(route: Dictionary, inv: float) -> void:
+## Light travelling from the linking note to the linked one, for *every* route at
+## once: the visible span of each link is flattened into two segment lists
+## (halo + core) so all the signals render as two `draw_multiline_colors` calls
+## instead of a `draw_polyline_colors`/`draw_circle` per link per direction.
+func _draw_flows(ci: CanvasItem, inv: float) -> void:
+	var halo_pts := PackedVector2Array()
+	var halo_cols := PackedColorArray()
+	var core_pts := PackedVector2Array()
+	var core_cols := PackedColorArray()
+	for route in _routes:
+		_append_flow(route, halo_pts, halo_cols, core_pts, core_cols)
+	if core_pts.is_empty():
+		return
+	ci.draw_multiline_colors(halo_pts, halo_cols, 7.0 * inv, true)
+	ci.draw_multiline_colors(core_pts, core_cols, 2.4 * inv, true)
+
+func _append_flow(route: Dictionary, halo_pts: PackedVector2Array,
+		halo_cols: PackedColorArray, core_pts: PackedVector2Array,
+		core_cols: PackedColorArray) -> void:
 	var samples: PackedVector2Array = route["samples"]
 	var n := samples.size()
 	if n < 2:
@@ -1001,24 +1208,27 @@ func _draw_flow(route: Dictionary, inv: float) -> void:
 		var lo := clampi(int(floor(lo_f * float(n - 1))), 0, n - 1)
 		var hi := clampi(int(ceil(hi_f * float(n - 1))), 0, n - 1)
 		var head_idx := hi if fwd else lo
-		var pts := PackedVector2Array()
-		var core := PackedColorArray()
-		var halo := PackedColorArray()
-		for i in range(lo, hi + 1):
-			pts.append(samples[i])
-			# Bright at the head, fading out along the tail.
-			var back: float = absf(float(i - head_idx)) / float(TRAIL)
-			var a: float = 0.05 + 0.80 * pow(maxf(0.0, 1.0 - back), 2.0)
-			core.append(Color(col.r, col.g, col.b, a))
-			halo.append(Color(col.r, col.g, col.b, a * 0.22))
-		if pts.size() < 2:
-			continue
-		draw_polyline_colors(pts, halo, 7.0 * inv, true)
-		draw_polyline_colors(pts, core, 2.4 * inv, true)
-		# Head tip: the origin hue brightened toward white so it still reads as a
-		# travelling light rather than a flat stub of colour.
-		draw_circle(samples[head_idx], 2.8 * inv,
-			Color(col.r, col.g, col.b, 0.95).lightened(0.55))
+		for i in range(lo, hi):
+			# Independent segments rather than a connected strip: same drawn
+			# curve, but every segment of every route shares one draw call, and
+			# `draw_multiline_colors` takes one colour per segment.
+			core_pts.append(samples[i])
+			core_pts.append(samples[i + 1])
+			core_cols.append(_flow_color(col, float(i) + 0.5, head_idx))
+			halo_pts.append(samples[i])
+			halo_pts.append(samples[i + 1])
+			halo_cols.append(_flow_color(col, float(i) + 0.5, head_idx, 0.22))
+
+## Colour of one light segment: bright at the head, fading along the tail. The
+## segment straddling the head is brightened toward white so the signal still
+## reads as a travelling light rather than a flat stub of colour. `scale` dims
+## the halo pass.
+func _flow_color(col: Color, v: float, head_idx: int, scale := 1.0) -> Color:
+	if scale >= 1.0 and absf(v - float(head_idx)) <= 0.5:
+		return Color(col.lightened(0.55), 0.95)
+	var back: float = absf(v - float(head_idx)) / float(TRAIL)
+	var a: float = (0.05 + 0.80 * pow(maxf(0.0, 1.0 - back), 2.0)) * scale
+	return Color(col.r, col.g, col.b, a)
 
 func _section_color(k: String) -> Color:
 	var path := String(_open_target.get(k, k))
@@ -1042,32 +1252,7 @@ func _node_color(k: String) -> Color:
 		col = Color(col.r, col.g, col.b, 0.35)
 	return col
 
-func _draw_node(k: String) -> void:
-	if not _pos.has(k):
-		return
-	var p := _to_screen(_pos[k])
-	var col := _node_color(k)
-	var folder: bool = not _children.get(k, []).is_empty() or _collapsed.get(k, false)
-	var leaf: bool = not folder
-	var r := NODE_R if leaf else FOLDER_R + 1.5
-	# Only folder/group nodes get the broad second-circle halo.
-	if folder:
-		draw_circle(p, r + 9.0, Color(col, 0.10))
-	else:
-		draw_circle(p, r + 3.0, Color(col, 0.08))
-	if folder:
-		# Square/diamond-like folder marker, distinct from circular note leaves.
-		var pts := PackedVector2Array([
-			p + Vector2(0, -r), p + Vector2(r, 0),
-			p + Vector2(0, r), p + Vector2(-r, 0), p + Vector2(0, -r),
-		])
-		draw_polyline(pts, col, 2.0, true)
-	else:
-		draw_circle(p, r, col)
-	if _collapsed.get(k, false):
-		draw_arc(p, r + 5.0, 0.0, TAU, 24, Color(col, 0.9), 1.4, true)
-
-func _draw_labels() -> void:
+func _draw_labels(ci: CanvasItem) -> void:
 	var zoomed := _map_scale >= LABEL_ZOOM
 	for k in _keys:
 		if not _pos.has(k):
@@ -1084,8 +1269,8 @@ func _draw_labels() -> void:
 		if _collapsed.get(k, false) and not _cluster_nodes.has(k):
 			txt += " ·%d" % _children.get(k, []).size()
 		var w := _font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-		draw_rect(Rect2(p + Vector2(8, -8), Vector2(w + 6, 17)), Color(GameManager.color("bg"), 0.72))
-		draw_string(_font, p + Vector2(11, 4), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, _text)
+		ci.draw_rect(Rect2(p + Vector2(8, -8), Vector2(w + 6, 17)), Color(GameManager.color("bg"), 0.72))
+		ci.draw_string(_font, p + Vector2(11, 4), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, _text)
 
 ## Compact neon navigation bar: << < current/total > >> plus scope path.
 func _crumb_chain() -> Array[String]:
@@ -1286,6 +1471,7 @@ func _gui_input(event: InputEvent) -> void:
 		else:
 			_hover = _node_at(event.position)
 			mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if _hover != "" else Control.CURSOR_ARROW
+			_mark_map_dirty()
 			queue_redraw()
 
 func _zoom_at(anchor: Vector2, factor: float) -> void:
@@ -1334,6 +1520,7 @@ func _close_menu() -> void:
 	_menu.clear()
 	if blur_cb.is_valid():
 		blur_cb.call()
+	_mark_map_dirty()
 	queue_redraw()
 
 ## Focus a node chosen outside the canvas (focus-card child list): select its
@@ -1375,6 +1562,7 @@ func _select(key: String, fly: bool = true) -> void:
 		focus_cb.call(String(_open_target.get(key, key)))
 	if fly:
 		_tween_to(key)
+	_mark_map_dirty()
 	queue_redraw()
 	state_changed.emit()
 
@@ -1388,6 +1576,7 @@ func _select_hub(fly: bool = true) -> void:
 		_tween_to("")
 	if focus_cb.is_valid():
 		focus_cb.call(_root_home)
+	_mark_map_dirty()
 	queue_redraw()
 	state_changed.emit()
 
@@ -1426,6 +1615,7 @@ func _activate_menu(action: String) -> void:
 		open_cb.call(note)
 	elif action == "Delete" and delete_cb.is_valid() and note != "":
 		delete_cb.call(note)
+	_mark_map_dirty()
 	queue_redraw()
 
 ## The vault path the circle menu's Move acts on: a container node moves the

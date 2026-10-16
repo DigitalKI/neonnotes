@@ -699,9 +699,16 @@ func ensure_inbox() -> void:
 ## destination (move) and never a node in the vault graph — so the move page,
 ## the tree's drag/drop and GraphView all ask this one question.
 static func is_inbox_path(rel: String) -> bool:
-	if rel == INBOX_DIR or rel == INBOX_DIR + ".md":
+	if is_inbox_root(rel):
 		return true
 	return rel.begins_with(INBOX_DIR + "/")
+
+## True ONLY for the Inbox folder itself or its companion note (`Inbox` /
+## `Inbox.md`) — the system-managed pair, created on demand, that may never be
+## relocated or deleted. Captures *inside* the Inbox are ordinary notes and stay
+## movable, so move/delete guards ask this, not `is_inbox_path`.
+static func is_inbox_root(rel: String) -> bool:
+	return rel == INBOX_DIR or rel == INBOX_DIR + ".md"
 
 ## Notes under the Inbox folder (any depth), sorted. Drives the tree badge;
 ## "reviewed" simply means the user dragged the capture back out of Inbox.

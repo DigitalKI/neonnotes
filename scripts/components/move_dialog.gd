@@ -172,6 +172,11 @@ func _do_move() -> void:
 	if _target == "":
 		flash_cb.call("✗ Nothing to move")
 		return
+	# The Inbox itself is system-managed and never relocatable (a capture inside
+	# it is an ordinary note, so only the root pair is refused).
+	if GameManager.is_inbox_root(_target):
+		flash_cb.call("📥 The Inbox cannot be moved")
+		return
 	var dest := _dest()
 	if dest.contains(".."):
 		flash_cb.call("✗ Invalid destination: " + dest)

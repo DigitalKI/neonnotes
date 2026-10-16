@@ -26,6 +26,38 @@ _Last updated: 2026-10-15 · Godot 4.7 · renderer: gl_compatibility_
 
 ## 2. Current state (present-tense facts — git is the changelog)
 
+- **Graph render performance (2026-10-15):** the map redrew *everything* every
+  frame — nodes (≈2 draw calls each via `draw_circle`/`draw_polyline`), a
+  `draw_line` per hierarchy edge, and ≈10 draw calls per link route — so a
+  few-hundred-node vault already hit ≈5 000 draw calls and ≈19 ms/frame, and
+  1 000+ nodes ≈8 500 calls / ≈37 ms. Mobile is draw-call bound, so this was the
+  bottleneck. Three changes, each verified with a real-renderer profiler (no
+  screenshots):
+  1. **Static/dynamic split.** `GraphView` owns three child CanvasItems:
+     `_bg` (`show_behind_parent`; batched spine + guide rails), `_nodes`
+     (MultiMesh markers), `_overlay` (labels + circle menu). They repaint only
+     when `_mark_map_dirty()` fires (pan/zoom/select/hover/layout), while `_draw`
+     itself emits only the animated light each frame.
+  2. **Batched links.** Fill geometry is flattened once into segment lists
+     (`_build_edge_geometry`/`_build_rail_geometry`) and drawn with
+     `draw_multiline[_colors]`; the travelling light is flattened per frame into
+     two `draw_multiline_colors` passes (halo + core). One colour per *segment*,
+     not per vertex. 400 routes: ≈4 006 draw calls → 34.
+  3. **MultiMesh nodes.** Leaves / folders / collapsed rings are three
+     `MultiMeshInstance2D`s over `shaders/graph_nodes.gdshader` (`mode` uniform
+     = disc / diamond outline / ring). **`canvas_item` shaders expose no
+     `INSTANCE_CUSTOM`** (spatial-only) — only per-instance `COLOR` — so shape
+     params live in material uniforms and there are three meshes, not one.
+  Result: draw calls ≈5 071→220 (250 notes), ≈8 491→275 (2 000), ≈8 255→157
+  (4 000, keys capped at 2 000); per-frame CPU ≈19–37 ms → ≈6–7 ms at every size.
+  Profile: `NEONNOTES_DEV=1 godot --path . scenes/dev/GraphBench.tscn`
+  (`scripts/dev/bench_graph.gd`) prints build-phase times, idle-vs-pan draw ms
+  per layer, RendererServer counters, and pixel-asserts the node shader renders.
+  **Still open:** the radial layout (≈80 ms) and the level BFS (≈30 ms) run on
+  the main thread and hitch the first overview build at ~2 000 visible nodes —
+  move them to a worker `Thread`. Link resolution is cached (`_resolved`) and
+  shared by the level + route passes; rebuild the maps only via
+  `_rebuild_resolve_maps()` so the cache cannot go stale.
 - **OS share-sheet intake (2026-10-15):** incoming shares are handled by
   `addons/SharePlugin` (cengiz-pz, v2 EditorExportPlugin) + `addons/GMPShared`;
   both are enabled in `project.godot [editor_plugins]`. New
@@ -83,11 +115,15 @@ _Last updated: 2026-10-15 · Godot 4.7 · renderer: gl_compatibility_
   image`) writes the note, registers the path in `GameManager.notes`
   (`write_note()` only refreshes *metadata*, never the path list), and returns
   the rel path — it is the single entry point an Android share intent will call
-  later. UI: `%InboxBtn` in `side_panel.tscn` (opens the mobile drawer, then
-  `vault_tree.open_inbox()` reveals the row), a scene-authored `%CapturePage`
-  inside `%Content` like the other pages, reachable from
-  `⋮ → 📥 Capture to Inbox…`, and `vault_tree.inbox_requested` →
-  `Main._open_inbox`. Covered by `tests/TestCapture.tscn` (in `run_tests.sh`).
+  later. UI: `%CaptureBtn` in `side_panel.tscn` — the 📥 button beside the 🏷 tag
+  browser — emits `vault_tree.capture_requested` → `Main._open_capture`, and a
+  scene-authored `%CapturePage` inside `%Content` like the other pages.
+  Capture's **only** entry point is that button: the old
+  `⋮ → 📥 Capture to Inbox…` item (`MoreMenuComponent.ID_CAPTURE`) and the
+  `_open_inbox`/`open_inbox()` reveal helpers are gone. `Main` also connects
+  `capture_page.close_requested` → `_close_page`, so the page's ✕ Close works —
+  previously the signal was never connected and the page could only be left by
+  capturing. Covered by `tests/TestCapture.tscn` (in `run_tests.sh`).
   **Presentation-only exclusions (2026-10-15):** the Inbox is a *temporary
   landing pad*, so it is never a **move destination** and never a **graph node**,
   while staying a plain syncable/tree/searchable folder. One predicate,
@@ -97,10 +133,18 @@ _Last updated: 2026-10-15 · Godot 4.7 · renderer: gl_compatibility_
   `MoveDialog` omits the destination row and `_blocks()` refuses a typed path,
   and `VaultTreeComponent` refuses a section-0 drag INTO the Inbox (reordering
   captures above/below stays allowed). Knocked out of both `⋮ → Move…` (tree)
-  and the graph radial **Move** since they share `MoveDialog`; `Main._move_selected`
-  also refuses the Inbox as a *source* (system-managed, like the delete guard).
-  Verified in `tests/TestMoveDialog.tscn` (dialog row + typed path + drop +
-  source + graph keys) and `tests/unit_tests.gd _check_inbox_path`.
+  and the graph radial **Move** since they share `MoveDialog`.
+  **Immovable source (2026-10-15):** the Inbox *root* — folder or companion,
+  never a capture — is also immovable from every entry point. A narrower
+  `GameManager.is_inbox_root()` is refused by `move_path()` itself (the one choke
+  point every move funnels through), by `_perform_drop()` and `_tree_get_drag()`
+  (no drag starts from the Inbox row, so the Android long-press never arms), and
+  by `MoveDialog._do_move()`; `Main._move_selected` uses the same predicate, so a
+  capture *inside* the Inbox can still be filed out with `⋮ → Move…` (matching
+  `docs/help.md`) while the Inbox itself cannot. Verified in
+  `tests/TestMoveDialog.tscn` (dialog row + typed path + drop + source + graph
+  keys + drag/`move_path` refusal + capture filing) and `tests/unit_tests.gd
+  _check_inbox_path`.
   **Not yet done:** *receiving* the OS share sheet — see §3 "Next up".
 - **Move page + graph Move (2026-10-15):** filing a note no longer needs a
   precise drag. `scripts/components/move_dialog.gd` (+ scene
@@ -1133,6 +1177,9 @@ _These OVERRIDE the skill's defaults for this project._
 | `res://scripts/common/note_crud.gd` | Static vault CRUD helpers (rm_dir, erase_note_meta, scrub_order, compute_delete_set, trash move/restore/purge) |
 | `res://scripts/components/trash_page.gd` | Trash page: lists/restores/purges trashed items (scene `trash_page.tscn`) |
 | `res://scripts/render/graph_model.gd` | Dependency-free graph semantics (levels/edges) |
+| `res://scripts/render/graph_view.gd` | Vault map: layered/batched canvas rendering (`_bg`/`_nodes`/`_overlay`), radial layout, scope/page, circle menu |
+| `res://shaders/graph_nodes.gdshader` | Node markers as MultiMesh quads (disc / diamond outline / ring) |
+| `res://scripts/dev/bench_graph.gd` (+ `scenes/dev/GraphBench.tscn`) | Real-renderer graph profiler: build phases, per-layer idle/pan draw ms, draw calls; pixel-asserts the node shader |
 | `res://scripts/render/` | PreviewBuilder, ChartView, GraphView, FX |
 | `res://scripts/sync/sync_service.gd` | LAN discovery/handshake/streaming transfer |
 | `res://scripts/components/` | Theme/Layout/SlashMenu/Export/VaultTree components |
@@ -1279,6 +1326,17 @@ _These OVERRIDE the skill's defaults for this project._
   parent's descendants while the layout skips them dumps every one onto the
   `_pos[k] = center` fallback — the whole vault stacks on the hub. `_collapsed`
   keys are the group markers; don't recurse past them.
+- **Graph static layers need invalidation:** nodes/edges/rails/labels/menu are
+  child CanvasItems repainted *only* when `_mark_map_dirty()` runs. Any new
+  mutation that changes `_pos`/`_keys`/`_collapsed`/`_levels`/`_selected`/`_hover`
+  must call it or the pixels go stale (camera pan/zoom is caught automatically in
+  `_process`). Nodes are MultiMesh instances in screen space, so they are
+  rebuilt by `_sync_nodes()`, not by a `_draw`.
+- **`INSTANCE_CUSTOM` is spatial-only:** a `canvas_item` shader gets only
+  per-instance `COLOR` (and `INSTANCE_ID`), so `shaders/graph_nodes.gdshader`
+  takes its shape params as material uniforms and GraphView runs three separate
+  marker MultiMeshes (leaf disc, folder diamond, collapsed ring) instead of one.
+  `use_custom_data`/`set_instance_custom_data` is a silent no-op on 2D MultiMesh.
 - **Link routes lag the boot by design:** `scan_paths()` clears `links` and
   `load_metadata_async()` fills them 12 notes/frame — a graph opened in that
   window has an empty index. Anything deriving routes/levels/labels from

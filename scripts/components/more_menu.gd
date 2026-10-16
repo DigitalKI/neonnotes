@@ -10,7 +10,6 @@ const ID_SAVE_NOW := 30
 const ID_MOVE := 34
 const ID_DELETE_NOTE := 31
 const ID_TRASH := 32
-const ID_CAPTURE := 33
 const ID_HELP := 10
 const ID_BACKLINKS := 11
 const ID_GRAPH := 12

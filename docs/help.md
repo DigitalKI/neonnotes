@@ -22,9 +22,9 @@ fit move into **⋮**.
 | **⬇ Export** | Save or share the current note |
 | **🔗 Links** | Show backlinks for the open note |
 | **🕸 Graph** | Show the vault's link graph |
-| **⋮** | Save Now, Move…, Delete Note…, Capture to Inbox…, Help, Backlinks, Graph, the export actions, and Open Trash… |
+| **⋮** | Save Now, Move…, Delete Note…, Help, Backlinks, Graph, the export actions, and Open Trash… |
 
-The sidebar contains the search field, an **📥 Inbox** button, the vault tree,
+The sidebar contains the search field, an **📥 Capture to Inbox** button (beside the **🏷** tag browser), the vault tree,
 an optional backlinks panel, and **⚙ Settings**. The status bar at the bottom shows short messages and
 a small sync indicator (grey = not paired, red = paired/error, gold = syncing,
 green = up to date).
@@ -362,12 +362,12 @@ is never synchronized.
 
 ## 18. Inbox and capture
 
-**📥 Inbox** is where captured material lands before you file it. The button
-sits at the top of the sidebar next to the search field; it opens the Inbox row,
-which is pinned to the top of the vault tree and shows how many captures are
-waiting.
+**📥 Inbox** is where captured material lands before you file it. The **📥**
+button at the top of the sidebar — next to the **🏷** tag browser — opens
+**Capture to Inbox** directly; a capture then lands in the Inbox row, which is
+pinned to the top of the vault tree and shows how many captures are waiting.
 
-Use **⋮ → 📥 Capture to Inbox…** to capture without leaving the app:
+Use **📥 Capture to Inbox** to capture without leaving the app:
 
 - **📋 Paste** pulls in the clipboard, then **✓ Capture** saves it. A pasted URL
   becomes a link note (the URL is kept in the note's `source:` field); anything

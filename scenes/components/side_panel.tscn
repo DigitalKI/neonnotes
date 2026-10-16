@@ -26,10 +26,10 @@ layout_mode = 2
 tooltip_text = "Browse all tags"
 text = "🏷"
 
-[node name="InboxBtn" type="Button" parent="SideVBox/SearchRow"]
+[node name="CaptureBtn" type="Button" parent="SideVBox/SearchRow"]
 unique_name_in_owner = true
 layout_mode = 2
-tooltip_text = "Inbox — captured links, images and text"
+tooltip_text = "Capture to Inbox — paste a link, text or image"
 text = "📥"
 
 [node name="ActiveTags" type="HFlowContainer" parent="SideVBox"]

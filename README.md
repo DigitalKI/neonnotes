@@ -71,12 +71,13 @@ you also get system sharing; on desktop, Share falls back to the clipboard and
 the OS file manager.
 
 ### 📥 Inbox and capture
-**📥** at the top of the sidebar opens the **Inbox** — a pinned, badged row at
-the top of the vault tree that collects material before you file it. **⋮ → 📥
-Capture to Inbox…** pastes a link or text, or imports an image into
+**📥** at the top of the sidebar (beside the **🏷** tag browser) opens
+**Capture to Inbox** — paste a link or text, or import an image into
 `vault/media/`; a captured link keeps its URL in the note's `source:` field.
-The Inbox is simply a folder (`Inbox/`) inside your vault, so captures sync
-between paired devices like any other note — drag one out to file it.
+Captures land in the **Inbox**, a pinned, badged row at the top of the vault
+tree that collects material before you file it. The Inbox is simply a folder
+(`Inbox/`) inside your vault, so captures sync between paired devices like any
+other note — drag one out to file it.
 
 On Android and iOS the system **share sheet** can post straight into the Inbox:
 share a link, an image or a piece of text to **NeonNotes** and it appears as an

@@ -60,6 +60,13 @@ func _check_inbox_path() -> void:
 	_check(not GameManagerScript.is_inbox_path("Inboxed.md"), "a name starting with Inbox is not the inbox")
 	_check(not GameManagerScript.is_inbox_path("Notes/Inbox.md"), "a nested Inbox-named note is not the inbox")
 	_check(not GameManagerScript.is_inbox_path("Notes/Inbox/Capture.md"), "a nested Inbox-named folder is not the inbox")
+	# The narrower `is_inbox_root` guards relocation/deletion: only the folder
+	# itself and its companion note, never a capture living inside.
+	_check(GameManagerScript.is_inbox_root("Inbox"), "inbox root folder")
+	_check(GameManagerScript.is_inbox_root("Inbox.md"), "inbox root companion note")
+	_check(not GameManagerScript.is_inbox_root("Inbox/Capture.md"), "a capture is not the inbox root")
+	_check(not GameManagerScript.is_inbox_root("Inbox/Sub/Deep.md"), "a nested capture is not the inbox root")
+	_check(not GameManagerScript.is_inbox_root("Inboxed.md"), "an Inbox-prefixed note is not the inbox root")
 
 
 func _check_media_import() -> void:

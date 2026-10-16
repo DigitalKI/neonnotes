@@ -89,10 +89,12 @@ func _ready() -> void:
 	var first := root.get_first_child()
 	_check("inbox pinned first", first != null and String(first.get_metadata(0)) == "Inbox.md")
 	_check("inbox row is badged", first != null and String(first.get_text(0)).contains("(%d)" % count))
-	# open_inbox() reveals + selects the pinned row.
-	panel.open_inbox()
-	_check("open_inbox selects the Inbox", panel.side_tree.get_selected() != null \
-		and String(panel.side_tree.get_selected().get_metadata(0)) == "Inbox.md")
+	# The sidebar 📥 button beside the 🏷 tag browser asks the host to open the
+	# capture page — capture's only entry point now.
+	var asked := [false]
+	panel.capture_requested.connect(func(): asked[0] = true)
+	panel.capture_btn.pressed.emit()
+	_check("sidebar capture button requests capture", asked[0])
 	panel.queue_free()
 	await get_tree().process_frame
 
