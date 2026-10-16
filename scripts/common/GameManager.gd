@@ -885,6 +885,15 @@ func all_tags() -> Array[String]:
 	out.sort()
 	return out
 
+
+## Human-facing title for a note path: its indexed front-matter title when
+## present, else the file stem ("folder/note.md" -> "note"). The single owner of
+## the "title-or-filename" fallback used by the tree, graph, cards, editor and
+## dialogs — see NoteMetadata.title_or_stem.
+func note_title(rel: String) -> String:
+	return NoteMetadata.title_or_stem(String(titles.get(rel, "")), rel)
+
+
 ## One pass over a note producing its front-matter title and tags plus every
 ## outbound [[wiki-link]] target. Feeds the in-memory link index so backlinks,
 ## the graph view and post-move link rewriting never re-read the whole vault.
@@ -927,14 +936,25 @@ func _parse_note_meta(text: String) -> Dictionary:
 			line_start = nl + 1
 	return {"title": title, "tags": tag_list, "links": extract_wiki_links(text)}
 
-## Raw [[wiki-link]] targets in `text` (deduplicated, alias stripped). Lives here
-## rather than in WikiLinks so GameManager can index links without a cyclic
-## dependency; WikiLinks.extract_links() delegates to it.
+## Compiled `[[target]]` / `[[target|label]]` regex, shared by the link index
+## (`extract_wiki_links`) and `GraphDigest`'s markdown stripper. Capture groups:
+## 1 = target, 2 = label (empty when absent). The canonical definition lives
+## here (not WikiLinks) so GameManager can index links without a cyclic
+## dependency; WikiLinks.extract_links() delegates to extract_wiki_links().
+static var _wiki_link_re: RegEx
+
+static func wiki_link_regex() -> RegEx:
+	if _wiki_link_re == null:
+		_wiki_link_re = RegEx.create_from_string("\\[\\[([^\\]|]+)(?:\\|([^\\]]+))?\\]\\]")
+	return _wiki_link_re
+
+
+## Raw [[wiki-link]] targets in `text` (deduplicated, alias stripped).
 static func extract_wiki_links(text: String) -> Array[String]:
 	var result: Array[String] = []
 	if not text.contains("[["):
 		return result  # nothing to find — skip the regex on this hot path
-	var re := RegEx.create_from_string("\\[\\[([^\\]|]+)(?:\\|[^\\]]+)?\\]\\]")
+	var re := wiki_link_regex()
 	for m in re.search_all(text):
 		# `\[[note]]` is escaped literal text, not a link. MarkdownParser already
 		# skips it via its ESCAPE span, so the index must agree — otherwise the

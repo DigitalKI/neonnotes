@@ -21,7 +21,6 @@ const PREVIEW_LINES := 50
 const MONTHS := ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
 	"Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
-static var _re_wiki: RegEx
 static var _re_md_link: RegEx
 static var _re_stamp: RegEx
 
@@ -140,10 +139,7 @@ static func count_occurrences(text: String, needle: String) -> int:
 	return n
 
 static func _wiki_regex() -> RegEx:
-	if _re_wiki == null:
-		_re_wiki = RegEx.new()
-		_re_wiki.compile("\\[\\[([^\\]|]+)(?:\\|([^\\]]+))?\\]\\]")
-	return _re_wiki
+	return GameManager.wiki_link_regex()
 
 static func _md_link_regex() -> RegEx:
 	if _re_md_link == null:
@@ -209,14 +205,13 @@ static func note_card(rel: String, digest: Dictionary, resolve_maps: Array = [])
 		var resolved := WikiLinks.resolve_with(name, maps)
 		outbound.append({
 			"raw": name,
-			"label": _title_for(resolved) if resolved != "" else name,
+			"label": GameManager.note_title(resolved) if resolved != "" else name,
 			"resolved": resolved,
 		})
-	var raw_title := String(GameManager.titles.get(rel, ""))
 	return {
 		"kind": "note",
 		"rel": rel,
-		"title": raw_title if raw_title != "" else rel.get_file().trim_suffix(".md"),
+		"title": GameManager.note_title(rel),
 		"tags": tags_for(rel),
 		"links": outbound,
 		"children": [] as Array[String],
@@ -242,10 +237,9 @@ static func folder_card(rel: String, digest: Dictionary) -> Dictionary:
 		if not String(note).begins_with(prefix):
 			continue
 		if String(note).get_base_dir() == stem:
-			var t := String(GameManager.titles.get(note, ""))
 			children.append({
 				"rel": String(note),
-				"title": t if t != "" else String(note).get_file().trim_suffix(".md"),
+				"title": GameManager.note_title(String(note)),
 			})
 		for tag in GameManager.tags.get(note, []):
 			var s := String(tag)
@@ -258,11 +252,10 @@ static func folder_card(rel: String, digest: Dictionary) -> Dictionary:
 	for tag in union:
 		if not own.has(tag):
 			own.append(tag)
-	var raw_title := String(GameManager.titles.get(rel, ""))
 	return {
 		"kind": "folder",
 		"rel": rel,
-		"title": raw_title if raw_title != "" else stem.get_file(),
+		"title": GameManager.note_title(rel),
 		"tags": own,
 		"links": [] as Array[Dictionary],
 		"children": children,
@@ -295,8 +288,3 @@ static func tags_for(rel: String) -> Array[String]:
 			out.append(s)
 	return out
 
-static func _title_for(rel: String) -> String:
-	if rel == "":
-		return ""
-	var t := String(GameManager.titles.get(rel, ""))
-	return t if t != "" else rel.get_file().trim_suffix(".md")

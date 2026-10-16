@@ -1138,11 +1138,14 @@ _These OVERRIDE the skill's defaults for this project._
   classes are `class_name … extends RefCounted` with static funcs; views
   extend `Control`.
 - **Shared string helpers are canonical (2026-10-16):** `NoteMetadata.frontmatter()`
-  / `unescape()` (the front-matter block-walk + quote/backslash unescape) and
-  `TextUtils.re_escape()` (regex metachar escape) are the single source of
-  truth. `GameManager._parse_note_meta`, `MarkdownParser.parse`, `body()`/
-  `field()` and the tree's link-rewriter all consume them — do not re-implement
-  a `---…---` scan or `re_escape` locally.
+  / `unescape()` (front-matter block-walk + quote/backslash unescape),
+  `NoteMetadata.title_or_stem()` + `GameManager.note_title()` (note display
+  title, falling back to the file stem), `GameManager.wiki_link_regex()` (the
+  `[[target|label]]` regex) and `TextUtils.re_escape()` (regex metachar escape)
+  are each the single source of truth. `GameManager._parse_note_meta`,
+  `MarkdownParser.parse`, `GraphDigest`, `GraphModel.node_label` and the tree's
+  link-rewriter all consume them — do not re-implement a `---…---` scan, a
+  "title-or-filename" fallback, the wiki-link regex, or `re_escape` locally.
 - **Indentation: TABS everywhere** (standardized 2026-09-12, all scripts).
 - **Style:** typed inference `:=`, lambdas for short callbacks, backtick
   template strings.

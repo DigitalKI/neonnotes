@@ -50,6 +50,15 @@ static func field(source: String, key: String, fallback := "") -> String:
 	var fields: Dictionary = frontmatter(source)["fields"]
 	return String(fields.get(key, fallback))
 
+
+## Human-facing note title: the front-matter title when non-empty, else the
+## file stem without ".md" ("folder/note.md" -> "note"). Pure so it is shared by
+## GameManager's index (`note_title`), GraphModel (which receives a local titles
+## dict) and the graph cards without pulling in the autoload.
+static func title_or_stem(title: String, rel: String) -> String:
+	return title if title != "" else rel.get_file().trim_suffix(".md")
+
+
 static func preview(body_text: String, title: String) -> String:
 	if title.strip_edges() == "":
 		return body_text

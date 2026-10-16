@@ -1,5 +1,10 @@
 class_name GraphModel
 extends RefCounted
+
+# Preloaded (not the class_name global) so GraphModel still resolves when run
+# via `godot --script`; NoteMetadata is pure (no GameManager/WikiLinks), keeping
+# this class dependency-light.
+const _NoteMeta := preload("res://scripts/common/note_metadata.gd")
 ## Renderer-agnostic graph neighbourhood: which notes are shown, how far from
 ## the centre, and how they connect. Knows nothing about drawing, so the view
 ## can be replaced later (a synthwave-style scene instead of today's canvas)
@@ -30,8 +35,7 @@ var titles := {}                     # note -> front-matter title ("" = file nam
 
 ## Front-matter title, falling back to the file name — labels never show paths.
 func node_label(note: String) -> String:
-	var t := String(titles.get(note, ""))
-	return t if t != "" else note.get_file().trim_suffix(".md")
+	return _NoteMeta.title_or_stem(String(titles.get(note, "")), note)
 
 ## Build the neighbourhood of `center_note`.
 ## `notes` are vault-relative paths, `links` maps note -> resolved note paths.

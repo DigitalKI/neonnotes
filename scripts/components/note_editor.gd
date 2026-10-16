@@ -271,7 +271,7 @@ func sync_service() -> Variant:
 
 func _on_note_title_changed(value: String) -> void:
 	_note_title = value.strip_edges()
-	note_title_label.text = _note_title if _note_title != "" else GameManager.current_rel.get_file().trim_suffix(".md")
+	note_title_label.text = NoteMetadata.title_or_stem(_note_title, GameManager.current_rel)
 	autosave_timer.start()
 
 
@@ -279,7 +279,7 @@ func set_title_form(value: String) -> void:
 	title_input.set_block_signals(true)
 	title_input.text = value
 	title_input.set_block_signals(false)
-	note_title_label.text = value if value != "" else GameManager.current_rel.get_file().trim_suffix(".md")
+	note_title_label.text = NoteMetadata.title_or_stem(value, GameManager.current_rel)
 
 
 func refresh_note_tag_chips() -> void:
