@@ -21,7 +21,7 @@ fit move into **⋮**.
 | **? Help** | This page |
 | **⬇ Export** | Save or share the current note |
 | **🔗 Links** | Show backlinks for the open note |
-| **🕸 Graph** | Show the vault's link graph |
+| **⊛ Graph** | Show the vault's link graph |
 | **⋮** | Save Now, Move…, Delete Note…, Help, Backlinks, Graph, the export actions, and Open Trash… |
 
 The sidebar contains the search field, an **📥 Capture to Inbox** button (beside the **🏷** tag browser), the vault tree,
@@ -197,7 +197,7 @@ opens the platform's default browser.
 
 ### The graph
 
-**🕸 Graph** renders a radial map of the vault, with folders forming the
+**⊛ Graph** renders a radial map of the vault, with folders forming the
 hierarchy and notes branching from them. The **📥 Inbox** is left out — it is a
 temporary landing pad for captures, not part of the knowledge map. Click a node
 to open its note. Drag to pan, scroll the wheel or pinch to zoom; hover

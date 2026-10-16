@@ -17,7 +17,9 @@ signal nav_action(action: String)
 @onready var next_btn: Button = %NextBtn
 @onready var last_btn: Button = %LastBtn
 @onready var pager_box: HBoxContainer = %Pager
-@onready var crumbs_box: HBoxContainer = %Crumbs
+@onready var crumbs_box: HFlowContainer = %Crumbs
+## Desktop only: hand the map the whole content area (full view) and back.
+@onready var expand_btn: Button = %ExpandBtn
 
 func _ready() -> void:
 	home_btn.pressed.connect(func(): nav_action.emit("home"))
@@ -25,6 +27,9 @@ func _ready() -> void:
 	prev_btn.pressed.connect(func(): nav_action.emit("<"))
 	next_btn.pressed.connect(func(): nav_action.emit(">"))
 	last_btn.pressed.connect(func(): nav_action.emit(">>"))
+	# "expand" is a shell layout action, not graph navigation: main.gd routes it
+	# to its own handler and everything else to GraphView._activate_nav.
+	expand_btn.pressed.connect(func(): nav_action.emit("expand"))
 	apply_theme()
 	GameManager.palette_changed.connect(apply_theme)
 	GameManager.font_changed.connect(apply_theme)
@@ -43,6 +48,11 @@ func update_state(state: Dictionary) -> void:
 	prev_btn.disabled = page <= 0
 	next_btn.disabled = page >= count - 1
 	last_btn.disabled = page >= count - 1
+	# The map's shape is the shell's business (dock vs full view); the button
+	# only mirrors it as a pressed state + tooltip.
+	var expanded := bool(state.get("expanded", false))
+	expand_btn.set_pressed_no_signal(expanded)
+	expand_btn.tooltip_text = "Back to the side panel" if expanded else "Full screen graph"
 
 	_clear_crumbs()
 	var crumbs: Array = state.get("crumbs", [])
@@ -82,6 +92,9 @@ func apply_theme() -> void:
 	home_btn.add_theme_color_override("font_color", c["accent"])
 	home_btn.add_theme_color_override("font_disabled_color", c["accent"])
 	page_label.add_theme_color_override("font_color", c["text"])
+	expand_btn.add_theme_color_override("font_color", c["accent"])
+	expand_btn.add_theme_color_override("font_pressed_color", c["accent"])
+	expand_btn.add_theme_color_override("font_disabled_color", c["accent"])
 	for btn in [first_btn, prev_btn, next_btn, last_btn]:
 		btn.add_theme_color_override("font_color", c["accent2"])
 		btn.add_theme_color_override("font_disabled_color",

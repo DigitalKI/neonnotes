@@ -54,7 +54,7 @@ itself still propagates to paired devices as a tombstone.
 
 ### 🔗 Wiki-links, backlinks, and the graph
 Write `[[Some Note]]` or `[[Some Note|a label]]` to link notes together.
-**🔗 Links** shows backlinks, and **🕸 Graph** renders a radial vault map with
+**🔗 Links** shows backlinks, and **⊛ Graph** renders a radial vault map with
 folder-spine hierarchy and animated, directional link light. Link resolution on
 the big generated test vault was optimized ~1,400× so the graph opens promptly
 even past a thousand notes.
@@ -92,7 +92,7 @@ documents are not offered, since NeonNotes cannot store them. Toggle the
 page: type a destination folder (a missing path is created on the spot) or pick
 one from a folder tree. Moving a folder takes its whole subtree — children,
 companion note and embedded media. The note you had open stays open where it
-lands. In the **🕸 Graph**, a node's radial menu offers the same **Move** action;
+lands. In the **⊛ Graph**, a node's radial menu offers the same **Move** action;
 the map updates and re-focuses the moved node. Every moved note has the
 `[[wiki-links]]` that point at it rewritten automatically.
 

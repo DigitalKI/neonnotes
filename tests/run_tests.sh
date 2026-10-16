@@ -61,6 +61,9 @@ run_godot_test "MOBILE TREE TOUCH RESULT: OK" --headless --path . tests/ReproTre
 run_godot_test "SELECTION RESULT: OK" --headless --path . tests/TestSelectionOverlay.tscn
 # Graph focus card: digest extraction/cache, card rendering, form-factor layout.
 run_godot_test "CARD RESULT: OK" --headless --path . tests/TestGraphCard.tscn
+# Graph dock (desktop right panel: follow-the-note, tap actions, remembered
+# width, expand to the full view) + the mobile screen-edge swipes.
+run_godot_test "GRAPH DOCK RESULT: OK" --headless --path . tests/TestGraphDock.tscn
 # Sync delete/move propagation over loopback (real frame protocol + tombstones).
 run_godot_test "SYNC DELETE/MOVE RESULT: OK" --headless --path . tests/TestSyncDeleteMove.tscn
 # Sync identity is per vault (in-folder id + device-local phrase); switching

@@ -124,6 +124,12 @@ var last_opened_rel := ""
 ## Last graph navigation/camera state (scope, page, selection, zoom, position).
 ## Persisted so a graph-default app reopens on the exact view it was left on.
 var graph_view_state := {}
+## Desktop graph dock width: the ContentSplit offset while the map shares the
+## content area with the note (i.e. the note column's width). 0 = the shell
+## computes a default. Only the *width* is persisted — whether the dock is open
+## is session state, because dev/smoke runs read the real user://settings.cfg
+## and a remembered "open" would leak a developer layout into every test boot.
+var graph_dock_split := 0
 var vault_dir := VAULT_DIR
 var dev_session := false  # true when this run is editor/MCP-driven (isolated vault)
 var current_file := ""  # absolute path of the open note ("" = none)
@@ -1055,6 +1061,7 @@ func _load_settings() -> void:
 	last_opened_rel = String(cf.get_value("ui", "last_opened_rel", last_opened_rel))
 	var gv_state = cf.get_value("ui", "graph_view_state", graph_view_state)
 	graph_view_state = gv_state if typeof(gv_state) == TYPE_DICTIONARY else {}
+	graph_dock_split = clampi(int(cf.get_value("ui", "graph_dock_split", graph_dock_split)), 0, 6000)
 	if not PALETTES.has(palette_name):
 		palette_name = "Synthwave"
 	if not FONTS.has(font_name):
@@ -1104,6 +1111,7 @@ func _save_settings() -> void:
 	cf.set_value("ui", "open_start_mode", open_start_mode)
 	cf.set_value("ui", "last_opened_rel", last_opened_rel)
 	cf.set_value("ui", "graph_view_state", graph_view_state)
+	cf.set_value("ui", "graph_dock_split", graph_dock_split)
 	cf.set_value("vault", "dir", vault_dir)
 	cf.set_value("sync", "device_id", device_id)
 	cf.set_value("sync", "pin", sync_pin)

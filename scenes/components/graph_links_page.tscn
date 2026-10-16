@@ -4,7 +4,6 @@
 
 [node name="GraphLinksPage" type="MarginContainer" unique_id=327998765]
 unique_name_in_owner = true
-visible = false
 theme_override_constants/margin_left = 10
 theme_override_constants/margin_top = 10
 theme_override_constants/margin_right = 10

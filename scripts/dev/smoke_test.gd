@@ -371,15 +371,35 @@ func _run_smoke() -> void:
 	fails += _check(m.page_mode == m.PAGE_CAPTURE, "sidebar 📥 opens the capture page")
 	m.capture_page.close_btn.pressed.emit()
 	fails += _check(m.page_mode == "", "capture ✕ Close returns to the note view")
-	# Opening a note from the tree leaves the graph: the note lands in front,
-	# not behind the still-visible map. Run last so the selection change cannot
-	# perturb the ordering/placement checks above.
-	m.graph_view.open(GameManager.current_rel)
-	fails += _check(m.graph_view.visible, "graph reopens for the tree-click check")
+	# The graph has two shapes on desktop: the dock (a side panel beside the
+	# note) and the full view (the whole content area). Opening a note from the
+	# tree leaves the *full* view — the note must not land behind the map — while
+	# the dock stays and follows the note. Run last so the selection change
+	# cannot perturb the ordering/placement checks above.
+	m.graph_view.visible = false  # the direct open() above bypassed the shell state
+	m._toggle_graph()
+	await m.get_tree().process_frame
+	fails += _check(m.graph_view.visible and m.graph_docked, "toolbar toggle opens the graph dock")
+	fails += _check(m.content_host.visible, "the dock keeps the note beside the map")
 	m.vault_tree.select_note("sub/demo.md")
 	await m.get_tree().process_frame
-	fails += _check(not m.graph_view.visible, "tree note click closes the graph view")
+	fails += _check(m.graph_view.visible and m.graph_docked, "the dock stays open when a note is opened")
+	fails += _check(m.content_host.visible, "opening a note leaves it visible beside the dock")
+	m._toggle_graph_expanded()
+	await m.get_tree().process_frame
+	fails += _check(m.graph_expanded and not m.note_column.visible, "expand gives the map the whole content area")
+	fails += _check(m.graph_nav.expand_btn.visible, "the full view offers the dock button")
+	m.vault_tree.select_note("sub/demo.md")
+	await m.get_tree().process_frame
+	fails += _check(not m.graph_view.visible, "tree note click closes the full graph view")
 	fails += _check(m.content_host.visible, "tree note click shows the note")
+	# The toggle is a plain show/hide: closed → dock → closed.
+	m._toggle_graph()
+	await m.get_tree().process_frame
+	fails += _check(m.graph_view.visible and m.graph_docked, "the toggle reopens the dock")
+	m._toggle_graph()
+	await m.get_tree().process_frame
+	fails += _check(not m.graph_view.visible and not m.graph_docked, "the toggle closes the dock again")
 	print("SMOKE RESULT: %s (%d fails)" % ["FAIL" if fails > 0 else "OK", fails])
 	m.get_tree().quit(1 if fails > 0 else 0)
 

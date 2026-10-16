@@ -77,7 +77,32 @@ layout_mode = 2
 size_flags_horizontal = 3
 script = ExtResource("16_editor")
 
-[node name="ContentHost" type="ScrollContainer" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=1622826570]
+[node name="ContentSplit" type="HSplitContainer" parent="Root/WorkspaceMargin/Workspace/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+split_offsets = PackedInt32Array(560)
+split_offset = 560
+
+[node name="NoteColumn" type="MarginContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/margin_left = 0
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 0
+
+[node name="GraphDock" type="PanelContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(240, 0)
+layout_mode = 2
+
+
+[node name="ContentHost" type="ScrollContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn" unique_id=1622826570]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -85,7 +110,7 @@ size_flags_vertical = 3
 follow_focus = true
 horizontal_scroll_mode = 0
 
-[node name="PreviewPadding" type="MarginContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentHost" unique_id=1712346517]
+[node name="PreviewPadding" type="MarginContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/ContentHost" unique_id=1712346517]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
@@ -94,88 +119,88 @@ theme_override_constants/margin_top = 14
 theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 14
 
-[node name="ContentBody" type="VBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentHost/PreviewPadding" unique_id=1712346518]
+[node name="ContentBody" type="VBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/ContentHost/PreviewPadding" unique_id=1712346518]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 10
 
-[node name="EditPadding" type="MarginContainer" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=1712346519]
+[node name="EditPadding" type="MarginContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn" unique_id=1712346519]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="EditColumn" type="VBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding" unique_id=1692838301]
+[node name="EditColumn" type="VBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/EditPadding" unique_id=1692838301]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 theme_override_constants/separation = 8
 
-[node name="TitlePanel" type="PanelContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn" unique_id=189551264]
+[node name="TitlePanel" type="PanelContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/EditPadding/EditColumn" unique_id=189551264]
 unique_name_in_owner = true
 layout_mode = 2
 
-[node name="TitleRow" type="VBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TitlePanel" unique_id=1452771203]
+[node name="TitleRow" type="VBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/EditPadding/EditColumn/TitlePanel" unique_id=1452771203]
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="TitleLabel" type="Label" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TitlePanel/TitleRow" unique_id=1411190849]
+[node name="TitleLabel" type="Label" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/EditPadding/EditColumn/TitlePanel/TitleRow" unique_id=1411190849]
 layout_mode = 2
 text = "◈ NOTE TITLE"
 
-[node name="TitleInput" type="LineEdit" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TitlePanel/TitleRow" unique_id=1574681668]
+[node name="TitleInput" type="LineEdit" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/EditPadding/EditColumn/TitlePanel/TitleRow" unique_id=1574681668]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "Untitled note"
 
-[node name="TagsPanel" type="PanelContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn" unique_id=1330336696]
+[node name="TagsPanel" type="PanelContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/EditPadding/EditColumn" unique_id=1330336696]
 unique_name_in_owner = true
 layout_mode = 2
 
-[node name="TagsRow" type="VBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TagsPanel" unique_id=1154712658]
+[node name="TagsRow" type="VBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/EditPadding/EditColumn/TagsPanel" unique_id=1154712658]
 layout_mode = 2
 theme_override_constants/separation = 5
 
-[node name="TagsLabel" type="Label" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TagsPanel/TagsRow" unique_id=1710661633]
+[node name="TagsLabel" type="Label" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/EditPadding/EditColumn/TagsPanel/TagsRow" unique_id=1710661633]
 layout_mode = 2
 text = "◈ NOTE TAGS"
 
-[node name="TagsChips" type="HFlowContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TagsPanel/TagsRow" unique_id=115003094]
+[node name="TagsChips" type="HFlowContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/EditPadding/EditColumn/TagsPanel/TagsRow" unique_id=115003094]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/h_separation = 6
 theme_override_constants/v_separation = 4
 
-[node name="TagsInputRow" type="HBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TagsPanel/TagsRow" unique_id=814439955]
+[node name="TagsInputRow" type="HBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/EditPadding/EditColumn/TagsPanel/TagsRow" unique_id=814439955]
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="TagsInput" type="LineEdit" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TagsPanel/TagsRow/TagsInputRow" unique_id=905177978]
+[node name="TagsInput" type="LineEdit" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/EditPadding/EditColumn/TagsPanel/TagsRow/TagsInputRow" unique_id=905177978]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "Add or pick a tag…"
 
-[node name="TagsAdd" type="Button" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/TagsPanel/TagsRow/TagsInputRow" unique_id=1668094736]
+[node name="TagsAdd" type="Button" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/EditPadding/EditColumn/TagsPanel/TagsRow/TagsInputRow" unique_id=1668094736]
 unique_name_in_owner = true
 layout_mode = 2
 text = "+ ADD"
 
-[node name="SearchRow" type="HBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn" unique_id=471409606]
+[node name="SearchRow" type="HBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/EditPadding/EditColumn" unique_id=471409606]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="EditSearch" type="LineEdit" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/SearchRow" unique_id=1676676697]
+[node name="EditSearch" type="LineEdit" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/EditPadding/EditColumn/SearchRow" unique_id=1676676697]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "Find in document…"
 
-[node name="SearchPrev" type="Button" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/SearchRow" unique_id=728062493]
+[node name="SearchPrev" type="Button" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/EditPadding/EditColumn/SearchRow" unique_id=728062493]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(34, 0)
 layout_mode = 2
@@ -184,7 +209,7 @@ focus_mode = 0
 theme_override_font_sizes/font_size = 14
 text = "▲"
 
-[node name="SearchNext" type="Button" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn/SearchRow" unique_id=1120225212]
+[node name="SearchNext" type="Button" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/EditPadding/EditColumn/SearchRow" unique_id=1120225212]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(34, 0)
 layout_mode = 2
@@ -193,7 +218,7 @@ focus_mode = 0
 theme_override_font_sizes/font_size = 14
 text = "▼"
 
-[node name="SourceEditor" type="CodeEdit" parent="Root/WorkspaceMargin/Workspace/Content/EditPadding/EditColumn" unique_id=1315287311]
+[node name="SourceEditor" type="CodeEdit" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/EditPadding/EditColumn" unique_id=1315287311]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
@@ -210,14 +235,15 @@ layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="GraphView" type="Control" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=938625459]
+[node name="GraphView" type="Control" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/GraphDock" unique_id=938625459]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
+size_flags_horizontal = 3
 size_flags_vertical = 3
 script = ExtResource("4_graph")
 
-[node name="GraphNavBar" parent="Root/WorkspaceMargin/Workspace/Content/GraphView" instance=ExtResource("19_nav")]
+[node name="GraphNavBar" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/GraphDock/GraphView" instance=ExtResource("19_nav")]
 unique_name_in_owner = true
 layout_mode = 1
 anchors_preset = 10

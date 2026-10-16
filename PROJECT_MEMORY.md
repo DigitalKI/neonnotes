@@ -425,6 +425,8 @@ _Last updated: 2026-10-16 · Godot 4.7 · renderer: gl_compatibility_
   Also, opening a note **from the vault tree** now hides the graph map
   (`Main._on_note_selected` mirrors `_toggle_graph`'s hide branch and closes
   the focus card), instead of leaving the note loaded behind the visible map.
+  (2026-10-16: the *docked* desktop map is the exception — as a side panel it
+  stays open and follows the note instead; see the graph dock entry in §2.)
 - **Graph link signal colour (2026-10-13):** each wiki-link's travelling light
   now carries the colour of the node it *leaves*, instead of a fixed `_accent2`.
   Routes keep their resolved endpoints (`"src"`/`"dst"` added in `_build_routes`)
@@ -901,6 +903,49 @@ _Last updated: 2026-10-16 · Godot 4.7 · renderer: gl_compatibility_
   (dependency-free so `--script` harnesses can preload it); unit-tested via
   `DevSession.is_active()` and `tests/TestDevIsolation.tscn`.
 
+- **Toolbar icons must be text glyphs, never emoji (2026-10-16):** the graph
+  toggle wore the colour emoji `🕸` (U+1F578) and read as a dark smudge. Toolbar
+  buttons are text, so their mark is drawn in the resolved `font_color` (0.875
+  grey — the ☰, ▣, ⋮, ✎ family) — but an emoji ignores `font_color` entirely:
+  Android routes it to NotoColorEmoji's *bitmap*, so at the toolbar's 11–13px it
+  renders as a dim grey picture (measured on device: brightest pixel luminance
+  **125** vs **208** for the ☰ bars). Fixed by swapping in a monochrome,
+  non-emoji glyph: `⊛` U+229B (a hub node with radiating links, matching the
+  map's radial layout). Verified on the device that U+229B is neither missing
+  (tofu) nor emoji-presentation; `⋈` U+22C8 (two nodes joined by an edge) is the
+  runner-up and also renders. Rule: pick a glyph Unicode does not list as Emoji,
+  then confirm it draws on the target device.
+
+- **Graph dock + mobile edge swipes (2026-10-16):** the map is no longer a
+  full-screen-only surface. `Main.tscn` nests the note view in
+  `%Content > ContentSplit (HSplit) > %NoteColumn + %GraphDock`, and the single
+  `GraphView` instance lives in `%GraphDock`: **docked** = the note beside the
+  map on a draggable divider (width remembered in `GameManager.graph_dock_split`)
+  and **expanded** = `%NoteColumn` hidden so the map owns the content area —
+  today's full view, behaviour unchanged. The truth lives in
+  `Main.graph_docked`/`graph_expanded` (`_set_graph_state(0|1|2)`, `_graph_open()`,
+  `_graph_dock_mode()`); `graph_view.visible` only mirrors "the map is drawn".
+  Entry points: a dedicated always-visible toolbar toggle (`%GraphToggleBtn`,
+  outermost control = top-right corner, labelled with the monochrome `⊛`
+  U+229B glyph; the ⋮ Graph item and the old collapsed
+  `🕸 Graph` button are gone) plus a `▣` expand/contract button in the graph nav
+  bar (`nav_action("expand")` → `Main._toggle_graph_expanded`; every other action
+  still goes to `GraphView._activate_nav`). Docked, the map is navigation: it
+  follows the open note (`GraphView.activate_note` = select + enter when the node
+  is a group), and a tap opens the node's own note beside it (`GraphView.tap_cb`
+  → `Main._on_graph_node_tapped` / `_open_dock_note`) *and* enters it when it has
+  children — so a folder with a companion note shows `Folder.md` **and** opens the
+  folder, while a folder with no note of its own (`node_is_note` false; only
+  reachable after that note was deleted, since `_ensure_folder_notes` mints one
+  per folder) just enters and leaves the reader alone. **No focus card is drawn**
+  in dock mode — the note *is* the focused node's full view. Pages keep hiding the
+  map and now restore the dock when they close (`Main._page_graph_state`). On
+  phones nothing changes except the entry: `EdgeSwipeComponent` opens the drawer
+  with a rightward swipe from the left corner and the map with a leftward swipe
+  from the right corner, and a full-screen surface hands the screen back to the
+  note — the map from either corner (or a reverse rightward drag), the drawer
+  from a leftward drag. Covered by `tests/TestGraphDock.tscn` plus the smoke tail.
+
 ## 3. Direction & next steps
 
 - **Current goal:** stable v3; sync verified on device (phone↔PC over air).
@@ -1179,11 +1224,11 @@ _These OVERRIDE the skill's defaults for this project._
 | Path | Responsibility |
 |---|---|
 | `res://scenes/main/Main.tscn` | Authored UI shell; instances component subscenes |
-| `res://scripts/main.gd` | Shell wiring only: boot phases, page router, control handlers → components; smoke test |
+| `res://scripts/main.gd` | Shell wiring only: boot phases, page router (which page owns the screen + the graph dock/full-view state), control handlers → components; smoke test |
 | `res://scripts/components/share_intake.gd` | OS share-sheet intake (`ShareIntake`): creates the addons/SharePlugin `Share` node only where its singleton exists, routes payloads into `Capture`; `handle_payload()` is plugin-free and testable off-platform |
 | `res://scripts/common/capture.gd` | Inbox capture API (`capture_text/link/image`) — shared by the Capture page and the share intake; the one entry point for new capture sources |
 | `res://scripts/components/move_dialog.gd` | Move page (scene `move_dialog.tscn`): relocate a note/folder by typing a path or exploring a folder tree; reuses `VaultTreeComponent.move_path()` |
-| `res://scripts/components/note_editor.gd` | Note view (script on `%Content`): editor+preview, find bar, mobile selection, autosave/save, title/tags, mode/help, reload-on-sync |
+| `res://scripts/components/note_editor.gd` | Note view (script on `%Content`): editor+preview, find bar, mobile selection, autosave/save, title/tags, mode/help, reload-on-sync. `%Content` also holds the graph dock split (`ContentSplit > NoteColumn + GraphDock`) |
 | `res://scripts/common/GameManager.gd` | Autoload — global state, scan, palettes, settings, link index |
 | `res://scripts/common/dev_session.gd` | Static editor/MCP dev-session detection (isolates agent runs from the real vault) |
 | `res://scripts/markdown/markdown_parser.gd` | Unified engine: blocks + inline spans + per-line block model (`lines`/`line_markers`) shared by editor & preview |
@@ -1203,6 +1248,7 @@ _These OVERRIDE the skill's defaults for this project._
 | `res://scripts/render/` | PreviewBuilder, ChartView, GraphView, FX |
 | `res://scripts/sync/sync_service.gd` | LAN discovery/handshake/streaming transfer |
 | `res://scripts/components/` | Theme/Layout/SlashMenu/Export/VaultTree components |
+| `res://scripts/components/edge_swipe_component.gd` | Mobile screen-edge swipes (`EdgeSwipeComponent`): drawer from the left corner, map from the right; drag-only claims (see §7) |
 | `res://tests/` | `run_tests.sh` + unit/drag/sync/smoke scenes |
 | `tools/gen_godot_docs_vault.py` | Builds the big Godot-docs test vault (reST→Markdown, tags, wiki-links) |
 | `scripts/dev/verify_docs_vault.gd` | Scans/validates the generated docs vault (`scenes/dev/VerifyDocsVault.tscn`) |
@@ -1246,7 +1292,27 @@ _These OVERRIDE the skill's defaults for this project._
   is full-screen, so any surface floating outside `%Content` (the graph focus
   card) must be dismissed when it opens — `LayoutComponent.drawer_opened`
   (connected to `Main._close_focus_card`) is the hook; route new floating
-  surfaces through it rather than adding per-caller close calls.
+  surfaces through it rather than adding per-caller close calls. The graph dock
+  and the full map stay *inside* `%Content` (ContentSplit), so this one switch
+  hides them with the note — never move either into `Workspace`.
+- **Graph dock vs full view**: `Main.graph_docked`/`graph_expanded` are the only
+  truth about the map being on screen; `graph_view.visible` merely mirrors them
+  (set it only from `_apply_graph_layout`). Full view keeps its old behaviour
+  byte-for-byte (a tap is a pure selection, the focus card shows, `Open` leaves
+  the map); the dock is the only mode where a tap acts (`GraphView.tap_cb`) and
+  where the card is suppressed. `GraphView` stays a **single instance** — dock
+  and full view are the same control, only wider.
+- **Edge swipes never steal a press**: `EdgeSwipeComponent` consumes *drags*
+  only, and only after `TRIGGER_PX` (44) of travel that is horizontal-dominant
+  (`|dy| < |dx|/2`). Never consume the press or the release: a tap inside the
+  edge band must still work (toolbar buttons, tree rows, nodes), and a vertical
+  drag — the scrollbar grabber — must keep scrolling. Android sends an emulated
+  mouse twin for every touch, so a claimed drag's twin motion is consumed too.
+  **Gesture map (phones):** from the note, the left corner opens the drawer and
+  the right corner opens the map; a full-screen surface hands the screen back to
+  the note — the map from *either* corner (or a reverse drag to the right), the
+  drawer from a leftward drag. So both corners return to the note, and the tree
+  is reached from the note view (or the ☰ button).
 - **Tree drag & drop**: `set_drag_forwarding` registered ONCE (re-registering
   per refresh breaks repeat drags on Android); `DROP_MODE_ON_ITEM |
   DROP_MODE_INBETWEEN` (-1/0/1 = above/on/below); preserve folder+note merged

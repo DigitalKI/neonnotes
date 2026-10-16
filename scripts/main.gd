@@ -18,6 +18,13 @@ const MONO_FONT := preload("res://assets/fonts/ShareTechMono-Regular.ttf")
 @onready var settings_page: ScrollContainer = %SettingsPage
 @onready var settings_component: SettingsComponent = %SettingsPage.get_node("MarginContanier/HBoxContainer/VerticalContainer")
 @onready var content_panel: PanelContainer = %Content
+## %Content holds a split: the note column on the left, the graph dock on the
+## right. The full graph view is the same split with the note column hidden, so
+## every surface stays inside %Content — the container the mobile drawer
+## switches (see LayoutComponent).
+@onready var content_split: HSplitContainer = %ContentSplit
+@onready var note_column: MarginContainer = %NoteColumn
+@onready var graph_dock: PanelContainer = %GraphDock
 ## The note view (source editor + preview + find bar + mobile selection) is its
 ## own component; Main only routes shell-level events into it.
 @onready var editor: NoteEditor = %Content
@@ -29,6 +36,21 @@ const MONO_FONT := preload("res://assets/fonts/ShareTechMono-Regular.ttf")
 @onready var code_edit : CodeEdit = %SourceEditor
 ## Which full-content page owns the screen: "" or one of PAGE_*.
 var page_mode := ""
+## Desktop graph dock. `graph_docked` = the map shares the content area with the
+## note as a right panel; `graph_expanded` = it owns the whole area (the full
+## graph view, unchanged). Both false = the map is not on screen. Phones have no
+## dock: there the map is always the full view. `graph_view.visible` mirrors
+## "one of the two is set", so code that only asks "is the map drawn" reads one
+## flag — `_graph_open()`.
+var graph_docked := false
+var graph_expanded := false
+## The graph state a full-screen page hid — 0 closed / 1 docked / 2 expanded
+## (-1 = nothing hidden) — restored when that page closes.
+var _page_graph_state := -1
+## Debounces dock-width writes while the divider is dragged.
+var _dock_save_timer: Timer
+## Mobile edge gestures (drawer from the left corner, map from the right one).
+var edge_swipe: EdgeSwipeComponent
 ## The unresolved target whose LinkResolveDialog page is open (set by _open_wikilink).
 var _link_target := ""
 const PAGE_SETTINGS := "settings"
@@ -103,6 +125,8 @@ func _phase_theme_layout() -> void:
 	theme_component.setup(%Bg, toolbar.note_title, %SidePanel as PanelContainer,
 			%Content as PanelContainer, toolbar, code_edit, self)
 	add_child(theme_component)
+	# The dock borrows the content panel's look (same neon panel as the note).
+	theme_component.graph_dock = graph_dock
 	theme_component.apply()
 	_theme_dialogs()
 	layout_component.name = "LayoutComponent"
@@ -116,7 +140,6 @@ func _phase_theme_layout() -> void:
 	layout_component.more_btn = toolbar.more_btn
 	layout_component.help_btn = toolbar.help_btn
 	layout_component.backlinks_btn = toolbar.backlinks_btn
-	layout_component.graph_btn = toolbar.graph_btn
 	layout_component.export_btn = toolbar.export_btn
 	layout_component.status_bar = status_bar
 	add_child(layout_component)
@@ -162,6 +185,9 @@ func _phase_theme_layout() -> void:
 	graph_view.delete_cb = _delete_graph_note
 	graph_view.move_cb = _move_graph_note
 	graph_view.focus_cb = _focus_graph_node
+	# A tap in the dock is an action (open the note / enter the folder); in the
+	# full view it stays a pure selection.
+	graph_view.tap_cb = _on_graph_node_tapped
 	_digest_store = GraphDigestStore.new()
 	_digest_store.name = "GraphDigestStore"
 	add_child(_digest_store)
@@ -181,7 +207,13 @@ func _phase_theme_layout() -> void:
 	# The nav chrome is a scene child of GraphView (visually editable); the
 	# view only publishes state, the bar mirrors it and sends actions back.
 	graph_view.nav_changed.connect(_refresh_graph_nav)
-	graph_nav.nav_action.connect(func(action: String): graph_view._activate_nav(action))
+	# "expand" is a shell layout action (dock ⇄ full view); every other string is
+	# graph navigation and goes to the view exactly as before.
+	graph_nav.nav_action.connect(func(action: String):
+		if action == "expand":
+			_toggle_graph_expanded()
+		else:
+			graph_view._activate_nav(action))
 	graph_view.blur_cb = _close_focus_card
 	# Persist the graph view (graph-as-start-page) — debounced, plus on quit.
 	graph_view.state_changed.connect(_on_graph_state_changed)
@@ -190,6 +222,15 @@ func _phase_theme_layout() -> void:
 	_graph_state_timer.wait_time = 1.5
 	_graph_state_timer.timeout.connect(_persist_graph_state)
 	add_child(_graph_state_timer)
+	# The dock divider fires per pixel; coalesce its saved width the same way.
+	_dock_save_timer = Timer.new()
+	_dock_save_timer.one_shot = true
+	_dock_save_timer.wait_time = 0.6
+	_dock_save_timer.timeout.connect(_persist_dock_width)
+	add_child(_dock_save_timer)
+	# The dock divider is draggable exactly like the tree's; the split offset (the
+	# note column's width) is the value that gets remembered.
+	content_split.dragged.connect(_on_dock_dragged)
 	editor.saved_cb = func(rel: String):
 		_digest_store.invalidate(rel)
 		if focus_card.is_open() and String(focus_card.model().get("rel", "")) == rel:
@@ -199,6 +240,15 @@ func _phase_theme_layout() -> void:
 	PreviewBuilder.open_cb = _open_wikilink
 	PreviewBuilder.image_cb = _on_image_click
 	layout_component.ready()
+	# Mobile edge gestures: the drawer slides in from the left corner, the map
+	# from the right one (see EdgeSwipeComponent and _on_edge_swiped).
+	edge_swipe = EdgeSwipeComponent.new()
+	edge_swipe.name = "EdgeSwipeComponent"
+	edge_swipe.enabled_cb = func() -> bool: return layout_component.is_mobile_layout
+	edge_swipe.state_cb = func() -> Dictionary:
+		return {"drawer_open": layout_component.drawer_open, "graph_open": _graph_open()}
+	edge_swipe.swiped.connect(_on_edge_swiped)
+	add_child(edge_swipe)
 	_boot_mark("theme-layout")
 	# Rotation changes the available layout shape (toolbar/margins), but not
 	# the density-based font/UI scale.
@@ -225,6 +275,10 @@ func _phase_vault() -> void:
 	_refresh_list()
 	_boot_mark("tree-build")
 	layout_component.update_layout()
+	# The dock is closed at boot (its open/width state is session state), but the
+	# toolbar toggle, the nav bar's expand button and the note column's split all
+	# need their form-factor defaults.
+	_apply_graph_layout()
 	# Re-apply fonts now that update_layout() has folded the saved font size
 	# (and any landscape delta) into LayoutComponent.ui_font_delta.
 	theme_component.apply()
@@ -297,11 +351,10 @@ func _start_smoke() -> void:
 
 func _open_start_page() -> void:
 	if GameManager.open_start_mode == "graph":
-		# Graph map as the startup "homepage": same presentation as toggling
-		# the graph from the toolbar (editor hidden, graph fills the content).
-		code_edit.visible = false
-		edit_padding.visible = false
-		content_host.visible = false
+		# Graph map as the startup "homepage": same presentation as toggling the
+		# graph from the toolbar (the note column hidden, the map filling the
+		# content area).
+		_set_graph_state(2)
 		# Reopen on the last graph view (scope, page, selection, zoom, position)
 		# when one was saved; otherwise a fresh overview.
 		if GameManager.graph_view_state.is_empty():
@@ -400,7 +453,7 @@ func _build_dynamic_ui() -> void:
 	toolbar.mode_btn.pressed.connect(func(): editor.toggle_mode())
 	toolbar.help_btn.pressed.connect(_show_help)
 	toolbar.backlinks_btn.pressed.connect(_toggle_backlinks)
-	toolbar.graph_btn.pressed.connect(_toggle_graph)
+	toolbar.graph_toggle_btn.pressed.connect(_toggle_graph)
 	slash_menu.name = "SlashMenu"
 	add_child(slash_menu)
 	slash_menu.build(code_edit, editor.flush)
@@ -512,8 +565,11 @@ func _on_font_changed() -> void:
 
 func _on_mobile_changed(_is_mobile: bool) -> void:
 	theme_component.apply()
+	# Rotation re-places the map: the dock exists on desktop only, so a phone
+	# always renders the map full screen.
+	_apply_graph_layout()
 	_apply_card_layout()
-	if graph_view.visible or page_mode != "":
+	if _graph_open() or page_mode != "":
 		return  # graph/pages own the screen; fonts re-apply when they close
 	if editor.is_help():
 		_show_help()
@@ -523,16 +579,27 @@ func _on_mobile_changed(_is_mobile: bool) -> void:
 func _on_note_selected(fname: String) -> void:
 	if page_mode != "":
 		_close_page()
-	# Opening a note also leaves the graph map: a tree click must land on the
-	# note, not behind the still-visible map (mirrors _toggle_graph's hide
-	# branch). The editor's own apply_mode() restores the note surfaces.
-	if graph_view.visible:
+	# A tree click must land on the note, not behind the still-visible map
+	# (mirrors _toggle_graph's hide branch). The docked panel is the exception:
+	# it is a side panel by design, so it stays and follows the note instead.
+	var docked := _graph_dock_mode()
+	if _graph_open() and not docked:
 		_persist_graph_state()
-		graph_view.visible = false
+		_set_graph_state(0)
 		_close_focus_card()
-	# Continue opening the selected note after leaving a page. The previous note
-	# is flushed first (its rel is still current), then GameManager is repointed
-	# and the source handed to the editor component.
+	_load_note_into_editor(fname)
+	if docked:
+		_graph_follow_note(fname)
+	if layout_component.is_mobile_layout and layout_component.drawer_open:
+		layout_component.toggle_sidebar()
+	status_bar.flash("Opened " + fname)
+
+
+## Load a note into the note view. The shell's shared body for "a note became
+## the open note" (tree click, wiki-link, dock tap): flush the previous note,
+## repoint GameManager and hand the source to the editor. The callers own the
+## tree selection and the graph dock.
+func _load_note_into_editor(fname: String) -> void:
 	editor.flush()  # flush previous note first — never lose changes
 	GameManager.current_file = GameManager.vault_abs() + "/" + fname
 	GameManager.current_rel = fname
@@ -544,11 +611,8 @@ func _on_note_selected(fname: String) -> void:
 	editor.load_note(fname, source)
 	_boot_mark("note-highlight")
 	help_folder = fname.get_base_dir() if fname.contains("/") else ""
-	if layout_component.is_mobile_layout and layout_component.drawer_open:
-		layout_component.toggle_sidebar()
 	if vault_tree.backlinks_panel.visible:
 		_refresh_backlinks()
-	status_bar.flash("Opened " + fname)
 
 func _on_new_note() -> void:
 	_open_page(PAGE_NEW_NOTE, new_dialog)
@@ -588,7 +652,10 @@ func _show_help() -> void:
 	if page_mode != "":
 		return  # a page owns the screen until it closes
 	editor.show_help()
-	graph_view.visible = false
+	# Help replaces the note view, so the full map gives the screen up; the
+	# docked panel is a navigation side panel and can stay beside the help text.
+	if graph_expanded:
+		_set_graph_state(0)
 	_close_focus_card()
 	if layout_component.is_mobile_layout and layout_component.drawer_open:
 		layout_component.toggle_sidebar()
@@ -621,8 +688,13 @@ func _open_page(mode: String, page: Control) -> void:
 	# collapse the tree drawer first.
 	if layout_component.is_mobile_layout and layout_component.drawer_open:
 		layout_component.toggle_sidebar()
-	graph_view.visible = false
+	# Hide the map and remember nothing more than how to bring it back: the dock
+	# (or the full view) is restored when this page closes (see _close_page).
+	if _page_graph_state < 0:
+		_page_graph_state = _graph_state_id()
+	_set_graph_state(0)
 	_close_focus_card()
+	note_column.visible = false
 	code_edit.visible = false
 	edit_padding.visible = false
 	content_host.visible = false
@@ -634,19 +706,33 @@ func _close_page() -> void:
 	editor.page_mode = ""
 	for p in _pages():
 		p.visible = false
+	note_column.visible = true
+	var resume := _page_graph_state
+	_page_graph_state = -1
+	if resume > 0:
+		_set_graph_state(resume)
+		graph_view.refresh_graph()
+	else:
+		_apply_graph_layout()
 	editor.apply_mode()
 
 # ------------------------------------------------- v2: wiki / backlinks / graph
 
 func _open_graph_note(fname: String) -> void:
-	# Preserve the graph's scope/page/camera before opening the document; toggling
-	# back restores that navigation context and focuses this note.
+	# Docked: the panel is a navigation side panel, so the note opens beside it
+	# and the map keeps its scope, page and selection exactly where they are.
+	if _graph_dock_mode():
+		_open_dock_note(fname)
+		return
+	# Full view: preserve the graph's scope/page/camera before opening the
+	# document; toggling back restores that navigation context and focuses this
+	# note.
 	_close_focus_card()
 	graph_view.suspend_for_open(fname)
 	# Snapshot the view before leaving it: an abrupt kill after this point
 	# (no close notification) must still reopen where the user was.
 	_persist_graph_state()
-	graph_view.visible = false
+	_set_graph_state(0)
 	vault_tree.select_note(fname)
 
 func _delete_graph_note(fname: String) -> void:
@@ -665,10 +751,13 @@ func _focus_graph_node(rel: String) -> void:
 	_render_focus_card(rel)
 
 func _render_focus_card(rel: String) -> void:
-	_focus_rel = rel
-	if rel == "":
+	if rel == "" or _graph_dock_mode():
+		# The map is a side panel: the note beside it is the "full view" of the
+		# focused node, so no card is drawn (desktop dock only).
+		_focus_rel = ""
 		focus_card.close()
 		return
+	_focus_rel = rel
 	var digest := _digest_store.request(rel)
 	var model := GraphDigest.folder_card(rel, digest) if GraphDigest.is_folder(rel) \
 		else GraphDigest.note_card(rel, digest, _card_resolve_maps())
@@ -726,16 +815,18 @@ func _graph_link_activated(target: String, resolved: String) -> void:
 ## restores the editor; the graph owns the screen here).
 func _return_to_graph() -> void:
 	if page_mode != "":
-		_close_page()
-	code_edit.visible = false
-	edit_padding.visible = false
-	content_host.visible = false
-	graph_view.visible = true
+		_close_page()  # restores the dock / full view the page hid
+	if not _graph_open():
+		_set_graph_state(2)
+	graph_view.refresh_graph()
 	_refresh_graph_nav()
 
 ## Mirror the graph's page/scope state into the nav-bar component.
 func _refresh_graph_nav() -> void:
-	graph_nav.update_state(graph_view.nav_state())
+	var state := graph_view.nav_state()
+	# The bar's expand button mirrors the shell's dock/full-view state.
+	state["expanded"] = graph_expanded
+	graph_nav.update_state(state)
 
 ## Navigation changed: coalesce the settings write instead of writing on every
 ## pan/zoom frame.
@@ -866,14 +957,16 @@ func _toggle_backlinks() -> void:
 func _refresh_backlinks() -> void:
 	vault_tree.refresh_backlinks()
 
+## The toolbar's graph toggle (top-right, always visible). On desktop it opens
+## the dock — the map beside the note — and closes it again; on a phone the map
+## is always full screen, so it is a plain show/hide.
 func _toggle_graph() -> void:
 	if page_mode != "" and page_mode != PAGE_SETTINGS:
 		return  # a page owns the screen until it closes
-	if graph_view.visible:
+	if _graph_open():
 		_persist_graph_state()
-		graph_view.visible = false
+		_set_graph_state(0)
 		_close_focus_card()
-		content_host.visible = not editor.source_mode
 		return
 	editor.flush()
 	# The graph behaves like opening a note: leave a page and, on mobile,
@@ -882,12 +975,170 @@ func _toggle_graph() -> void:
 		_close_page()
 	if layout_component.is_mobile_layout and layout_component.drawer_open:
 		layout_component.toggle_sidebar()
-	code_edit.visible = false
-	edit_padding.visible = false
-	content_host.visible = false
 	# Resolve maps + digests belong to one graph session.
 	_card_maps.clear()
+	var mobile := layout_component.is_mobile_layout
+	_set_graph_state(2 if mobile else 1)
 	graph_view.open(GameManager.current_rel)
+	if not mobile:
+		# The dock follows the note that is already open, once the map has
+		# finished its (deferred) first layout.
+		_graph_follow_note.call_deferred(GameManager.current_rel)
+
+
+## The nav bar's expand button: the map takes the whole content area (the full
+## view, unchanged) or shares it with the note again. Desktop only — on a phone
+## the button is hidden because the map is always full screen.
+func _toggle_graph_expanded() -> void:
+	if layout_component.is_mobile_layout or not _graph_open():
+		return
+	if graph_expanded:
+		_set_graph_state(1)
+		_close_focus_card()
+		# Back to the panel: the note is untouched, and the map re-focuses it.
+		graph_view.refresh_graph()
+		_graph_follow_note(GameManager.current_rel)
+		return
+	_set_graph_state(2)
+	graph_view.refresh_graph()
+	# The full view owns the focus card again: show it for the node the dock had
+	# selected, exactly as a tap on that node would.
+	graph_view.refocus()
+
+
+## True while the map is on screen (dock or full view).
+func _graph_open() -> bool:
+	return graph_docked or graph_expanded
+
+
+## True while the map is the desktop side panel, i.e. its taps act on the note
+## beside it instead of just selecting (the full view keeps its old behaviour).
+func _graph_dock_mode() -> bool:
+	return graph_docked and not graph_expanded
+
+
+## 0 = closed, 1 = docked, 2 = full view.
+func _graph_state_id() -> int:
+	return 2 if graph_expanded else (1 if graph_docked else 0)
+
+
+func _set_graph_state(state: int) -> void:
+	graph_docked = state == 1
+	graph_expanded = state == 2
+	_apply_graph_layout()
+
+
+## Push the dock state into the scene. The note and the map both live inside
+## %Content (ContentSplit > NoteColumn + GraphDock), so the mobile drawer's
+## `content.visible` switch still hides everything with it — the full-screen
+## drawer invariant is untouched.
+func _apply_graph_layout() -> void:
+	var mobile := layout_component.is_mobile_layout
+	var open := _graph_open()
+	# Phones have no dock: the map is full screen or absent.
+	var expanded := graph_expanded or (mobile and open)
+	graph_dock.visible = open
+	graph_view.visible = open
+	note_column.visible = not expanded
+	graph_nav.expand_btn.visible = not mobile
+	toolbar.graph_toggle_btn.set_pressed_no_signal(open)
+	if open and not expanded:
+		_apply_dock_split.call_deferred()
+	else:
+		note_column.custom_minimum_size = Vector2.ZERO
+	_refresh_graph_nav()
+
+
+## Give the dock its remembered width — the split offset, i.e. the note column's
+## width — or a default fraction of the content area the first time.
+func _apply_dock_split() -> void:
+	var total := content_split.size.x
+	if total <= 0.0:
+		return
+	var px := GameManager.graph_dock_split
+	if px <= 0:
+		px = int(clampf(total * 0.58, 320.0, maxf(320.0, total - 280.0)))
+	note_column.custom_minimum_size = Vector2(minf(260.0, total * 0.35), 0.0)
+	_set_dock_split(px)
+
+
+func _set_dock_split(px: int) -> void:
+	var total := int(content_split.size.x)
+	var value := clampi(px, 160, maxi(160, total - 200))
+	# SplitContainer keeps both the array (new multi-divider storage) and the
+	# legacy scalar; write both so a saved offset survives either reader.
+	if content_split.split_offsets.size() > 0:
+		content_split.split_offsets = PackedInt32Array([value])
+	content_split.split_offset = value
+
+
+## The dock divider was dragged: remember the width (coalesced) for the next
+## time the panel opens.
+func _on_dock_dragged(offset: int) -> void:
+	GameManager.graph_dock_split = offset
+	if _dock_save_timer != null:
+		_dock_save_timer.start()
+
+
+func _persist_dock_width() -> void:
+	GameManager._save_settings()
+
+
+## The dock follows the open note: select its node and, when the node is a group
+## (a folder, or a note with child notes), enter it — the state pressing Enter in
+## the graph produces. Notes the map cannot reach are left alone.
+func _graph_follow_note(note: String) -> void:
+	if layout_component.is_mobile_layout or not _graph_dock_mode() or note == "":
+		return
+	graph_view.activate_note(note)
+
+
+## A node was tapped on the map. In the dock the map is navigation: a node's own
+## note (a folder's companion note included) loads into the reader beside it and
+## the node is entered when it has children; a bare folder — no `Folder.md` to
+## show — only enters, leaving the reader alone. In the full view a tap stays a
+## pure selection, exactly as before.
+func _on_graph_node_tapped(key: String, rel: String) -> void:
+	if not _graph_dock_mode() or rel == "":
+		return
+	# The hub ("") is the homepage: it has children, but no group to enter.
+	if key == "" or not graph_view.node_has_children(key):
+		_open_dock_note(rel)
+		return
+	# A folder with a companion note shows that note *and* enters the folder.
+	if graph_view.node_is_note(key):
+		_open_dock_note(rel)
+	graph_view.activate_key(key)
+
+
+## Load a note into the reader for a dock tap/menu action: the tree selection
+## follows so the sidebar stays in step with the map.
+func _open_dock_note(rel: String) -> void:
+	_load_note_into_editor(rel)
+	vault_tree.select_note(rel, false)
+	status_bar.flash("Opened " + rel)
+
+
+## Mobile edge gestures (EdgeSwipeComponent): the drawer slides in from the left
+## corner, the map from the right one — and either is dismissed by dragging it
+## back the way it came in.
+func _on_edge_swiped(action: String) -> void:
+	match action:
+		EdgeSwipeComponent.OPEN_DRAWER:
+			if not layout_component.drawer_open:
+				layout_component.toggle_sidebar()
+		EdgeSwipeComponent.CLOSE_DRAWER:
+			if layout_component.drawer_open:
+				layout_component.toggle_sidebar()
+		EdgeSwipeComponent.OPEN_GRAPH:
+			# The drawer owns the screen while it is open (the map hides with
+			# %Content), so the map is only reachable from the note view.
+			if layout_component.drawer_open or _graph_open() or page_mode != "":
+				return
+			_toggle_graph()
+		EdgeSwipeComponent.CLOSE_GRAPH:
+			if _graph_open():
+				_toggle_graph()
 
 # ------------------------------------------------------------ vault / sync
 
@@ -1106,7 +1357,5 @@ func _on_more_action(id: int) -> void:
 			_show_help()
 		MoreMenuComponent.ID_BACKLINKS:
 			_toggle_backlinks()
-		MoreMenuComponent.ID_GRAPH:
-			_toggle_graph()
 		_:
 			export_component.handle_action(id)

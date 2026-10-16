@@ -16,6 +16,9 @@ var bg: ColorRect
 var note_title: Label
 var side_panel: PanelContainer
 var content_panel: PanelContainer
+## Desktop graph dock panel (Main.tscn %GraphDock): styled like the content
+## panel so the map's right panel reads as part of the shell.
+var graph_dock: PanelContainer
 var toolbar: Control
 var code_edit: CodeEdit
 var root_ctl: Control
@@ -67,6 +70,8 @@ func apply() -> void:
 	# Padding is authored on the preview/edit MarginContainers in Main.tscn so
 	# the ScrollContainer scrollbar remains flush with the content panel edge.
 	content_panel.add_theme_stylebox_override("panel", panel.duplicate())
+	if graph_dock != null:
+		graph_dock.add_theme_stylebox_override("panel", panel.duplicate())
 	note_title.add_theme_font_override("font", orb)
 	for btn in toolbar.get_children():
 		if btn is Button:

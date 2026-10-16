@@ -15,6 +15,10 @@ var delete_cb := Callable()     # circle menu: delete the node's note
 var move_cb := Callable()       # circle menu: move the node (note or folder)
 var focus_cb := Callable()      # node selected: Main shows the focus card
 var blur_cb := Callable()       # focus dropped (tap outside): Main hides the card
+## A clean tap landed on a node (key, rel). The desktop dock turns it into an
+## action — open the note beside the map, or enter the folder — while the full
+## view leaves the callback alone (its tap stays a pure selection).
+var tap_cb := Callable()
 ## Emitted whenever page/scope state changes: the nav-bar component (a scene
 ## child of this view) mirrors it — navigation visuals live in
 ## scenes/components/graph_nav_bar.tscn, editable like any other UI.
@@ -1389,10 +1393,10 @@ func _gui_input(event: InputEvent) -> void:
 			if not _press_moved:
 				var clicked := _key_at(event.position)
 				if clicked != "":
-					_select(clicked)
+					_tap_node(clicked)
 					accept_event()
 				elif _hub_at(event.position):
-					_select_hub()
+					_tap_hub()
 					accept_event()
 	elif event is InputEventMouseButton and event.pressed \
 			and (event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN):
@@ -1433,9 +1437,9 @@ func _gui_input(event: InputEvent) -> void:
 			if _touches.is_empty() and not _pinch_used and not _press_moved:
 				var tapped := _key_at(event.position)
 				if tapped != "":
-					_select(tapped)
+					_tap_node(tapped)
 				elif _hub_at(event.position):
-					_select_hub()
+					_tap_hub()
 		accept_event()
 	elif event is InputEventScreenDrag:
 		var prev: Vector2 = _touches.get(event.index, event.position)
@@ -1522,6 +1526,72 @@ func _close_menu() -> void:
 		blur_cb.call()
 	_mark_map_dirty()
 	queue_redraw()
+
+## A clean tap landed on `key`: focus it exactly as before (selection, circle
+## menu, focus callback), then tell the host. Only the desktop dock acts on that
+## — the full view keeps its tap = pure selection behaviour.
+func _tap_node(key: String) -> void:
+	_select(key)
+	if tap_cb.is_valid():
+		tap_cb.call(key, node_rel(key))
+
+## The hub (the homepage at the centre) tapped: same hand-off as a node.
+func _tap_hub() -> void:
+	_select_hub()
+	if tap_cb.is_valid() and _root_home != "":
+		tap_cb.call("", _root_home)
+
+## True when the node drawn for `key` is a group — a folder, a note with child
+## notes, or a collapsed aggregate. "Enter" only means something for those.
+func node_has_children(key: String) -> bool:
+	return not _children.get(key, []).is_empty()
+
+## The note a node stands for (`_open_target` folds a note onto its own node;
+## a folder without a companion note maps to its folder path).
+func node_rel(key: String) -> String:
+	return String(_open_target.get(key, key))
+
+## True when the node stands for a real note — a leaf note, or a folder that has
+## a companion note (`Folder/` + `Folder.md`). A bare folder has no note of its
+## own, so "open this node's note" has nothing to open.
+func node_is_note(key: String) -> bool:
+	return _open_target.has(key) and String(_open_target[key]) != ""
+
+## Select a node and, when it is a group, enter it: exactly the state the
+## circle menu's Enter produces. The dock uses it for a tapped folder and to
+## follow the open note.
+func activate_key(key: String) -> void:
+	if key == "" and _root_home != "":
+		_select_hub()
+	elif _selected != key:
+		_select(key)
+	if _children.get(key, []).is_empty():
+		return
+	_enter_group(key)
+
+## Follow a note the way the dock wants to: select its node and enter it when it
+## is a group (a folder or a folder companion). False = not reachable on the map.
+func activate_note(note: String) -> bool:
+	if note == "":
+		return false
+	if _root_home != "" and note == _root_home:
+		_select_hub()
+		return true
+	if not focus_note(note):
+		return false
+	activate_key(_selected)
+	return true
+
+## Re-run the focus callback for the current selection. The dock hands the map
+## over to the full view with a node already selected, and the focus card
+## belongs to the full view only (Main._toggle_graph_expanded).
+func refocus() -> void:
+	if not _menu.open or not focus_cb.is_valid():
+		return
+	if _selected == "":
+		focus_cb.call(_root_home)
+		return
+	focus_cb.call(node_rel(_selected))
 
 ## Focus a node chosen outside the canvas (focus-card child list): select its
 ## node when it is on the map, entering its parent scope first when needed.

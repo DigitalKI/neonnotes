@@ -12,6 +12,9 @@ extends HFlowContainer
 @onready var help_btn: Button = %HelpBtn
 @onready var export_btn: MenuButton = %ExportBtn
 @onready var backlinks_btn: Button = %BacklinksBtn
-@onready var graph_btn: Button = %GraphBtn
+## Dedicated graph toggle, the toolbar's outermost control (top-right corner).
+## Never collapsed into the ⋮ overflow: it is the only way to the dock, and the
+## only graph entry point on phones.
+@onready var graph_toggle_btn: Button = %GraphToggleBtn
 @onready var more_btn: MenuButton = %MoreBtn
 @onready var more_menu: PopupMenu = %MoreMenu

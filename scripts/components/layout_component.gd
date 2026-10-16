@@ -5,6 +5,11 @@ extends Node
 ## lives here; the host reads it via properties. On mobile the drawer and
 ## %Content are mutually exclusive (full-screen drawer invariant — see
 ## PROJECT_MEMORY.md).
+##
+## The graph dock / full view lives *inside* %Content (Main.tscn: ContentSplit >
+## NoteColumn + GraphDock), so this component never has to know about it: the
+## drawer's `content.visible` switch hides the map with the note, exactly as the
+## invariant requires.
 
 signal mobile_changed(is_mobile: bool)
 
@@ -34,7 +39,6 @@ var content_host: ScrollContainer
 var more_btn: Control
 var help_btn: Control
 var backlinks_btn: Control
-var graph_btn: Control
 var export_btn: Control
 var status_bar: Control
 
@@ -69,7 +73,7 @@ func _process(_delta: float) -> void:
 	# The keyboard reports its height before the final Android viewport/layout
 	# resize. Keep correcting for a few frames so edit mode follows the caret,
 	# rather than relying on one adjustment at the wrong geometry.
-	var code_edit: CodeEdit = content.get_node_or_null("EditPadding/EditColumn/SourceEditor")
+	var code_edit: CodeEdit = content.get_node_or_null("ContentSplit/NoteColumn/EditPadding/EditColumn/SourceEditor")
 	if code_edit != null and code_edit.visible:
 		# The editor's actual size is the reliable signal that Android has
 		# finished resizing the layout for the IME. Keyboard height alone can
@@ -102,7 +106,6 @@ func update_layout(force: bool = false) -> void:
 	more_btn.visible = true
 	help_btn.visible = not cramped
 	backlinks_btn.visible = not cramped
-	graph_btn.visible = not cramped
 	export_btn.visible = not cramped
 	if mobile:
 		# Keep physical margins identical in portrait and landscape. Safe-area and
@@ -232,7 +235,7 @@ func _apply_safe_area() -> void:
 	# Android, so repeat after the next frame as well. This is important when
 	# the caret is near the bottom: resizing alone does not guarantee that
 	# TextEdit re-centres its viewport.
-	var code_edit: CodeEdit = content.get_node_or_null("EditPadding/EditColumn/SourceEditor")
+	var code_edit: CodeEdit = content.get_node_or_null("ContentSplit/NoteColumn/EditPadding/EditColumn/SourceEditor")
 	if code_edit != null and code_edit.visible:
 		_keep_caret_visible.call_deferred(code_edit)
 
