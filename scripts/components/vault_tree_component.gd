@@ -1069,14 +1069,14 @@ func _rewrite_links(old_rel: String, new_rel: String) -> void:
 	# identical RegEx for every candidate note, which is pure CPU on the UI
 	# thread and grows with vault size.
 	var rules: Array = [[
-		RegEx.create_from_string("(?i)(?<!\\\\)\\[\\[" + _re_escape(old_noext) + "(\\]\\]|\\|)"),
+		RegEx.create_from_string("(?i)(?<!\\\\)\\[\\[" + TextUtils.re_escape(old_noext) + "(\\]\\]|\\|)"),
 		"[[" + new_noext + "$1",
 	]]
 	var old_base := old_noext.get_file()
 	var new_base := new_noext.get_file()
 	if old_base != new_base:
 		rules.append([
-			RegEx.create_from_string("(?i)(?<!\\\\)\\[\\[" + _re_escape(old_base) + "(\\]\\]|\\|)"),
+			RegEx.create_from_string("(?i)(?<!\\\\)\\[\\[" + TextUtils.re_escape(old_base) + "(\\]\\]|\\|)"),
 			"[[" + new_base + "$1",
 		])
 	# Only notes whose indexed links can match this move are rewritten.
@@ -1097,7 +1097,7 @@ func _rewrite_links(old_rel: String, new_rel: String) -> void:
 ## Update [[wiki-links]] across the vault after a move/rename.
 func _rewrite_folder_links(old_dir: String, new_dir: String) -> void:
 	# Compiled once per move (was: once per candidate note).
-	var folder_re := RegEx.create_from_string("(?i)(?<!\\\\)\\[\\[" + _re_escape(old_dir) + "/")
+	var folder_re := RegEx.create_from_string("(?i)(?<!\\\\)\\[\\[" + TextUtils.re_escape(old_dir) + "/")
 	# Only notes whose indexed links can match the old folder prefix.
 	for n in _move_rewrite_candidates(old_dir):
 		var path := GameManager.vault_abs().path_join(n)
@@ -1119,16 +1119,6 @@ func _move_rewrite_candidates(old_prefix: String) -> Array[String]:
 	if not GameManager.links_ready:
 		return GameManager.list_note_paths()
 	return GameManager.notes_linking_to(old_prefix)
-
-## Escape regex metacharacters (Godot has no String.regex_escape).
-func _re_escape(s: String) -> String:
-	var out := ""
-	for ch in s:
-		if "\\.^$|?*+()[]{}".contains(ch):
-			out += "\\" + ch
-		else:
-			out += ch
-	return out
 
 func _tree_item_has_metadata(item: TreeItem) -> bool:
 	return item != null and is_instance_valid(item) and item.get_metadata(0) != null

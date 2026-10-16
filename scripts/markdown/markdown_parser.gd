@@ -1,5 +1,9 @@
 class_name MarkdownParser extends RefCounted
 
+# Preloaded (not the class_name global) so the parser still resolves when run
+# via `godot --script`, where class_name globals are not registered.
+const _NoteMeta := preload("res://scripts/common/note_metadata.gd")
+
 # ---- Shared inline-syntax span model -------------------------------------
 # Both NeonHighlighter (edit mode) and PreviewBuilder (view mode) consume a
 # single, position-indexed token stream computed here, so a construct is
@@ -372,10 +376,7 @@ static func parse(text: String) -> Dictionary:
 			var p := lines[i].find(":")
 			if p >= 0:
 				var key := lines[i].substr(0, p).strip_edges()
-				var value := lines[i].substr(p + 1).strip_edges()
-				if value.length() >= 2 and ((value.begins_with("\"") and value.ends_with("\"")) or (value.begins_with("'") and value.ends_with("'"))):
-					value = value.substr(1, value.length() - 2).replace("\\\"", "\"").replace("\\\\", "\\")
-				meta[key] = value
+				meta[key] = _NoteMeta.unescape(lines[i].substr(p + 1))
 			i += 1
 		for li in range(0, mini(i, lines.size())):
 			lines_info[li]["kind"] = BlockLine.FRONT_MATTER

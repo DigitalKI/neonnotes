@@ -1137,6 +1137,12 @@ _These OVERRIDE the skill's defaults for this project._
   `PreviewBuilder`, `SyncService`, `WikiLinks`, `PathRemap`…). Static utility
   classes are `class_name … extends RefCounted` with static funcs; views
   extend `Control`.
+- **Shared string helpers are canonical (2026-10-16):** `NoteMetadata.frontmatter()`
+  / `unescape()` (the front-matter block-walk + quote/backslash unescape) and
+  `TextUtils.re_escape()` (regex metachar escape) are the single source of
+  truth. `GameManager._parse_note_meta`, `MarkdownParser.parse`, `body()`/
+  `field()` and the tree's link-rewriter all consume them — do not re-implement
+  a `---…---` scan or `re_escape` locally.
 - **Indentation: TABS everywhere** (standardized 2026-09-12, all scripts).
 - **Style:** typed inference `:=`, lambdas for short callbacks, backtick
   template strings.
