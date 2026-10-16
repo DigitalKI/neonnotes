@@ -48,6 +48,9 @@ run_godot_test "MOVE RESULT: OK" --headless --path . tests/TestMoveDialog.tscn
 # Dev/MCP session isolation: NEONNOTES_DEV=1 must redirect the boot to the
 # disposable dev vault and never persist it (keeps agent runs off the real vault).
 NEONNOTES_DEV=1 run_godot_test "DEV ISOLATION RESULT: OK" --headless --path . tests/TestDevIsolation.tscn
+# Metadata index cache: a warm boot rebuilds titles/tags/links from disk (stat
+# check) instead of re-reading every note; changes/moves invalidate correctly.
+run_godot_test "META CACHE RESULT: OK" --headless --path . tests/TestMetaCache.tscn
 run_godot_test "REVEAL RESULT: OK" --headless --path . tests/TestTreeReveal.tscn
 # Unresolved wikilinks open the resolve page (suggestions + explicit create)
 # instead of silently creating a note; #tag links filter without creating.

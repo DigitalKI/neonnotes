@@ -66,6 +66,7 @@ func _rebuild() -> void:
 	for r in ranked:
 		var b := Button.new()
 		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		b.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
 		var label := String(r.get("label", ""))
 		var rel := String(r.get("rel", "")).trim_suffix(".md")
 		var near := int(r.get("score", 0)) >= 2

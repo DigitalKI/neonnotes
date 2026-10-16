@@ -1,0 +1,14 @@
+{
+	"disabled_build_options": {
+		"disable_3d": true,
+		"disable_navigation_3d": true,
+		"disable_physics_3d": true,
+		"disable_xr": true,
+		"module_godot_physics_3d_enabled": false,
+		"module_jolt_physics_enabled": false
+	},
+	"disabled_classes": [
+		"Node3D"
+	],
+	"type": "build_profile"
+}

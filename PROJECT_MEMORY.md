@@ -5,7 +5,7 @@
 > decisions, gotchas) — history lives in git, `git log` is the changelog.
 > Size budget ~250 lines: compact in-session if exceeded.
 
-_Last updated: 2026-10-15 · Godot 4.7 · renderer: gl_compatibility_
+_Last updated: 2026-10-16 · Godot 4.7 · renderer: gl_compatibility_
 
 ---
 
@@ -26,6 +26,26 @@ _Last updated: 2026-10-15 · Godot 4.7 · renderer: gl_compatibility_
 
 ## 2. Current state (present-tense facts — git is the changelog)
 
+- **Startup: metadata index cache (2026-10-16):** boot read *every* note to
+  build titles/tags/links (`load_metadata_async`), ~1.5 s on a 1 000-note
+  vault — and it was **frame-paced, not I/O-bound**: the pass dripped 12
+  notes/frame, so `metadata_ready` waited on the frame rate (measured: cold
+  1468 ms vs 150 ms of actual reads). Fix = a per-vault on-disk index
+  (`user://metadata_index.json`, top-level keyed by absolute vault path; entry
+  `rel -> {mtime,size,title,tags,links}`) so an unchanged note resolves with a
+  stat() instead of a read, **and** `load_metadata_async()` now applies every
+  cache hit **synchronously** before dripping only the uncached remainder.
+  Measured via `scenes/dev/BenchMetaCache.tscn` (vault copy, 1089 notes): app
+  `[boot] metadata` **1548 ms -> 18 ms**, shell ready **1663 -> 108 ms**. The
+  cache write is skipped when `suppress_settings_save` (smoke/dev leave
+  user:// clean) and moved paths are *dropped* per-entry (a move rewrites links,
+  so a remapped entry could be stale). Cold first run is unchanged by design.
+  Guarded by `tests/TestMetaCache.tscn`.
+- **Theme font preload:** `theme_component` preloads Orbitron as a `const`
+  (was `load()`ed on every `apply()`, which runs twice during boot).
+  `McpRuntime` was left as-is: it is a no-op in exported builds
+  (`EngineDebugger.is_active()` is false) and the godot-mcp plugin rewrites its
+  autoload line into `project.godot` anyway.
 - **Graph render performance (2026-10-15):** the map redrew *everything* every
   frame — nodes (≈2 draw calls each via `draw_circle`/`draw_polyline`), a
   `draw_line` per hierarchy edge, and ≈10 draw calls per link route — so a

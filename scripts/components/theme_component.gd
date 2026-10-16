@@ -24,6 +24,9 @@ var root_ctl: Control
 ## setup() before any theme change so apply() can rescale them idempotently.
 var _base_font_sizes: Dictionary = {}
 var _app_theme: Theme
+## Display face for headings/title/toolbar. Preloaded (not load()ed per apply())
+## so a boot-time apply() never touches the ResourceLoader for it.
+const ORBITRON := preload("res://assets/fonts/Orbitron.ttf")
 
 
 func setup(p_bg: ColorRect, p_note_title: Label,
@@ -54,7 +57,7 @@ func _capture_font_sizes(node: Node) -> void:
 func apply() -> void:
 	var c := GameManager.palette()
 	_apply_fonts()
-	var orb: FontFile = load("res://assets/fonts/Orbitron.ttf")
+	var orb: FontFile = ORBITRON
 	bg.color = c["bg"]
 	var panel := StyleBoxFlat.new()
 	panel.bg_color = c["panel"]

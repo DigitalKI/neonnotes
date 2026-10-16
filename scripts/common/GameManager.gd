@@ -21,6 +21,12 @@ signal share_target_changed(enabled: bool)
 
 const VAULT_DIR := "user://vault"
 const SETTINGS := "user://settings.cfg"
+## On-disk metadata index: front-matter title/tags/links per vault-relative path
+## plus that file's mtime+size, so a warm boot rebuilds the index with stat()
+## checks instead of re-reading every note (the ~1.5 s cold-boot cost on a large
+## vault). Lives in user:// (never in the vault, never synced).
+const META_CACHE := "user://metadata_index.json"
+const META_CACHE_VERSION := 1
 const FRONT_MATTER_SCAN_MAX_LINES := 200  # bound the per-keystroke front-matter scan
 const EXPORTS_SUBDIR := "exports"  # vault/exports/ — rendered PNG/GIF/HTML, hidden from the tree
 const INBOX_DIR := "Inbox"  # vault/Inbox/ — captured links/text/images; a PLAIN vault folder, so per-vault sync ships it between devices for free
@@ -123,6 +129,13 @@ var dev_session := false  # true when this run is editor/MCP-driven (isolated va
 var current_file := ""  # absolute path of the open note ("" = none)
 var current_rel := ""   # vault-relative path of the open note ("" = none)
 var notes: Array[String] = []
+## In-memory half of the metadata index for the ACTIVE vault:
+## rel -> {"m": mtime, "s": size, "t": title, "g": tags, "l": links}.
+var _meta_cache := {}
+## Absolute vault path _meta_cache belongs to ("" = nothing loaded yet).
+var _meta_cache_vault := ""
+## True when _meta_cache holds entries not yet written to disk.
+var _meta_cache_dirty := false
 
 # Sync identity is split by scope: the device code is global (it names *this
 # machine* on the LAN), while the vault phrase + trusted peers are per-vault,
@@ -578,6 +591,7 @@ func scan_paths() -> void:
 	titles.clear()
 	tags.clear()
 	links.clear()
+	_load_meta_cache()
 	_scan_dir("")
 	ensure_inbox()  # keep the pinned Inbox row present even on an empty vault
 	_ensure_folder_notes()
@@ -587,9 +601,9 @@ func scan_paths() -> void:
 
 
 func _index_note_metadata() -> void:
-	var vault := vault_abs()
 	for n in notes:
-		_apply_note_meta(n, _read_note_meta_abs(vault.path_join(n)))
+		_apply_note_meta(n, _meta_for(n))
+	_save_meta_cache()
 
 
 ## Batched, frame-yielding metadata pass used after the shell and tree are up.
@@ -604,21 +618,33 @@ func load_metadata_async() -> void:
 	_meta_scanning = true
 	var gen := _scan_generation
 	var names := notes.duplicate()
-	var vault := vault_abs()
-	var i := 0
-	while i < names.size():
+	# Warm path first: apply every cache hit synchronously. A hit is a stat(),
+	# so a whole-vault pass over unchanged notes costs tens of ms — whereas
+	# dripping them 12/frame paced the pass to the frame rate (1089 notes held
+	# metadata_ready back ~1.5 s even when nothing had to be read). Only the
+	# uncached remainder is dripped, so a first run stays just as responsive.
+	var pending: Array[String] = []
+	for n in names:
 		if gen != _scan_generation or not is_inside_tree():
 			_meta_scanning = false
 			return
-		var end := mini(i + METADATA_BATCH, names.size())
+		if not _apply_cached_meta(n):
+			pending.append(n)
+	var i := 0
+	while i < pending.size():
+		if gen != _scan_generation or not is_inside_tree():
+			_meta_scanning = false
+			return
+		var end := mini(i + METADATA_BATCH, pending.size())
 		for k in range(i, end):
-			var n: String = names[k]
+			var n: String = pending[k]
 			if notes.has(n):
-				_apply_note_meta(n, _read_note_meta_abs(vault.path_join(n)))
+				_apply_note_meta(n, _meta_for(n))
 		i = end
 		await get_tree().process_frame
 	links_ready = true
 	_meta_scanning = false
+	_save_meta_cache()
 	metadata_ready.emit()
 
 
@@ -636,6 +662,117 @@ func _read_note_meta_abs(path: String) -> Dictionary:
 	f.close()
 	return _parse_note_meta(text)
 
+## Indexed metadata for one note. On a cache hit (same mtime+size) it returns the
+## stored title/tags/links WITHOUT reading the file; otherwise it reads and
+## re-indexes. This is what turns a warm boot from O(notes) file reads into
+## O(notes) stat() checks.
+func _meta_for(rel: String) -> Dictionary:
+	var hit: Variant = _cached_meta(rel)
+	if hit != null:
+		return hit
+	var abs := vault_abs().path_join(rel)
+	var meta := _read_note_meta_abs(abs)
+	_remember_meta(rel, int(FileAccess.get_modified_time(abs)), file_size(abs), meta)
+	return meta
+
+## The cached metadata for a note when the file is UNCHANGED (same mtime+size),
+## else null. A hit is only a stat() + two file-opens — no content read.
+func _cached_meta(rel: String) -> Variant:
+	var cached: Variant = _meta_cache.get(rel)
+	if typeof(cached) != TYPE_DICTIONARY:
+		return null
+	var abs := vault_abs().path_join(rel)
+	if int(cached.get("m", -1)) != int(FileAccess.get_modified_time(abs)) \
+			or int(cached.get("s", -2)) != file_size(abs):
+		return null
+	return {"title": str(cached.get("t", "")),
+			"tags": as_string_array(cached.get("g", [])),
+			"links": as_string_array(cached.get("l", []))}
+
+## Apply a note's cached metadata when unchanged, returning whether it was.
+func _apply_cached_meta(rel: String) -> bool:
+	var hit: Variant = _cached_meta(rel)
+	if hit == null:
+		return false
+	_apply_note_meta(rel, hit)
+	return true
+
+## Store a note's index entry in memory and mark it for persistence. No-op unless
+## the in-memory cache belongs to the active vault (so direct write_note() calls
+## in harnesses that never scanned cannot seed a bogus vault).
+func _remember_meta(rel: String, mtime: int, size: int, meta: Dictionary) -> void:
+	if _meta_cache_vault != vault_abs():
+		return
+	_meta_cache[rel] = {"m": mtime, "s": size,
+			"t": meta["title"], "g": meta["tags"], "l": meta["links"]}
+	_meta_cache_dirty = true
+
+## Raw byte size of a file (cheap: one open, no content read), or -1 if missing.
+static func file_size(path: String) -> int:
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return -1
+	var n := f.get_length()
+	f.close()
+	return n
+
+## Coerce a JSON-decoded array into Array[String] so cached tags/links have the
+## same type _parse_note_meta() returns.
+static func as_string_array(v: Variant) -> Array[String]:
+	var out: Array[String] = []
+	if typeof(v) == TYPE_ARRAY:
+		for x in v:
+			out.append(str(x))
+	return out
+
+## Load the on-disk index for the active vault (once per vault). A missing file,
+## a version bump, or an entry for a different vault just leaves the cache empty
+## — every note is then re-read and re-cached.
+func _load_meta_cache() -> void:
+	var abs := vault_abs()
+	if _meta_cache_vault == abs:
+		return
+	_meta_cache = {}
+	_meta_cache_vault = abs
+	_meta_cache_dirty = false
+	var f := FileAccess.open(META_CACHE, FileAccess.READ)
+	if f == null:
+		return
+	var doc = JSON.parse_string(f.get_as_text())
+	f.close()
+	if typeof(doc) != TYPE_DICTIONARY or int(doc.get("version", 0)) != META_CACHE_VERSION:
+		return
+	var vaults = doc.get("vaults", {})
+	if typeof(vaults) == TYPE_DICTIONARY and typeof(vaults.get(abs)) == TYPE_DICTIONARY:
+		_meta_cache = vaults[abs]
+
+## Persist the active vault's index (read-modify-write so other vaults' entries
+## survive). Skipped when nothing changed, and when settings writes are
+## suppressed — smoke/dev sessions must leave user:// untouched.
+func _save_meta_cache() -> void:
+	if suppress_settings_save or not _meta_cache_dirty:
+		return
+	var abs := vault_abs()
+	var doc := {}
+	var f := FileAccess.open(META_CACHE, FileAccess.READ)
+	if f != null:
+		var parsed = JSON.parse_string(f.get_as_text())
+		f.close()
+		if typeof(parsed) == TYPE_DICTIONARY and int(parsed.get("version", 0)) == META_CACHE_VERSION:
+			doc = parsed
+	var vaults = doc.get("vaults", {})
+	if typeof(vaults) != TYPE_DICTIONARY:
+		vaults = {}
+	vaults[abs] = _meta_cache
+	doc["version"] = META_CACHE_VERSION
+	doc["vaults"] = vaults
+	var w := FileAccess.open(META_CACHE, FileAccess.WRITE)
+	if w == null:
+		return
+	w.store_string(JSON.stringify(doc))
+	w.close()
+	_meta_cache_dirty = false
+
 ## Remap the in-memory index after files moved on disk, without re-reading the
 ## vault. Only paths change on a move — titles/tags travel with their files —
 ## so this is exact and avoids a full rescan on every drag/drop.
@@ -652,6 +789,17 @@ func remap_moved(old_prefix: String, new_prefix: String) -> void:
 	tags = PathRemap.moved_keys(tags, old_prefix, new_prefix)
 	links = PathRemap.moved_keys(links, old_prefix, new_prefix)
 	collapsed_folders = PathRemap.moved_keys(collapsed_folders, old_prefix, new_prefix)
+	# A move rewrites wiki-links inside the affected files, so their cached
+	# entries are stale. Drop them (don't remap) — the next pass re-reads those
+	# few notes fresh while every untouched note keeps its cache hit.
+	var stale: Array[String] = []
+	for k in _meta_cache.keys():
+		if PathRemap.moved(String(k), old_prefix, new_prefix) != String(k):
+			stale.append(String(k))
+	for k in stale:
+		_meta_cache.erase(k)
+	if not stale.is_empty():
+		_meta_cache_dirty = true
 	var moved_order := {}
 	for dir in order.keys():
 		var lst: Array = []
@@ -873,6 +1021,7 @@ func write_note(fname: String, text: String) -> bool:
 	titles[fname] = meta["title"]
 	tags[fname] = meta["tags"]
 	links[fname] = meta["links"]
+	_remember_meta(fname, int(FileAccess.get_modified_time(abs)), file_size(abs), meta)
 	return true
 
 func read_note(fname: String) -> String:
