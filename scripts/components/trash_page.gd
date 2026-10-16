@@ -1,7 +1,7 @@
 class_name TrashPage
 extends MarginContainer
 ## Trash page: a scene instance inside %Content, sized exactly like the settings
-## and sync pages. Data comes from NoteCrud.list_trash(); the page never mutates
+## and sync pages. Data comes from TrashStore.list_trash(); the page never mutates
 ## the vault itself — it emits restore/purge/empty requests, main performs them
 ## (scan + tree refresh + tombstone handling), then calls refresh(). Layout is
 ## authored in scenes/components/trash_page.tscn.
@@ -31,13 +31,13 @@ func begin() -> void:
 
 func refresh() -> void:
 	item_list.clear()
-	var items := NoteCrud.list_trash()
+	var items := TrashStore.list_trash()
 	for it in items:
 		var label := "🗑 %s   ·   %s" % [str(it["label"]), _age(int(it["at"]))]
 		var idx := item_list.add_item(label)
 		item_list.set_item_metadata(idx, str(it["id"]))
 		item_list.set_item_tooltip(idx, "Deleted %s\nRestores to: %s" % [_age(int(it["at"])), str(it["rel"])])
-	hint.text = "Items are kept for %d days, then removed automatically." % NoteCrud.TRASH_RETENTION_DAYS
+	hint.text = "Items are kept for %d days, then removed automatically." % TrashStore.TRASH_RETENTION_DAYS
 	empty_btn.disabled = items.is_empty()
 	_update_buttons()
 
@@ -82,7 +82,7 @@ func bind(p_refresh_tree: Callable, p_sync_restored: Callable, p_sync_saved: Cal
 
 
 func restore(id: String) -> void:
-	var res := NoteCrud.restore_from_trash(id)
+	var res := TrashStore.restore_from_trash(id)
 	if not res.get("ok", false):
 		flash_cb.call("✗ Could not restore item")
 		refresh()
@@ -97,7 +97,7 @@ func restore(id: String) -> void:
 
 
 func purge(id: String) -> void:
-	NoteCrud.purge_from_trash(id)
+	TrashStore.purge_from_trash(id)
 	refresh()
 	flash_cb.call("🗑 Deleted permanently")
 
@@ -112,7 +112,7 @@ func empty() -> void:
 	DialogTheme.apply(dlg)
 	add_child(dlg)
 	dlg.confirmed.connect(func():
-		NoteCrud.empty_trash()
+		TrashStore.empty_trash()
 		refresh()
 		flash_cb.call("🗑 Trash emptied")
 		dlg.queue_free())

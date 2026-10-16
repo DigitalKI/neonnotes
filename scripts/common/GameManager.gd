@@ -162,6 +162,37 @@ var trusted: Array[String] = []
 ## user's existing pairing with the vault that was open.
 var _legacy_vault_id := ""
 
+
+## Shared word list for the human-readable device code and the pairing phrase.
+const WORDS := [
+	"acid", "amber", "anchor", "apple", "arrow", "atlas", "aurora", "axis",
+	"balloon", "basin", "beam", "bingo", "bishop", "blade", "bloom", "bolt",
+	"cargo", "cedar", "chalk", "cherry", "cobra", "comet", "coral", "crane",
+	"daisy", "delta", "denim", "domino", "drift", "ember", "eagle", "echo",
+	"falcon", "fable", "fern", "flint", "forge", "frost", "gadget", "garnet",
+	"gecko", "glide", "granite", "harbor", "helix", "husky", "ivory", "jade",
+	"joker", "kayak", "laser", "lemon", "lunar", "maple", "meteor", "nebula",
+	"onyx", "orbit", "pixel", "quartz", "raven", "sonic", "tiger", "vapor",
+]
+
+
+## Eight random words (48 bits); never broadcast this secret.
+static func gen_vault_secret() -> String:
+	var bytes := Crypto.new().generate_random_bytes(8)
+	var words: Array[String] = []
+	for b in bytes:
+		words.append(WORDS[int(b) % WORDS.size()])
+	return "-".join(words)
+
+
+## Stable 4-word identity code (17.8M space) — the human-readable device ID.
+static func gen_device_code() -> String:
+	var out := []
+	for i in 4:
+		out.append(WORDS[randi() % WORDS.size()])
+	return "-".join(out)
+
+
 func _ready() -> void:
 	_load_settings()
 	# An explicitly-marked agent/test session (MCP `play_scene` sets
@@ -172,7 +203,7 @@ func _ready() -> void:
 		_apply_dev_isolation()
 	DirAccess.make_dir_recursive_absolute(vault_abs())
 	if device_id == "":
-		device_id = SyncService.gen_device_code()
+		device_id = gen_device_code()
 	# The vault's non-secret id lives in the folder; the phrase + peers are
 	# device-local and looked up by that id.
 	ensure_vault_id()
@@ -433,11 +464,7 @@ func is_vault_paired() -> bool:
 ## Read the vault's non-secret id from the vault folder ("" when none yet).
 func load_vault_id() -> void:
 	vault_id = ""
-	var f := FileAccess.open(vault_abs() + "/" + VAULT_ID_FILE, FileAccess.READ)
-	if f == null:
-		return
-	var data = JSON.parse_string(f.get_as_text())
-	f.close()
+	var data = TextIO.read_json(vault_abs() + "/" + VAULT_ID_FILE)
 	if typeof(data) == TYPE_DICTIONARY:
 		vault_id = str(data.get("vault_id", ""))
 
@@ -491,12 +518,12 @@ func _load_vault_identity() -> void:
 		return
 	var rec = sync_vaults.get(vault_id, {})
 	if typeof(rec) != TYPE_DICTIONARY or rec.is_empty():
-		vault_secret = SyncService.gen_vault_secret()  # never leaves the device
+		vault_secret = gen_vault_secret()  # never leaves the device
 		_save_vault_identity()
 		return
 	vault_secret = str(rec.get("secret", ""))
 	if vault_secret == "":
-		vault_secret = SyncService.gen_vault_secret()
+		vault_secret = gen_vault_secret()
 	for t in rec.get("trusted", []):
 		trusted.append(String(t))
 	var pp = rec.get("paired_peers", {})
@@ -530,7 +557,7 @@ func unpair_vault() -> void:
 ## Fork the active vault: mint a new phrase AND a new id, so this copy becomes
 ## its own independent vault. Existing members keep the old phrase/id.
 func reset_vault_words() -> void:
-	vault_secret = SyncService.gen_vault_secret()
+	vault_secret = gen_vault_secret()
 	vault_id = "%s-%s" % [Time.get_unix_time_from_system(), randi()]
 	trusted.clear()
 	paired_peers.clear()
@@ -561,10 +588,7 @@ func set_graph_view_state(state: Dictionary) -> void:
 func load_order() -> void:
 	order = {}
 	collapsed_folders = {}
-	var f := FileAccess.open(vault_abs() + "/" + ORDER_FILE, FileAccess.READ)
-	if f == null:
-		return
-	var data = JSON.parse_string(f.get_as_text())
+	var data = TextIO.read_json(vault_abs() + "/" + ORDER_FILE)
 	if typeof(data) == TYPE_DICTIONARY:
 		if typeof(data.get("order", {})) == TYPE_DICTIONARY:
 			order = data["order"]
@@ -661,12 +685,7 @@ func _apply_note_meta(name: String, meta: Dictionary) -> void:
 
 
 func _read_note_meta_abs(path: String) -> Dictionary:
-	var f := FileAccess.open(path, FileAccess.READ)
-	if f == null:
-		return {"title": "", "tags": [] as Array[String], "links": [] as Array[String]}
-	var text := f.get_as_text()
-	f.close()
-	return _parse_note_meta(text)
+	return _parse_note_meta(TextIO.read_text(path))
 
 ## Indexed metadata for one note. On a cache hit (same mtime+size) it returns the
 ## stored title/tags/links WITHOUT reading the file; otherwise it reads and
@@ -741,11 +760,7 @@ func _load_meta_cache() -> void:
 	_meta_cache = {}
 	_meta_cache_vault = abs
 	_meta_cache_dirty = false
-	var f := FileAccess.open(META_CACHE, FileAccess.READ)
-	if f == null:
-		return
-	var doc = JSON.parse_string(f.get_as_text())
-	f.close()
+	var doc = TextIO.read_json(META_CACHE)
 	if typeof(doc) != TYPE_DICTIONARY or int(doc.get("version", 0)) != META_CACHE_VERSION:
 		return
 	var vaults = doc.get("vaults", {})
@@ -760,12 +775,9 @@ func _save_meta_cache() -> void:
 		return
 	var abs := vault_abs()
 	var doc := {}
-	var f := FileAccess.open(META_CACHE, FileAccess.READ)
-	if f != null:
-		var parsed = JSON.parse_string(f.get_as_text())
-		f.close()
-		if typeof(parsed) == TYPE_DICTIONARY and int(parsed.get("version", 0)) == META_CACHE_VERSION:
-			doc = parsed
+	var parsed = TextIO.read_json(META_CACHE)
+	if typeof(parsed) == TYPE_DICTIONARY and int(parsed.get("version", 0)) == META_CACHE_VERSION:
+		doc = parsed
 	var vaults = doc.get("vaults", {})
 	if typeof(vaults) != TYPE_DICTIONARY:
 		vaults = {}
@@ -1050,12 +1062,7 @@ func write_note(fname: String, text: String) -> bool:
 	return true
 
 func read_note(fname: String) -> String:
-	var f := FileAccess.open(vault_abs() + "/" + fname, FileAccess.READ)
-	if f == null:
-		return ""
-	var t := f.get_as_text()
-	f.close()
-	return t
+	return TextIO.read_text(vault_abs() + "/" + fname)
 
 # --------------------------------------------------------- persistence
 

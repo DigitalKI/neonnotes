@@ -1153,7 +1153,7 @@ func _on_vault_selected(path: String) -> void:
 		_close_page()
 	editor.flush()
 	if GameManager.set_vault_dir(path):
-		NoteCrud.purge_expired()  # trash belongs to the old vault's retention window
+		TrashStore.purge_expired()  # trash belongs to the old vault's retention window
 		# Digest cache and resolve maps describe the previous vault.
 		_digest_store.clear()
 		_card_maps.clear()
@@ -1305,7 +1305,7 @@ func _selection_rel_after_move(new_rel: String) -> String:
 ## A restore recreates files the delete flow tombstoned, so it rescans and
 ## clears those tombstones — the same contract as a folder moved back.
 func _open_trash() -> void:
-	NoteCrud.purge_expired()
+	TrashStore.purge_expired()
 	_open_page(PAGE_TRASH, trash_page)
 	trash_page.begin()
 
@@ -1326,7 +1326,7 @@ func _boot_mark(label: String) -> void:
 func _deferred_housekeeping() -> void:
 	# Drop trash entries older than the retention window. Deferred so the
 	# stat() sweep never delays the first rendered frame.
-	NoteCrud.purge_expired()
+	TrashStore.purge_expired()
 	_boot_mark("housekeeping")
 
 

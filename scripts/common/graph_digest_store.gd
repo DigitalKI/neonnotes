@@ -88,12 +88,7 @@ func _read(rel: String) -> Variant:
 	var path := _vault.path_join(rel)
 	if not FileAccess.file_exists(path):
 		return null
-	var f := FileAccess.open(path, FileAccess.READ)
-	if f == null:
-		return null
-	var text := f.get_as_text()
-	f.close()
-	return text
+	return TextIO.read_text(path)
 
 ## Store off-thread, notify on-thread: `call_deferred` re-enters the main loop,
 ## which is where UI code (the card) is allowed to run.

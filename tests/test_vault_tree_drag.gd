@@ -104,7 +104,7 @@ func _simulate_drop(vt: VaultTreeComponent, src_path: String, dst_meta: String, 
 		var dst_d := dst_m.get_base_dir() if dst_m.contains("/") else ""
 		if dst_d == (new_rel.get_base_dir() if new_rel.contains("/") else ""):
 			vt._apply_order(new_rel, dst_d, dst_m, section < 0)
-	vt.prune_empty_dirs()
+	VaultMove.prune_empty_dirs()
 	GameManager.scan_notes()
 	vt.refresh()
 

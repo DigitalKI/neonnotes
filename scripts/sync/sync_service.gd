@@ -13,37 +13,11 @@ const BROADCAST_INTERVAL := 2.0
 const PEER_TIMEOUT := 6.0
 const MAGIC := "neonnotes-v2"
 
-const WORDS := [
-	"acid", "amber", "anchor", "apple", "arrow", "atlas", "aurora", "axis",
-	"balloon", "basin", "beam", "bingo", "bishop", "blade", "bloom", "bolt",
-	"cargo", "cedar", "chalk", "cherry", "cobra", "comet", "coral", "crane",
-	"daisy", "delta", "denim", "domino", "drift", "ember", "eagle", "echo",
-	"falcon", "fable", "fern", "flint", "forge", "frost", "gadget", "garnet",
-	"gecko", "glide", "granite", "harbor", "helix", "husky", "ivory", "jade",
-	"joker", "kayak", "laser", "lemon", "lunar", "maple", "meteor", "nebula",
-	"onyx", "orbit", "pixel", "quartz", "raven", "sonic", "tiger", "vapor",
-]
-
 var peers: Dictionary = {}
 var device_name: String = ""
 
-## Eight random words (48 bits); never broadcast this secret.
-static func gen_vault_secret() -> String:
-	var bytes := Crypto.new().generate_random_bytes(8)
-	var words: Array[String] = []
-	for b in bytes:
-		words.append(WORDS[int(b) % WORDS.size()])
-	return "-".join(words)
-
 var _pending_unsynced := false
 var _change_generation := 0
-
-## Stable 4-word identity code (17.8M space) — the human-readable device ID.
-static func gen_device_code() -> String:
-	var out := []
-	for i in 4:
-		out.append(WORDS[randi() % WORDS.size()])
-	return "-".join(out)
 
 var _udp: PacketPeerUDP
 var _server: TCPServer
@@ -1012,11 +986,7 @@ func _ensure_state_loaded() -> void:
 	_confirmed.clear()
 	if not _persistence_enabled():
 		return
-	var f := FileAccess.open(_state_file(), FileAccess.READ)
-	if f == null:
-		return
-	var parsed = JSON.parse_string(f.get_as_text())
-	f.close()
+	var parsed = TextIO.read_json(_state_file())
 	if typeof(parsed) != TYPE_DICTIONARY:
 		return
 	var rec = parsed.get(key, {})
@@ -1049,12 +1019,9 @@ func _save_state() -> void:
 	if _state_key == "":
 		return  # nothing loaded yet — do not clobber stored state
 	var data := {}
-	var f := FileAccess.open(_state_file(), FileAccess.READ)
-	if f != null:
-		var parsed = JSON.parse_string(f.get_as_text())
-		f.close()
-		if typeof(parsed) == TYPE_DICTIONARY:
-			data = parsed
+	var parsed = TextIO.read_json(_state_file())
+	if typeof(parsed) == TYPE_DICTIONARY:
+		data = parsed
 	# Write under the key we actually loaded, so a flush right after a vault
 	# switch still lands on the outgoing vault.
 	data[_state_key] = {"mtimes": _mtimes, "tombstones": _tombstones, "confirmed": _confirmed}

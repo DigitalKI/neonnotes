@@ -972,8 +972,11 @@ _Last updated: 2026-10-16 · Godot 4.7 · renderer: gl_compatibility_
   `_ready` is decomposed into ordered boot phases (each ends with its
   `_boot_mark`). Staged commits 2b799ba..HEAD. `TextUtils.re_escape` added
   (shared regex escape). Remaining idea (older note): split
-  `vault_tree_component.gd` (1327 lines) into tree_builder + drag_handler
-  behind the facade.
+  `vault_tree_component.gd` into tree_builder + drag_handler behind the facade.
+  The pure move/rename + link-rewrite + prune half was extracted to
+  `VaultMove` (2026-10-16); the drag/touch and search/worker halves are still
+  in the component (they share the tree node + instance state, so a facade
+  split is higher-risk).
 - **Next up:**
   - **Attachments (proposed, not built):** non-image shares (PDF, video, audio)
     are refused rather than stored. Supporting them properly means a real
@@ -1146,6 +1149,11 @@ _These OVERRIDE the skill's defaults for this project._
   `MarkdownParser.parse`, `GraphDigest`, `GraphModel.node_label` and the tree's
   link-rewriter all consume them — do not re-implement a `---…---` scan, a
   "title-or-filename" fallback, the wiki-link regex, or `re_escape` locally.
+- **File I/O and trash are centralized (2026-10-16):** `TextIO.read_text()` /
+  `read_json()` own the "open → read → parse → close" boilerplate (missing file
+  → `""` / `null`), and the recoverable-delete subsystem moved from `NoteCrud`
+  into `TrashStore`. `NoteCrud` keeps only `rm_dir`, `erase_note_meta`,
+  `scrub_order` and `compute_delete_set`.
 - **Indentation: TABS everywhere** (standardized 2026-09-12, all scripts).
 - **Style:** typed inference `:=`, lambdas for short callbacks, backtick
   template strings.
@@ -1248,7 +1256,10 @@ _These OVERRIDE the skill's defaults for this project._
 | `res://scripts/components/selection_overlay.gd` | Android selection overlay (handles + Cut/Copy/Paste/Format/Select All bar, edge auto-scroll); scene `selection_overlay.tscn` |
 | `res://scripts/components/selection_loupe.gd` | Magnifier panel shown above the finger during handle drags (font-scaled re-draw, no framebuffer capture) |
 | `res://scripts/common/media_import.gd` | Static media library + image import helpers (magic-byte decode, SAF URIs, dest naming) |
-| `res://scripts/common/note_crud.gd` | Static vault CRUD helpers (rm_dir, erase_note_meta, scrub_order, compute_delete_set, trash move/restore/purge) |
+| `res://scripts/common/note_crud.gd` | Static vault CRUD helpers (rm_dir, erase_note_meta, scrub_order, compute_delete_set) |
+| `res://scripts/common/trash_store.gd` | Recoverable-delete ops (move/restore/purge/empty/expire) into `vault/.trash/` |
+| `res://scripts/common/text_io.gd` | `read_text`/`read_json` file helpers (""/null on missing) |
+| `res://scripts/common/vault_move.gd` | Pure move/rename + wiki-link rewrite + empty-folder prune (static; `VaultTreeComponent.move_path` delegates to it) |
 | `res://scripts/components/trash_page.gd` | Trash page: lists/restores/purges trashed items (scene `trash_page.tscn`) |
 | `res://scripts/render/graph_model.gd` | Dependency-free graph semantics (levels/edges) |
 | `res://scripts/render/graph_view.gd` | Vault map: layered/batched canvas rendering (`_bg`/`_nodes`/`_overlay`), radial layout, scope/page, circle menu |
@@ -1372,6 +1383,10 @@ _These OVERRIDE the skill's defaults for this project._
 
 **Gotchas** (one-liners — delete once guarded in code/tests):
 
+- `GameManager` (autoload) and `SyncService` (`class_name`) must not reference
+  each other — the compile cycle surfaces as "Identifier not found: GameManager"
+  under `godot --script`. `gen_device_code`/`gen_vault_secret` live on
+  `GameManager` (2026-10-16) so the edge stays one-way (`SyncService` → `GameManager`).
 - Godot `bind()`/`listen()` return `Error` enums, not bools — always `!= OK`.
 - `Tree.enable_drag_unfolding` (default true) auto-unfolds folders mid-drag —
   disabled in `VaultTreeComponent.build()`.
