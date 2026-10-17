@@ -1152,6 +1152,7 @@ func _confirm_delete_leaf(rel: String) -> void:
 	save_cb.call()
 	var dlg := ConfirmationDialog.new()
 	dlg.title = "Delete"
+	dlg.dialog_autowrap = true
 	dlg.dialog_text = "Move \"%s\" to the Trash?\n\nYou can restore it for %d days." % [rel, TrashStore.TRASH_RETENTION_DAYS]
 	dlg.ok_button_text = "🗑 Move to Trash"
 	dlg.get_cancel_button().text = "Cancel"
