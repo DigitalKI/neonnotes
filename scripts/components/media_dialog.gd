@@ -68,6 +68,11 @@ func begin(files: Array) -> void:
 	for path in files:
 		var item := Button.new()
 		item.text = path.get_file()
+		# One row per file: a long, unbreakable name must ellipsize instead of
+		# widening the row (and with it the whole page).
+		item.clip_text = true
+		item.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		item.tooltip_text = path.get_file()
 		item.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		item.mouse_filter = Control.MOUSE_FILTER_STOP
 		item.custom_minimum_size = Vector2(0, 64)

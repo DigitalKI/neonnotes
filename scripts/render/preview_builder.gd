@@ -286,10 +286,20 @@ static func _image_block(block: Dictionary) -> Control:
 			tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			tr.tooltip_text = (alt + "  — " if alt != "" else "") + src
 			return tr
-	# empty embed (or missing file) → placeholder that opens the picker
+	# Empty embed (or a missing file) → placeholder that opens the picker.
+	# The label carries the embed's alt text, which is normally the file name and
+	# can be long and unbreakable. A Button derives its *minimum width* from its
+	# text unless that text can wrap, and ContentHost scrolls horizontally
+	# disabled — so it propagates the child's minimum width up through
+	# NoteColumn and the whole page grows past both screen margins on a phone
+	# (measured: `![Screenshot_20240105_201647_Firefox](files/…)` made a 468px
+	# button in a 384px canvas, shifting Workspace to x=-62). Wrapping keeps the
+	# file name readable and the layout inside the screen.
 	var btn := Button.new()
 	btn.name = "ImageEmbed"
+	btn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	btn.text = "🖼 %s — click to choose image" % (alt if alt != "" else "Image")
+	btn.tooltip_text = src if src != "" else btn.text
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	btn.pressed.connect(click)
 	return btn

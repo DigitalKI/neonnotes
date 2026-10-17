@@ -26,6 +26,34 @@ _Last updated: 2026-10-16 · Godot 4.7 · renderer: gl_compatibility_
 
 ## 2. Current state (present-tense facts — git is the changelog)
 
+- **Mobile: a note can no longer widen the shell past the screen margins
+  (2026-10-16).** Reported on-device: the open note pushed the whole UI beyond
+  the side margins, *both* sides clipped. Cause: the image-embed placeholder.
+  `_image_block` (preview_builder) draws a `Button` labelled with the embed's alt
+  text (normally the file name) when the image file is missing; a Button derives
+  its **minimum width from its text** unless that text can wrap, and
+  `ContentHost` is a `ScrollContainer` with horizontal scrolling **disabled**,
+  which propagates a child's minimum width up
+  (`ContentBody → PreviewPadding → NoteColumn → Content → Workspace → Root`), so
+  the shell grew and re-centred. Measured on the phone with
+  `![Screenshot_20240105_201647_Firefox](files/screenshot_20240105_201647_firefox.jpg)`
+  open (a real AnyType-import note): 468px button min in a 384px canvas,
+  `NoteColumn` 508px at x=-62, `Root` 528px at x=-72. Fix: the placeholder gets
+  `autowrap_mode = WORD_SMART` (+ the src as tooltip), so the button wraps to the
+  column instead of demanding its text width; the `MediaDialog` file rows get
+  `clip_text` + `OVERRUN_TRIM_ELLIPSIS` + tooltip for the same reason.
+  **Gotcha:** headless Godot has *real* font metrics (TextServerAdvanced), so
+  min-size regressions are testable headless. A `Button`'s min width is
+  text-driven unless `autowrap_mode`/`clip_text`/a trimming
+  `text_overrun_behavior` is set — a `Label` likewise (never used in the
+  preview); `RichTextLabel` reports a min width of ≈1 (it auto-wraps), so
+  paragraphs/lists/quotes/tables are already safe. Guarded by
+  `tests/TestPreviewFit.tscn`: it boots Main, pins the canvas to a phone shape
+  (384×832, `content_scale_mode = DISABLED` + factor 1 — the density branch
+  `_apply_ui_scale` takes on Android) and asserts the placeholder, `ContentBody`,
+  `NoteColumn` and `Root` all stay inside the viewport. Without the fix it fails
+  6/12 checks, reproducing the on-device numbers.
+
 - **Animated edge swipe + remembered graph presentation (2026-10-16):** the
   mobile screen-edge gestures are no longer a discrete flip. `EdgeSwipeComponent`
   now tracks the drag continuously (`swipe_started`/`swipe_move`/`swipe_release`

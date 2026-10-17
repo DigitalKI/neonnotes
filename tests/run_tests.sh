@@ -52,6 +52,9 @@ NEONNOTES_DEV=1 run_godot_test "DEV ISOLATION RESULT: OK" --headless --path . te
 # check) instead of re-reading every note; changes/moves invalidate correctly.
 run_godot_test "META CACHE RESULT: OK" --headless --path . tests/TestMetaCache.tscn
 run_godot_test "REVEAL RESULT: OK" --headless --path . tests/TestTreeReveal.tscn
+# Preview horizontal fit: an open note must not widen the shell past the screen
+# margins (a missing image embed's long file name used to do exactly that).
+run_godot_test "PREVIEW FIT RESULT: OK" --headless --path . tests/TestPreviewFit.tscn
 # Unresolved wikilinks open the resolve page (suggestions + explicit create)
 # instead of silently creating a note; #tag links filter without creating.
 run_godot_test "LINK RESOLVE RESULT: OK" --headless --path . tests/TestLinkResolve.tscn
