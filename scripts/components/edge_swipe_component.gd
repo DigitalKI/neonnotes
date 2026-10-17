@@ -1,14 +1,19 @@
 class_name EdgeSwipeComponent
 extends Node
 ## Mobile screen-edge swipes: pull the tree drawer in from the left corner and
-## the graph map in from the right one — from a *note*. Any full-screen surface
-## hands the screen back to the note when an edge swipe or a reverse drag lands:
-## the map leaves from either corner, the drawer from a leftward drag. So the
-## note is always the surface both corners return to.
+## the graph map in from the right one — from a *note*. A full-screen surface
+## hands the screen back to the note: the map leaves from the LEFT corner (the
+## right corner and any pan keep the map, since panning is its own gesture), and
+## the drawer leaves on a leftward drag. The note is what both corners return to.
 ##
-## Only *drags* are ever consumed, and only once a gesture has clearly qualified
-## (more than TRIGGER_PX of travel, horizontal-dominant). The press and the
-## release always reach the control under the finger, so:
+## This component is a *gesture tracker*, not an animator. It qualifies a drag
+## with the same rules as before (more than TRIGGER_PX of horizontal travel,
+## horizontal-dominant) and then reports live horizontal deltas so the host can
+## slide the panel under the finger. The host owns the commit threshold and the
+## snap/complete tween — this node only tells it where the finger is.
+##
+## Only *drags* are ever consumed, and only once a gesture has clearly qualified.
+## The press and the release always reach the control under the finger, so:
 ##  - a tap inside the edge band still works (toolbar buttons, tree rows, graph
 ##    nodes) — the band is only a *start* condition for a drag;
 ##  - a vertical drag — a scrollbar grabber or a list scroll — is never claimed,
@@ -18,7 +23,16 @@ extends Node
 ## Android sends an emulated mouse twin for every touch and the scroll
 ## containers / the map follow the mouse, so the twin motions are consumed too.
 
-signal swiped(action: String)
+## A drag qualified and the host should begin sliding `kind` in (`opening=true`)
+## or back out (`opening=false`).
+signal swipe_started(kind: String, opening: bool)
+## Live horizontal delta (px) since the gesture qualified. Positive = rightward.
+signal swipe_move(dx: float)
+## The finger lifted after `dx` total horizontal travel. The host decides commit.
+signal swipe_release(dx: float)
+
+const KIND_DRAWER := "drawer"
+const KIND_GRAPH := "graph"
 
 const OPEN_DRAWER := "open_drawer"
 const CLOSE_DRAWER := "close_drawer"
@@ -44,6 +58,10 @@ var _start := Vector2.ZERO
 ## 0 = started in the left band, 1 = the right band, -1 = elsewhere on screen.
 var _edge := -1
 var _claimed := false
+## The gesture this drag resolved to ("" until qualified).
+var _action := ""
+## The last dx reported, so a release without an extra drag still reports true.
+var _last_dx := 0.0
 
 
 func _ready() -> void:
@@ -55,7 +73,7 @@ func _input(event: InputEvent) -> void:
 		if event.pressed:
 			_begin(event)
 		elif event.index == _index or _index == -2:
-			_reset()
+			_end(event)
 		return
 	if event is InputEventScreenDrag and event.index == _index:
 		if _track(event.position):
@@ -75,8 +93,15 @@ func _begin(event: InputEventScreenTouch) -> void:
 		_start = event.position
 		_edge = _band_of(event.position.x)
 		_claimed = false
+		_action = ""
+		_last_dx = 0.0
 	elif event.index != _index:
 		# A second finger turns the drag into a pinch: never an edge swipe.
+		# Cancel any claimed slide by releasing it at zero travel, so the host
+		# snaps the panel back instead of leaving it dangling mid-drag.
+		if _claimed:
+			swipe_release.emit(0.0)
+		_reset()
 		_index = -2
 
 
@@ -84,6 +109,7 @@ func _begin(event: InputEventScreenTouch) -> void:
 ## swallow the event and stop the surface below from reacting to it.
 func _track(at: Vector2) -> bool:
 	if _claimed:
+		_report(at)
 		return true
 	if _index < 0 or not _enabled():
 		return false
@@ -94,8 +120,23 @@ func _track(at: Vector2) -> bool:
 	if action == "":
 		return false
 	_claimed = true
-	swiped.emit(action)
+	_action = action
+	_last_dx = d.x
+	swipe_started.emit(_kind_of(action), _opening_of(action))
+	_report(at)
 	return true
+
+
+func _report(at: Vector2) -> void:
+	var d := at - _start
+	_last_dx = d.x
+	swipe_move.emit(d.x)
+
+
+func _end(_event: InputEventScreenTouch) -> void:
+	if _claimed:
+		swipe_release.emit(_last_dx)
+	_reset()
 
 
 ## Which gesture an edge + direction means in the current state. A band swipe
@@ -106,17 +147,25 @@ func _gesture_for(state: Dictionary, d: Vector2) -> String:
 		# The drawer is on screen: swiping left, anywhere, sends it back.
 		return CLOSE_DRAWER if d.x <= -TRIGGER_PX else ""
 	if bool(state.get("graph_open", false)):
-		# The map owns the whole screen: an edge swipe from EITHER corner, or a
-		# reverse drag to the right, slides it away and puts the note back. The
-		# tree stays reachable from the ☰ button (or from the note view).
-		if d.x >= TRIGGER_PX:
-			return CLOSE_GRAPH
-		return CLOSE_GRAPH if _edge == 1 and d.x <= -TRIGGER_PX else ""
+		# The map owns the whole screen and panning is its primary gesture, so
+		# the ONLY swipe that leaves it is the left corner (back to the note).
+		# The right corner must not close it, and neither must a rightward pan:
+		# a pan that happens to start near the right edge, or one moving right,
+		# has to keep panning the map rather than dropping back to the note.
+		return CLOSE_GRAPH if _edge == 0 and d.x >= TRIGGER_PX else ""
 	if _edge == 0 and d.x >= TRIGGER_PX:
 		return OPEN_DRAWER
 	if _edge == 1 and d.x <= -TRIGGER_PX:
 		return OPEN_GRAPH
 	return ""
+
+
+func _kind_of(action: String) -> String:
+	return KIND_GRAPH if action == OPEN_GRAPH or action == CLOSE_GRAPH else KIND_DRAWER
+
+
+func _opening_of(action: String) -> bool:
+	return action == OPEN_DRAWER or action == OPEN_GRAPH
 
 
 func _band_of(x: float) -> int:
@@ -139,3 +188,4 @@ func _reset() -> void:
 	_index = -1
 	_edge = -1
 	_claimed = false
+	_action = ""

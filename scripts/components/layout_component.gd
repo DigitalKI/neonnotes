@@ -49,11 +49,43 @@ var _kb_h := -1
 var _caret_adjust_frames := 0
 var _editor_size := Vector2.ZERO
 var _last_landscape := false
+## Follow-the-finger slide-over for the tree drawer (left edge).
+var _drawer_slide: SlideSurface
 
 
 func ready() -> void:
 	get_viewport().size_changed.connect(update_layout)
 	content.visible = true
+	_drawer_slide = SlideSurface.new()
+	_drawer_slide.name = "DrawerSlide"
+	_drawer_slide.panel = sidebar
+	_drawer_slide.covered = content
+	_drawer_slide.from_right = false
+	_drawer_slide.finished.connect(_on_drawer_slide_finished)
+	add_child(_drawer_slide)
+
+
+## Mobile edge-swipe: start sliding the drawer in (opening) or back out.
+func begin_drawer_slide(opening: bool) -> void:
+	if not is_mobile_layout:
+		return
+	_drawer_slide.begin(opening)
+
+
+func move_drawer_slide(dx: float) -> void:
+	_drawer_slide.move(dx)
+
+
+func finish_drawer_slide(dx: float) -> void:
+	_drawer_slide.finish(dx)
+
+
+func _on_drawer_slide_finished(panel_wins: bool) -> void:
+	# SlideSurface already applied the resting visibility; keep the flag in
+	# step and, on open, dismiss the floating graph focus card like the button.
+	drawer_open = panel_wins
+	if panel_wins:
+		drawer_opened.emit()
 
 
 func _process(_delta: float) -> void:

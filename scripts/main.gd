@@ -51,6 +51,10 @@ var _page_graph_state := -1
 var _dock_save_timer: Timer
 ## Mobile edge gestures (drawer from the left corner, map from the right one).
 var edge_swipe: EdgeSwipeComponent
+## Follow-the-finger slide-over for the graph map (right edge).
+var _graph_slide: SlideSurface
+## Which surface the current swipe is sliding ("" = none).
+var _swipe_kind := ""
 ## The unresolved target whose LinkResolveDialog page is open (set by _open_wikilink).
 var _link_target := ""
 const PAGE_SETTINGS := "settings"
@@ -241,14 +245,25 @@ func _phase_theme_layout() -> void:
 	PreviewBuilder.image_cb = _on_image_click
 	layout_component.ready()
 	# Mobile edge gestures: the drawer slides in from the left corner, the map
-	# from the right one (see EdgeSwipeComponent and _on_edge_swiped).
+	# from the right one (see EdgeSwipeComponent and the slide handlers).
 	edge_swipe = EdgeSwipeComponent.new()
 	edge_swipe.name = "EdgeSwipeComponent"
 	edge_swipe.enabled_cb = func() -> bool: return layout_component.is_mobile_layout
 	edge_swipe.state_cb = func() -> Dictionary:
 		return {"drawer_open": layout_component.drawer_open, "graph_open": _graph_open()}
-	edge_swipe.swiped.connect(_on_edge_swiped)
+	edge_swipe.swipe_started.connect(_on_swipe_started)
+	edge_swipe.swipe_move.connect(_on_swipe_move)
+	edge_swipe.swipe_release.connect(_on_swipe_release)
 	add_child(edge_swipe)
+	# The graph slides over the note column from the right, exactly like the
+	# drawer slides over the content from the left.
+	_graph_slide = SlideSurface.new()
+	_graph_slide.name = "GraphSlide"
+	_graph_slide.panel = graph_dock
+	_graph_slide.covered = note_column
+	_graph_slide.from_right = true
+	_graph_slide.finished.connect(_on_graph_slide_finished)
+	add_child(_graph_slide)
 	_boot_mark("theme-layout")
 	# Rotation changes the available layout shape (toolbar/margins), but not
 	# the density-based font/UI scale.
@@ -978,7 +993,7 @@ func _toggle_graph() -> void:
 	# Resolve maps + digests belong to one graph session.
 	_card_maps.clear()
 	var mobile := layout_component.is_mobile_layout
-	_set_graph_state(2 if mobile else 1)
+	_set_graph_state(2 if mobile else GameManager.graph_presentation)
 	graph_view.open(GameManager.current_rel)
 	if not mobile:
 		# The dock follows the note that is already open, once the map has
@@ -993,12 +1008,18 @@ func _toggle_graph_expanded() -> void:
 	if layout_component.is_mobile_layout or not _graph_open():
 		return
 	if graph_expanded:
+		# The ▣ button is the only thing that remembers dock vs full view: the
+		# toolbar ⊛ reopens in this remembered shape.
+		GameManager.graph_presentation = 1
+		GameManager._save_settings()
 		_set_graph_state(1)
 		_close_focus_card()
 		# Back to the panel: the note is untouched, and the map re-focuses it.
 		graph_view.refresh_graph()
 		_graph_follow_note(GameManager.current_rel)
 		return
+	GameManager.graph_presentation = 2
+	GameManager._save_settings()
 	_set_graph_state(2)
 	graph_view.refresh_graph()
 	# The full view owns the focus card again: show it for the node the dock had
@@ -1120,25 +1141,62 @@ func _open_dock_note(rel: String) -> void:
 
 
 ## Mobile edge gestures (EdgeSwipeComponent): the drawer slides in from the left
-## corner, the map from the right one — and either is dismissed by dragging it
-## back the way it came in.
-func _on_edge_swiped(action: String) -> void:
-	match action:
-		EdgeSwipeComponent.OPEN_DRAWER:
-			if not layout_component.drawer_open:
-				layout_component.toggle_sidebar()
-		EdgeSwipeComponent.CLOSE_DRAWER:
-			if layout_component.drawer_open:
-				layout_component.toggle_sidebar()
-		EdgeSwipeComponent.OPEN_GRAPH:
-			# The drawer owns the screen while it is open (the map hides with
-			# %Content), so the map is only reachable from the note view.
-			if layout_component.drawer_open or _graph_open() or page_mode != "":
-				return
-			_toggle_graph()
-		EdgeSwipeComponent.CLOSE_GRAPH:
-			if _graph_open():
-				_toggle_graph()
+## corner, the map from the right one — the panel follows the finger and either
+## snaps back or completes past the threshold (see SlideSurface).
+func _on_swipe_started(kind: String, opening: bool) -> void:
+	_swipe_kind = kind
+	if kind == EdgeSwipeComponent.KIND_DRAWER:
+		layout_component.begin_drawer_slide(opening)
+	else:
+		_begin_graph_slide(opening)
+
+
+func _on_swipe_move(dx: float) -> void:
+	if _swipe_kind == EdgeSwipeComponent.KIND_DRAWER:
+		layout_component.move_drawer_slide(dx)
+	else:
+		_graph_slide.move(dx)
+
+
+func _on_swipe_release(dx: float) -> void:
+	if _swipe_kind == EdgeSwipeComponent.KIND_DRAWER:
+		layout_component.finish_drawer_slide(dx)
+	else:
+		_graph_slide.finish(dx)
+	_swipe_kind = ""
+
+
+## Start the graph's slide. Opening mirrors the toolbar toggle's session prep
+## (flush, leave any page, close the drawer, clear card maps) but keeps the note
+## visible underneath while the map slides in; closing only reveals the note.
+func _begin_graph_slide(opening: bool) -> void:
+	if opening:
+		# A full-screen page owns the screen until it closes; the map is only
+		# reachable from the note view (matches the old swipe guard).
+		if page_mode != "":
+			return
+		editor.flush()
+		if layout_component.drawer_open:
+			layout_component.toggle_sidebar()
+		_card_maps.clear()
+		graph_docked = false
+		graph_expanded = true
+	if opening:
+		graph_view.open(GameManager.current_rel)
+	_graph_slide.begin(opening)
+
+
+func _on_graph_slide_finished(panel_wins: bool) -> void:
+	if panel_wins:
+		graph_docked = false
+		graph_expanded = true
+		_apply_graph_layout()
+	else:
+		_persist_graph_state()
+		graph_docked = false
+		graph_expanded = false
+		_close_focus_card()
+		_apply_graph_layout()
 
 # ------------------------------------------------------------ vault / sync
 

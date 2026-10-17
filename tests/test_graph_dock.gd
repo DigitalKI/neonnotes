@@ -41,6 +41,7 @@ func _ready() -> void:
 	GameManager.open_start_mode = "last"
 	GameManager.graph_view_state = {}
 	GameManager.last_opened_rel = ""
+	GameManager.graph_presentation = 1
 
 	var main: Node = load("res://scenes/main/Main.tscn").instantiate()
 	get_tree().root.add_child.call_deferred(main)
@@ -178,27 +179,32 @@ func _ready() -> void:
 	_check("the map is closed before the swipes", not main.graph_view.visible)
 	main.layout_component.is_mobile_layout = true
 	var w := get_viewport().get_visible_rect().size.x
-	_swipe(Vector2(10.0, 400.0), Vector2(120.0, 405.0))
-	await get_tree().process_frame
+	# A swipe now slides the panel under the finger and only commits past a
+	# threshold (a fraction of the panel width), then tweens to the end — so a
+	# committing swipe travels well past ~40% of the width and we await the tween.
+	_swipe(Vector2(10.0, 400.0), Vector2(w * 0.6, 405.0))
+	await _slide_settles()
 	_check("a left-corner swipe opens the drawer", main.layout_component.drawer_open)
-	_swipe(Vector2(300.0, 400.0), Vector2(180.0, 405.0))
-	await get_tree().process_frame
+	_swipe(Vector2(w * 0.7, 400.0), Vector2(w * 0.1, 405.0))
+	await _slide_settles()
 	_check("swiping left dismisses the drawer", not main.layout_component.drawer_open)
-	_swipe(Vector2(w - 10.0, 400.0), Vector2(w - 140.0, 405.0))
-	await get_tree().process_frame
+	_swipe(Vector2(w - 10.0, 400.0), Vector2(w * 0.4, 405.0))
+	await _slide_settles()
 	_check("a right-corner swipe opens the map", main.graph_view.visible)
 	_check("the phone map is full screen",
 		main.graph_expanded and not main.note_column.visible)
+	# Panning inside the map must not leave it: a rightward pan and a leftward
+	# pan that starts in the right corner are both map gestures, not swipes.
 	_swipe(Vector2(300.0, 400.0), Vector2(430.0, 405.0))
 	await get_tree().process_frame
-	_check("swiping right leaves the map", not main.graph_view.visible)
-	# From the map, the LEFT corner puts the note back — it must not pull the
-	# tree in (that is the note view's gesture).
+	_check("a rightward pan keeps the map", main.graph_view.visible)
 	_swipe(Vector2(w - 10.0, 400.0), Vector2(w - 140.0, 405.0))
 	await get_tree().process_frame
-	_check("the map opens again", main.graph_view.visible)
-	_swipe(Vector2(10.0, 400.0), Vector2(130.0, 405.0))
-	await get_tree().process_frame
+	_check("the right-corner swipe does not close the map", main.graph_view.visible)
+	# The LEFT corner is the map's only swipe exit — back to the note (it must
+	# not pull the tree in; that is the note view's gesture).
+	_swipe(Vector2(10.0, 400.0), Vector2(w * 0.6, 405.0))
+	await _slide_settles()
 	_check("the left corner leaves the map", not main.graph_view.visible)
 	_check("... and does not pull the tree in", not main.layout_component.drawer_open)
 	_swipe(Vector2(w - 10.0, 400.0), Vector2(w - 6.0, 540.0))
@@ -209,6 +215,12 @@ func _ready() -> void:
 	GameManager.vault_dir = original_vault
 	print("GRAPH DOCK RESULT: %s (%d fails)" % ["OK" if _fails == 0 else "FAIL", _fails])
 	get_tree().quit(_fails)
+
+
+## Wait out the slide tween (0.22s) plus a frame so `finished` settles the state.
+func _slide_settles() -> void:
+	await get_tree().create_timer(0.3).timeout
+	await get_tree().process_frame
 
 
 ## Push one synthetic touch gesture (a real press/drag/release sequence through

@@ -32,6 +32,9 @@ func _write_smoke_features_note() -> void:
 
 func _run_smoke() -> void:
 	var fails := 0
+	# The dock-vs-full-view presentation is persisted, so reset it here — the
+	# suite must not depend on the developer's real settings.cfg.
+	GameManager.graph_presentation = 1
 	var doc := MarkdownParser.parse("---\ntitle: \"T\"\ntheme: \"Toxic Terminal\"\n---\n\n# H\n[[Alpha]] and [[Beta|alias]]\n%%g%% ++f++\n")
 	fails += _check(doc["meta"].get("title", "") == "T" and doc["meta"].get("theme", "") == "Toxic Terminal", "front-matter title/theme")
 	var links := WikiLinks.extract_links("see [[Alpha]] and [[Beta|alias]] and [[Alpha]]")
@@ -392,13 +395,15 @@ func _run_smoke() -> void:
 	await m.get_tree().process_frame
 	fails += _check(not m.graph_view.visible, "tree note click closes the full graph view")
 	fails += _check(m.content_host.visible, "tree note click shows the note")
-	# The toggle is a plain show/hide: closed → dock → closed.
+	# The toggle reopens in the *last* presentation (the ▣ button remembered
+	# full view above), then closes again — the old always-dock behavior is gone.
 	m._toggle_graph()
 	await m.get_tree().process_frame
-	fails += _check(m.graph_view.visible and m.graph_docked, "the toggle reopens the dock")
+	fails += _check(m.graph_view.visible and m.graph_expanded, "the toggle reopens the full view")
 	m._toggle_graph()
 	await m.get_tree().process_frame
-	fails += _check(not m.graph_view.visible and not m.graph_docked, "the toggle closes the dock again")
+	fails += _check(not m.graph_view.visible and not m.graph_docked and not m.graph_expanded,
+		"the toggle closes the graph again")
 	print("SMOKE RESULT: %s (%d fails)" % ["FAIL" if fails > 0 else "OK", fails])
 	m.get_tree().quit(1 if fails > 0 else 0)
 

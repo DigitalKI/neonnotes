@@ -26,6 +26,39 @@ _Last updated: 2026-10-16 · Godot 4.7 · renderer: gl_compatibility_
 
 ## 2. Current state (present-tense facts — git is the changelog)
 
+- **Animated edge swipe + remembered graph presentation (2026-10-16):** the
+  mobile screen-edge gestures are no longer a discrete flip. `EdgeSwipeComponent`
+  now tracks the drag continuously (`swipe_started`/`swipe_move`/`swipe_release`
+  with a live horizontal delta) and a new `SlideSurface` node (one instance per
+  surface: `layout_component` owns the drawer, `main.gd` owns `_graph_slide`)
+  makes the panel `top_level` while it floats, slides it under the finger, and
+  on release tweens to full coverage past a ~40%-of-width threshold or snaps
+  back. The covered surface stays static (true slide-over). The old
+  tap/scroll/pan safety and the left-corner-only graph-dismiss rule are
+  unchanged; desktop has no swipe (buttons + split divider, as before).
+  **Gotcha:** `SlideSurface` must capture `covered.get_global_rect()` *before*
+  setting `top_level` and re-assert `panel.size` in `move()`/`finish()` — the
+  graph dock's `open()` (called right before `begin()`) triggers a container
+  re-sort that otherwise collapses the floating panel to its 240px minimum.
+  **Gotcha (on-device, "ends in the wrong position"):** a `top_level` panel's
+  `position` is absolute/global; after `top_level = false` that value is read
+  as a *local* offset inside its container, doubling the parent's own offset
+  (verified on-device: `panel.global` was 2× the covered surface's). `_complete`
+  and `_cancel` must reset `panel.position = Vector2.ZERO` on restore. Do **not**
+  reset `panel.size` there — that collapses the panel to its minimum instead of
+  the full screen.
+  - **Graph presentation persistence:** `GameManager.graph_presentation` (1 =
+    dock / 2 = full view, default 1) is written only by the nav-bar ▣ button
+    (`_toggle_graph_expanded`), not by `_set_graph_state` (so the graph-as-
+    start-page boot does not clobber it). The toolbar ⊛ reopens in the remembered
+    shape. The dock *width* (`graph_dock_split`) was already persisted. Both
+    graph tests reset `graph_presentation = 1` for hermeticity (it otherwise
+    leaks the developer's real settings.cfg into the suite).
+  - **Tree ⇄ graph sync** is already in place for the dock: a tree note click
+    calls `_graph_follow_note` → `GraphView.activate_note` (select + enter the
+    node), and a dock tap calls `_open_dock_note` → `VaultTreeComponent.
+    select_note` (expands ancestors + selects). No new code; covered by
+    `tests/TestGraphDock.tscn` + `tests/TestTreeReveal.tscn`.
 - **Startup: metadata index cache (2026-10-16):** boot read *every* note to
   build titles/tags/links (`load_metadata_async`), ~1.5 s on a 1 000-note
   vault — and it was **frame-paced, not I/O-bound**: the pass dripped 12
@@ -943,8 +976,9 @@ _Last updated: 2026-10-16 · Godot 4.7 · renderer: gl_compatibility_
   phones nothing changes except the entry: `EdgeSwipeComponent` opens the drawer
   with a rightward swipe from the left corner and the map with a leftward swipe
   from the right corner, and a full-screen surface hands the screen back to the
-  note — the map from either corner (or a reverse rightward drag), the drawer
-  from a leftward drag. Covered by `tests/TestGraphDock.tscn` plus the smoke tail.
+  note — the map from the left corner only (panning is never a swipe), the
+  drawer from a leftward drag. Covered by `tests/TestGraphDock.tscn` plus the
+  smoke tail.
 
 ## 3. Direction & next steps
 
@@ -1330,9 +1364,10 @@ _These OVERRIDE the skill's defaults for this project._
   mouse twin for every touch, so a claimed drag's twin motion is consumed too.
   **Gesture map (phones):** from the note, the left corner opens the drawer and
   the right corner opens the map; a full-screen surface hands the screen back to
-  the note — the map from *either* corner (or a reverse drag to the right), the
-  drawer from a leftward drag. So both corners return to the note, and the tree
-  is reached from the note view (or the ☰ button).
+  the note — the map from the **left corner only** (a pan — rightward, or one
+  starting in the right corner — keeps panning the map, so panning is never
+  mistaken for a swipe), the drawer from a leftward drag. The tree is reached
+  from the note view (or the ☰ button).
 - **Tree drag & drop**: `set_drag_forwarding` registered ONCE (re-registering
   per refresh breaks repeat drags on Android); `DROP_MODE_ON_ITEM |
   DROP_MODE_INBETWEEN` (-1/0/1 = above/on/below); preserve folder+note merged

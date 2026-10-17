@@ -130,6 +130,11 @@ var graph_view_state := {}
 ## is session state, because dev/smoke runs read the real user://settings.cfg
 ## and a remembered "open" would leak a developer layout into every test boot.
 var graph_dock_split := 0
+## Desktop graph presentation the toolbar ⊛ button reopens in: 1 = docked side
+## panel, 2 = full view (note column hidden). Persisted so the last choice
+## survives a restart. It is *not* "is the graph open on boot" — that stays
+## session state — it only decides the shape when the user opens the graph.
+var graph_presentation := 1
 var vault_dir := VAULT_DIR
 var dev_session := false  # true when this run is editor/MCP-driven (isolated vault)
 var current_file := ""  # absolute path of the open note ("" = none)
@@ -1088,6 +1093,7 @@ func _load_settings() -> void:
 	var gv_state = cf.get_value("ui", "graph_view_state", graph_view_state)
 	graph_view_state = gv_state if typeof(gv_state) == TYPE_DICTIONARY else {}
 	graph_dock_split = clampi(int(cf.get_value("ui", "graph_dock_split", graph_dock_split)), 0, 6000)
+	graph_presentation = clampi(int(cf.get_value("ui", "graph_presentation", graph_presentation)), 1, 2)
 	if not PALETTES.has(palette_name):
 		palette_name = "Synthwave"
 	if not FONTS.has(font_name):
@@ -1138,6 +1144,7 @@ func _save_settings() -> void:
 	cf.set_value("ui", "last_opened_rel", last_opened_rel)
 	cf.set_value("ui", "graph_view_state", graph_view_state)
 	cf.set_value("ui", "graph_dock_split", graph_dock_split)
+	cf.set_value("ui", "graph_presentation", graph_presentation)
 	cf.set_value("vault", "dir", vault_dir)
 	cf.set_value("sync", "device_id", device_id)
 	cf.set_value("sync", "pin", sync_pin)
