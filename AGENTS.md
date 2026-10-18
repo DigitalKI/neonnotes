@@ -109,5 +109,3 @@ history. Run `python3 tools/context_audit.py` before finishing a context change.
 - `docs/gotchas.md` — engine/platform traps (on demand).
 - `docs/roadmap.md` — direction and open work.
 - `docs/decisions.md` / `docs/decisions/ADR-*.md` — settled decisions.
-- `PROJECT_MEMORY.md` — retired and removed. Do not recreate it; the kit above
-  is the replacement.

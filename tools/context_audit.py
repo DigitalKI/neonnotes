@@ -54,17 +54,6 @@ def audit(root: Path) -> int:
     errors: list[str] = []
     warnings: list[str] = []
 
-    # Small-project mode: a single PROJECT_MEMORY.md instead of the docs kit.
-    archive = root / "PROJECT_MEMORY.md"
-    if not (root / "docs/architecture.md").is_file() and archive.is_file():
-        n = len(read_text(archive).splitlines())
-        if n > 150:
-            warnings.append(f"PROJECT_MEMORY.md is {n} lines (small-project budget ~150); split to the docs kit or compact it")
-        for w in warnings:
-            print(f"WARN:  {w}", file=sys.stderr)
-        print(f"context audit: single-file mode, {len(warnings)} warning(s)")
-        return 0
-
     for rel in REQUIRED:
         if not (root / rel).is_file():
             errors.append(f"missing required context file: {rel}")
@@ -141,13 +130,6 @@ def audit(root: Path) -> int:
             resolved = (root / "docs" / target).resolve()
             if not resolved.exists():
                 errors.append(f"decisions.md links a missing ADR: {target}")
-
-    # Deprecated memory should be clearly marked if it still exists.
-    old = root / "PROJECT_MEMORY.md"
-    if old.is_file():
-        head = "\n".join(read_text(old).splitlines()[:20])
-        if "DEPRECATED" not in head.upper():
-            warnings.append("PROJECT_MEMORY.md exists without a DEPRECATED header")
 
     # Architecture map coverage: let repo_map.py verify module paths.
     repo_map = root / "tools/repo_map.py"
