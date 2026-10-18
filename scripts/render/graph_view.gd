@@ -45,18 +45,64 @@ const ROUTE_SAMPLES := 48       # evenly spaced samples per route
 const NODE_R := 4.5
 const FOLDER_R := 3.0
 const LABEL_ZOOM := 1.5         # only label leaves once zoomed in this far
+
+# ---------------------------------------------------------------- label tuning
+## Graph labels are tuned here on purpose — there is no settings UI. Edit a
+## value and restart. Sizes/widths are logical pixels (the canvas scales them
+## with the UI). `LABEL_STYLE`: "outline" (default), "background", "none".
+const LABEL_STYLE := "outline"
+const LABEL_FONT := "body"          # "body" (GameManager font) or "orbitron"
+const LABEL_SIZE := 11
+const LABEL_COLOR := Color("#ffffff")          # normal fill
+const LABEL_OUTLINE_COLOR := Color("#000000")  # normal outline
+const LABEL_OUTLINE_WIDTH := 2
+const LABEL_HOVER_COLOR := Color("#ffe36e")    # hover highlight fill
+const LABEL_HOVER_OUTLINE_COLOR := Color("#000000")
+const LABEL_MAX_WIDTH := 140.0       # every label is capped and ellipsised
+const LABEL_BG_ALPHA := 0.72
+const LABEL_OFFSET := 8.0            # gap between marker edge and label box
+const LABEL_PAD := 2.0               # padding inside the label box
+const LABEL_CULL := 48.0             # viewport margin for label candidates
+const LABEL_GRID_CELL := 48.0        # spatial-hash cell for collision
+## A pure camera pan translates every label by the same delta, so the cached
+## placement is shifted in place until the *accumulated* pan exceeds this many
+## pixels; beyond that it is recomputed so labels entering the viewport are not
+## missed. The drift is measured from where the cache was placed, not from the
+## previous event — otherwise every small drag step translates and the cache
+## never re-places, leaving newly visible nodes unlabelled.
+const LABEL_PAN_TRANSLATE := 24.0
+const LABEL_GRID_BIAS := 1024
+const LABEL_GRID_SPAN := 2048
+const LABEL_MODES := ["right", "left", "up", "down",
+	"up_right", "up_left", "down_right", "down_left"]
+const LABEL_MODE_RANK := {
+	"right": 0, "left": 1, "up": 2, "down": 3,
+	"up_right": 4, "up_left": 5, "down_right": 6, "down_left": 7,
+}
+
+# ---------------------------------------------------------------- layout tuning
+## Radial spacing. Edge length is adaptive per parent: `_child_edge()` grows a
+## crowded parent's child ring so siblings get more arc length, and shrinks a
+## sparse one. `LAYOUT_SPACING` scales the whole radial skeleton.
+const LAYOUT_BASE_RADIUS_FRAC := 0.36
+const LAYOUT_SPACING := 1.0
+const LAYOUT_CHILD_SCALE := 0.9      # each deeper level's base edge
+const LAYOUT_TARGET_GAP := 0.22      # target child arc gap / base edge
+const LAYOUT_MIN_RING_FACTOR := 0.8
+const LAYOUT_MAX_RING_FACTOR := 2.0
+const LAYOUT_MIN_SECTOR_GAP := 0.015 # radians between sibling subtrees
+
 ## Phones open the overview closer than fit-all: the whole map is unreadable
 ## at that zoom, so the default frames the inner rings (the level-1 ring lands
 ## at ~85% of the short half-edge) and zooming out to everything stays
 ## possible — `_min_zoom` keeps the raw fit scale.
 const MOBILE_FIT_FLOOR := 1.2
-## Defaults only; the live values live in GameManager (settings page, persisted).
-## Defaults only; the live values live in GameManager (settings page, persisted).
 const ANCESTOR_CONTEXT := 2     # visible parent landmarks when entering a group
 const HOME_NOTE := "_homepage.md"  # the homepage IS the vault-root hub node
 const MAX_ROUTES := 400
 
 var _font: Font
+var _label_font: Font
 var _accent: Color
 var _accent2: Color
 var _text: Color
@@ -91,7 +137,8 @@ var _pending_restore := {}
 ## only decides *which* actions a node offers and what each one does.
 var _menu := GraphRadialMenu.new()
 var _cam_tween: Tween
-var _hover := ""
+var _hover := ""                # hovered tree key ("" is also the root hub key)
+var _hover_active := false      # distinguishes "hovering root" from "no hover"
 var _center_note := ""
 var _time := 0.0
 var _map_ready := false
@@ -138,6 +185,20 @@ const FOLDER_R_PX := FOLDER_R + 1.5
 var _map_dirty := true
 var _last_scale := -1.0
 var _last_offset := Vector2(INF, INF)
+## Label placement is recomputed when map state or appearance changes. A pure
+## pan translates the cache; a scale/view/size change forces a fresh pass.
+var _label_cache: Array[Dictionary] = []
+var _label_cache_valid := false
+var _label_cache_scale := -1.0
+var _label_cache_offset := Vector2(INF, INF)   # camera offset the boxes were placed at
+var _label_cache_applied := Vector2(INF, INF)  # camera offset the boxes now reflect
+var _label_cache_view := Rect2()
+var _label_cache_size := Vector2.ZERO
+## Text metrics depend only on the hierarchy/font, not the camera. Caching them
+## keeps the per-frame placement pass from re-shaping every title while panning.
+var _label_metrics := {}
+## Eight precomputed outward-first anchor orders, keyed by direction sector.
+var _label_mode_orders := {}
 # Resolve maps (full-path + basename) built once per open(). Reused by the
 # level and route passes — resolving each link via WikiLinks.resolve() rebuilt
 # them per call, which was O(links × notes): ~7 s at docs-vault scale.
@@ -156,10 +217,40 @@ func _ready() -> void:
 	# graph view's bounding box into the toolbar / status bar / sidebar.
 	clip_contents = true
 	_font = load("res://assets/fonts/Orbitron.ttf")
+	_label_font = _pick_label_font()
 	mouse_default_cursor_shape = Control.CURSOR_ARROW
 	set_process(false)
 	_build_layers()
 	GameManager.metadata_ready.connect(_on_metadata_ready)
+	GameManager.font_changed.connect(_on_font_changed)
+	GameManager.palette_changed.connect(_on_palette_changed)
+	resized.connect(_mark_map_dirty)
+	mouse_exited.connect(_clear_hover)
+
+## The graph label face is a code-level choice (see LABEL_FONT); "body" follows
+## the app's body font setting, "orbitron" keeps the display face.
+func _pick_label_font() -> Font:
+	if LABEL_FONT == "orbitron":
+		return _font
+	return GameManager.font()
+
+## Body-font changes invalidate label metrics; label size itself is independent
+## (LABEL_SIZE), so a global text-size change does not reflow the map.
+func _on_font_changed() -> void:
+	_label_font = _pick_label_font()
+	_label_metrics.clear()
+	_label_mode_orders.clear()
+	_mark_map_dirty()
+	queue_redraw()
+
+## Palette changes reach the graph's cached accent/text colours and the
+## background label style; repaint the static layers.
+func _on_palette_changed() -> void:
+	_accent = GameManager.color("accent")
+	_accent2 = GameManager.color("accent2")
+	_text = GameManager.color("text")
+	_mark_map_dirty()
+	queue_redraw()
 
 ## Create the three map layers (see the member docs). They are inserted *before*
 ## the authored nav bar so the chrome still draws on top of the map.
@@ -213,8 +304,15 @@ func _make_layer(layer_name: String, cb: Callable) -> Control:
 	c.draw.connect(cb)
 	return c
 
-## Request a repaint of the static layers on the next frame.
+## Request a repaint of the static layers on the next frame. Label placement is
+## derived from the same state, so it is dropped here too.
 func _mark_map_dirty() -> void:
+	_map_dirty = true
+	_label_cache_valid = false
+
+## Camera-only change: the static layers repaint, but the label cache survives
+## so a pure pan can be translated instead of resolving collisions again.
+func _mark_camera_dirty() -> void:
 	_map_dirty = true
 
 
@@ -226,6 +324,8 @@ func _mark_map_dirty() -> void:
 func _on_metadata_ready() -> void:
 	if not visible or not _map_ready:
 		return
+	# Titles can arrive with the metadata pass (the root hub label reads one).
+	_label_metrics.clear()
 	_rebuild_resolve_maps()
 	_build_levels()
 	_build_routes()
@@ -279,6 +379,8 @@ func open_restored(state: Dictionary) -> void:
 func _reset_nav(center_note: String) -> void:
 	_center_note = center_note
 	_selected = ""
+	_hover = ""
+	_hover_active = false
 	_scope = ""
 	_scope_active = false
 	_page = 0
@@ -498,6 +600,7 @@ func _key_for_note(note: String) -> String:
 ## Folder-as-note hierarchy over the whole vault. A note whose stem is a folder
 ## IS that folder's node (they never appear twice).
 func _build_hierarchy() -> void:
+	_label_metrics.clear()
 	_pos.clear(); _parent.clear(); _children.clear(); _companion.clear()
 	_open_target.clear(); _collapsed.clear(); _cluster_nodes.clear(); _keys.clear()
 	_root_home = ""
@@ -951,7 +1054,7 @@ func _layout_points() -> void:
 		if landmark == "":
 			break
 		landmark_count += 1
-		_pos[landmark] = center - Vector2(0, 62.0 * landmark_count)
+		_pos[landmark] = center - Vector2(0, 62.0 * LAYOUT_SPACING * landmark_count)
 	if _scope != "":
 		_pos[_scope] = center
 	else:
@@ -962,8 +1065,7 @@ func _layout_points() -> void:
 		if _keys.has(c):
 			children.append(c)
 	children.sort()
-	var radius := minf(size.x, size.y) * 0.36
-	_assign_sectors(children, -PI / 2.0, TAU, 1, center, radius)
+	_assign_sectors(children, -PI / 2.0, TAU, center, _layout_radius())
 	# Ensure every visible node has a deterministic fallback point.
 	for k in _keys:
 		if not _pos.has(k):
@@ -991,8 +1093,24 @@ func _visible_leaf_weight(key: String) -> int:
 			total += _visible_leaf_weight(c)
 	return maxi(1, total)
 
+## Base radius of the radial skeleton. `LAYOUT_SPACING` is the single knob that
+## scales the whole map (edge lengths included) without touching the camera.
+func _layout_radius() -> float:
+	return minf(size.x, size.y) * LAYOUT_BASE_RADIUS_FRAC * LAYOUT_SPACING
+
+## Child-ring radius for one parent. Siblings sit on an arc, so their gap is
+## `edge * span / count`: a crowded parent in a narrow sector gets a longer
+## edge, while a sparse one tightens. Both ends are clamped so the map cannot
+## explode or collapse. Deterministic — no runtime physics.
+func _child_edge(count: int, span: float, base_edge: float) -> float:
+	if count <= 1:
+		return base_edge * LAYOUT_MIN_RING_FACTOR
+	var slot := maxf(span / float(count), 0.0001)
+	var factor := LAYOUT_TARGET_GAP / slot
+	return base_edge * clampf(factor, LAYOUT_MIN_RING_FACTOR, LAYOUT_MAX_RING_FACTOR)
+
 func _assign_sectors(children: Array[String], start: float,
-		span: float, depth: int, origin: Vector2, radius: float) -> void:
+		span: float, origin: Vector2, base_edge: float) -> void:
 	if children.is_empty():
 		return
 	var weights: Array[int] = []
@@ -1001,22 +1119,29 @@ func _assign_sectors(children: Array[String], start: float,
 		var w := _visible_leaf_weight(child)
 		weights.append(w)
 		total += w
-	var cursor := start
-	for i in children.size():
+	var n := children.size()
+	# A small gap between sibling subtrees keeps branches from touching. The
+	# cap on the total gap means a huge fan-out still keeps most of its sector.
+	var gap := 0.0
+	if n > 1:
+		gap = minf(LAYOUT_MIN_SECTOR_GAP, span * 0.15 / float(n))
+	var usable := maxf(span - gap * float(n - 1), span * 0.5)
+	var edge := _child_edge(n, usable, base_edge)
+	var cursor := start + (gap * 0.5 if n > 1 else 0.0)
+	for i in n:
 		var child := children[i]
-		var child_span := span * float(weights[i]) / float(maxi(1, total))
+		var child_span := usable * float(weights[i]) / float(maxi(1, total))
 		var angle := cursor + child_span / 2.0
-		var radial := radius * float(depth)
-		_pos[child] = origin + Vector2.from_angle(angle) * radial
+		_pos[child] = origin + Vector2.from_angle(angle) * edge
 		var grand: Array[String] = []
 		for c in _children.get(child, []):
 			var sk := String(c)
 			if _keys.has(sk):
 				grand.append(sk)
 		if not grand.is_empty() and not _collapsed.get(child, false):
-			_assign_sectors(grand, cursor, child_span, depth + 1,
-				_pos[child], radius * 0.72)
-		cursor += child_span
+			_assign_sectors(grand, cursor, child_span, _pos[child],
+				base_edge * LAYOUT_CHILD_SCALE)
+		cursor += child_span + gap
 
 func _fit_to_view() -> void:
 	if _pos.is_empty():
@@ -1036,7 +1161,7 @@ func _fit_to_view() -> void:
 	# Phones default closer than fit-all, portrait or landscape alike (the
 	# floor is derived from the short edge, so rotation does not change it).
 	if mobile_fit:
-		var ring1 := minf(size.x, size.y) * 0.36
+		var ring1 := _layout_radius()
 		_map_scale = maxf(fit_scale, clampf(0.85 * 0.5 * minf(size.x, size.y) / ring1, 0.5, 2.0))
 	var mid := (lo + hi) / 2.0
 	var anchor := mid
@@ -1062,7 +1187,7 @@ func _process(delta: float) -> void:
 	if _map_scale != _last_scale or _map_offset != _last_offset:
 		_last_scale = _map_scale
 		_last_offset = _map_offset
-		_map_dirty = true
+		_mark_camera_dirty()
 	if _map_dirty:
 		_map_dirty = false
 		_bg.queue_redraw()
@@ -1257,24 +1382,365 @@ func _node_color(k: String) -> Color:
 	return col
 
 func _draw_labels(ci: CanvasItem) -> void:
+	var font := _label_font
+	if font == null:
+		return
+	for item in label_layout():
+		var rect: Rect2 = item["rect"]
+		var baseline: Vector2 = item["baseline"]
+		var txt := String(item["text"])
+		var hovered := bool(item["hovered"])
+		var fill := LABEL_HOVER_COLOR if hovered else LABEL_COLOR
+		var outline_col := LABEL_HOVER_OUTLINE_COLOR if hovered else LABEL_OUTLINE_COLOR
+		var outline_w := LABEL_OUTLINE_WIDTH + (1 if hovered else 0)
+		if LABEL_STYLE == "background":
+			ci.draw_rect(rect, Color(GameManager.color("bg"), LABEL_BG_ALPHA))
+		if LABEL_STYLE != "none" and outline_w > 0:
+			ci.draw_string_outline(font, baseline, txt,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, LABEL_SIZE, outline_w, outline_col)
+		ci.draw_string(font, baseline, txt,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, LABEL_SIZE, fill)
+
+## Resolve every visible label to a screen-space box and a draw order. This is
+## the pure placement pass behind `_draw_labels()`: the probe can call it
+## headless and assert that no two boxes intersect. Requests are placed by
+## priority (selected → hot → folders → focus leaves → scope leaves → other
+## leaves); labels are drawn in the reverse order, with the hovered label last
+## so it wins any overlap. A hovered/selected label is forced even when the map
+## is too tight; lower-priority labels are dropped instead.
+func label_layout() -> Array[Dictionary]:
+	var view := view_rect()
+	var font := _label_font
+	if font == null:
+		return []
+	# A pure pan translates every screen-space label by the same delta, so the
+	# cached placement can be shifted in place. Scale/view changes (zoom, card
+	# inset, resize) fall through to a full collision pass.
+	if _label_cache_valid \
+			and _label_cache_scale == _map_scale \
+			and _label_cache_view == view \
+			and _label_cache_size == size:
+		if _map_offset != _label_cache_offset:
+			# Re-place once the pan has drifted far enough from where the cache was
+			# built; a slow drag accumulates across many small events.
+			if (_map_offset - _label_cache_offset).length() > LABEL_PAN_TRANSLATE:
+				_label_cache_valid = false
+			else:
+				var step := _map_offset - _label_cache_applied
+				if step != Vector2.ZERO:
+					_translate_label_cache(step)
+					_label_cache_applied = _map_offset
+		if _label_cache_valid:
+			return _label_cache
+	var placed: Array[Dictionary] = []
+	if _keys.is_empty() or _pos.is_empty():
+		_label_cache = placed
+		_label_cache_valid = true
+		_label_cache_scale = _map_scale
+		_label_cache_offset = _map_offset
+		_label_cache_applied = _map_offset
+		_label_cache_view = view
+		_label_cache_size = size
+		return placed
+
 	var zoomed := _map_scale >= LABEL_ZOOM
+	var overview := _scope == "" and not _scope_active
+	var hub_key := _scope if _scope != "" else ""
+	var hub := _to_screen(_pos[hub_key]) if _pos.has(hub_key) else size * 0.5
+	var blockers := {}
+	# Other node markers are obstacles. A label's own marker cannot collide
+	# because every candidate starts at least one marker radius away from it.
 	for k in _keys:
 		if not _pos.has(k):
 			continue
-		var hot := k == _center_note or String(_companion.get(k, "")) == _center_note
-		var leaf: bool = _is_leaf(k) and not _collapsed.get(k, false)
-		var in_focus := _center_note == "" or _levels.has(String(_open_target.get(k, "")))
-		# Keep the map legible: folders always; notes only when in focus, zoomed
-		# in, hovered or collapsed (where one label stands for many notes).
-		if not (hot or zoomed or in_focus or k == _hover or not leaf):
+		var np := _to_screen(_pos[k])
+		if not view.grow(LABEL_CULL).has_point(np):
+			continue
+		var nr := _node_label_radius(k)
+		_grid_add(blockers, Rect2(np - Vector2(nr, nr), Vector2(nr, nr) * 2.0))
+	# The circle menu owns a disc around the selected node.
+	if _menu.open and _pos.has(_selected):
+		var mp := _to_screen(_pos[_selected])
+		var mr := GraphRadialMenu.RADIUS + GraphRadialMenu.HALO_R
+		_grid_add(blockers, Rect2(mp - Vector2(mr, mr), Vector2(mr, mr) * 2.0))
+
+	var requests: Array[Dictionary] = []
+	for k in _keys:
+		if not _pos.has(k):
 			continue
 		var p := _to_screen(_pos[k])
-		var txt := _label(k)
-		if _collapsed.get(k, false) and not _cluster_nodes.has(k):
-			txt += " ·%d" % _children.get(k, []).size()
-		var w := _font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-		ci.draw_rect(Rect2(p + Vector2(8, -8), Vector2(w + 6, 17)), Color(GameManager.color("bg"), 0.72))
-		ci.draw_string(_font, p + Vector2(11, 4), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, _text)
+		if not view.grow(LABEL_CULL).has_point(p):
+			continue
+		var hovered := _hover_active and k == _hover
+		var selected := _menu.open and k == _selected
+		var hot := _label_is_hot(k)
+		var leaf: bool = _is_leaf(k) and not _collapsed.get(k, false)
+		var focus_leaf := _center_note != "" \
+			and _levels.has(String(_open_target.get(k, "")))
+		# LOD: the no-centre overview labels folders/centre/hover/selected only;
+		# leaves join when zoomed, in a focus neighbourhood, or inside a scope.
+		if leaf and not (hovered or selected or hot or zoomed or focus_leaf or not overview):
+			continue
+		var priority := 6
+		if selected:
+			priority = 0
+		elif hot:
+			priority = 1
+		elif not leaf:
+			priority = 2
+		elif focus_leaf:
+			priority = 3
+		elif not overview:
+			priority = 4
+		# All labels share one width cap, so their shaped text/metrics are cached
+		# per key across pans (and hover does not resize the label under the
+		# cursor, which would make it flicker).
+		var metrics: Dictionary
+		if _label_metrics.has(k):
+			metrics = _label_metrics[k]
+		else:
+			var txt := _label_text(k, LABEL_MAX_WIDTH, font)
+			var text_w := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, LABEL_SIZE).x
+			metrics = {
+				"text": txt,
+				"w": text_w + LABEL_PAD * 2.0 + float(LABEL_OUTLINE_WIDTH),
+				"h": font.get_height(LABEL_SIZE) + LABEL_PAD * 2.0
+					+ float(LABEL_OUTLINE_WIDTH),
+			}
+			_label_metrics[k] = metrics
+		requests.append({
+			"key": k, "text": metrics["text"], "priority": priority, "hovered": hovered,
+			"selected": selected, "pos": p, "w": metrics["w"], "h": metrics["h"],
+			"depth": _depth(k),
+		})
+	requests.sort_custom(_label_request_less)
+
+	for req in requests:
+		var k := String(req["key"])
+		var p: Vector2 = req["pos"]
+		var rect_w := float(req["w"])
+		var rect_h := float(req["h"])
+		var selected := bool(req["selected"])
+		var hovered := bool(req["hovered"])
+		# Clear the node's own marker (collapsed rings are much wider) plus the
+		# collision padding, so a candidate never trips over its own node.
+		var gap := maxf(LABEL_OFFSET, _node_label_radius(k) + LABEL_PAD + 1.0)
+		if selected:
+			# The focused node's label sits outside the circle menu.
+			gap = GraphRadialMenu.RADIUS + GraphRadialMenu.HALO_R + LABEL_PAD
+		# Prefer the outward side: labels on the right half extend right, the
+		# left half extends left, top/bottom prefer above/below. This stops every
+		# label from crossing the hub toward the same side.
+		var modes := _label_modes_for(p - hub)
+		var chosen := {}
+		for mode in modes:
+			var cand := _label_rect(String(mode), p, rect_w, rect_h, gap, font)
+			var rect: Rect2 = cand["rect"]
+			if not view.encloses(rect):
+				continue
+			if _grid_hits(blockers, rect.grow(LABEL_PAD)):
+				continue
+			chosen = cand
+			break
+		if chosen.is_empty():
+			if not (hovered or selected):
+				continue
+			chosen = _label_rect(String(modes[0]), p, rect_w, rect_h, gap, font)
+		_grid_add(blockers, chosen["rect"])
+		placed.append({
+			"key": k, "text": req["text"], "rect": chosen["rect"],
+			"baseline": chosen["baseline"], "hovered": hovered,
+			"priority": req["priority"],
+		})
+
+	placed.sort_custom(_label_draw_less)
+	_label_cache = placed
+	_label_cache_valid = true
+	_label_cache_scale = _map_scale
+	_label_cache_offset = _map_offset
+	_label_cache_applied = _map_offset
+	_label_cache_view = view
+	_label_cache_size = size
+	return _label_cache
+
+## Placement order: higher priority first, then shallower nodes, then key.
+static func _label_request_less(a: Dictionary, b: Dictionary) -> bool:
+	if int(a["priority"]) != int(b["priority"]):
+		return int(a["priority"]) < int(b["priority"])
+	if int(a["depth"]) != int(b["depth"]):
+		return int(a["depth"]) < int(b["depth"])
+	return String(a["key"]) < String(b["key"])
+
+## Draw order: low priority first, hovered last (it must win any overlap).
+static func _label_draw_less(a: Dictionary, b: Dictionary) -> bool:
+	var ha := bool(a["hovered"])
+	var hb := bool(b["hovered"])
+	if ha != hb:
+		return hb
+	if int(a["priority"]) != int(b["priority"]):
+		return int(a["priority"]) > int(b["priority"])
+	return String(a["key"]) < String(b["key"])
+
+## A pure pan shifts the whole cached placement by one screen-space delta.
+func _translate_label_cache(delta: Vector2) -> void:
+	for item in _label_cache:
+		var rect: Rect2 = item["rect"]
+		item["rect"] = Rect2(rect.position + delta, rect.size)
+		item["baseline"] = (item["baseline"] as Vector2) + delta
+
+## Outward-first anchor order, quantised to eight direction sectors so the
+## eight-way sort runs at most eight times per process (not per label per pan).
+func _label_modes_for(want: Vector2) -> Array:
+	var dir := want.normalized() if want.length() > 0.001 else Vector2.RIGHT
+	var angle := atan2(dir.y, dir.x)
+	var sector := clampi(int(floor((angle + PI) / (PI / 4.0))), 0, 7)
+	if _label_mode_orders.has(sector):
+		return _label_mode_orders[sector]
+	var center := -PI + (float(sector) + 0.5) * (PI / 4.0)
+	var target := Vector2.from_angle(center)
+	var modes: Array[String] = []
+	for mode in LABEL_MODES:
+		modes.append(String(mode))
+	modes.sort_custom(func(a, b):
+		var da := _label_mode_dir(a).dot(target)
+		var db := _label_mode_dir(b).dot(target)
+		if absf(da - db) > 0.0001:
+			return da > db
+		return int(LABEL_MODE_RANK[a]) < int(LABEL_MODE_RANK[b]))
+	_label_mode_orders[sector] = modes
+	return modes
+
+## True for the centre/companion node a graph was opened from.
+func _label_is_hot(k: String) -> bool:
+	if k == _center_note:
+		return true
+	if String(_companion.get(k, "")) == _center_note:
+		return true
+	return _center_note != "" and String(_open_target.get(k, "")) == _center_note
+
+## Marker radius used as a label obstacle (collapsed rings are the widest).
+func _node_label_radius(k: String) -> float:
+	if _collapsed.get(k, false):
+		return FOLDER_R_PX + RING_PAD_PX
+	return NODE_R + 1.0
+
+func _label_text(key: String, cap: float, font: Font) -> String:
+	var txt := _label(key)
+	if _collapsed.get(key, false) and not _cluster_nodes.has(key):
+		# Keep the aggregate count visible even when the folder name is capped.
+		var suffix := " ·%d" % _children.get(key, []).size()
+		var suffix_w := font.get_string_size(suffix, HORIZONTAL_ALIGNMENT_LEFT,
+			-1, LABEL_SIZE).x
+		return _truncate_label(txt, maxf(20.0, cap - suffix_w), font) + suffix
+	return _truncate_label(txt, cap, font)
+
+## Cap a label to `max_w` with an ellipsis. Every label uses the same cap;
+## hovering changes the highlight/draw order, never the size (no flicker).
+func _truncate_label(txt: String, max_w: float, font: Font) -> String:
+	if txt.is_empty() or max_w <= 0.0:
+		return txt
+	if font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, LABEL_SIZE).x <= max_w:
+		return txt
+	var ell := "…"
+	var lo := 0
+	var hi := txt.length()
+	while lo < hi:
+		var mid := int((lo + hi + 1) / 2)
+		var cand := txt.substr(0, mid) + ell
+		if font.get_string_size(cand, HORIZONTAL_ALIGNMENT_LEFT, -1, LABEL_SIZE).x <= max_w:
+			lo = mid
+		else:
+			hi = mid - 1
+	return txt.substr(0, maxi(1, lo)) + ell
+
+## One candidate box for a label anchor mode. `baseline` centres the chosen
+## font vertically inside the box (the box also reserves the outline width).
+func _label_rect(mode: String, p: Vector2, w: float, h: float, gap: float,
+		font: Font) -> Dictionary:
+	var rect: Rect2
+	match mode:
+		"right":
+			rect = Rect2(p + Vector2(gap, -h * 0.5), Vector2(w, h))
+		"left":
+			rect = Rect2(p + Vector2(-gap - w, -h * 0.5), Vector2(w, h))
+		"up":
+			rect = Rect2(p + Vector2(-w * 0.5, -gap - h), Vector2(w, h))
+		"down":
+			rect = Rect2(p + Vector2(-w * 0.5, gap), Vector2(w, h))
+		"up_right":
+			rect = Rect2(p + Vector2(gap, -gap - h), Vector2(w, h))
+		"up_left":
+			rect = Rect2(p + Vector2(-gap - w, -gap - h), Vector2(w, h))
+		"down_right":
+			rect = Rect2(p + Vector2(gap, gap), Vector2(w, h))
+		"down_left":
+			rect = Rect2(p + Vector2(-gap - w, gap), Vector2(w, h))
+		_:
+			rect = Rect2(p + Vector2(gap, -h * 0.5), Vector2(w, h))
+	var baseline := Vector2(rect.position.x + LABEL_PAD,
+		rect.position.y + (h + font.get_ascent(LABEL_SIZE)
+			- font.get_descent(LABEL_SIZE)) * 0.5)
+	return {"rect": rect, "baseline": baseline}
+
+func _label_mode_dir(mode: String) -> Vector2:
+	match mode:
+		"right": return Vector2.RIGHT
+		"left": return Vector2.LEFT
+		"up": return Vector2.UP
+		"down": return Vector2.DOWN
+		"up_right": return Vector2(1, -1).normalized()
+		"up_left": return Vector2(-1, -1).normalized()
+		"down_right": return Vector2(1, 1).normalized()
+		"down_left": return Vector2(-1, 1).normalized()
+	return Vector2.RIGHT
+
+## Spatial hash for label/node collision checks. Cell size is one label height,
+## so a candidate box touches only a handful of buckets even at 2,000 nodes.
+## Integer keys avoid allocating a Vector2i per cell.
+func _grid_key(x: int, y: int) -> int:
+	return (x + LABEL_GRID_BIAS) * LABEL_GRID_SPAN + (y + LABEL_GRID_BIAS)
+
+func _grid_add(grid: Dictionary, rect: Rect2) -> void:
+	var x0 := int(floor(rect.position.x / LABEL_GRID_CELL))
+	var x1 := int(floor(rect.end.x / LABEL_GRID_CELL))
+	var y0 := int(floor(rect.position.y / LABEL_GRID_CELL))
+	var y1 := int(floor(rect.end.y / LABEL_GRID_CELL))
+	for x in range(x0, x1 + 1):
+		for y in range(y0, y1 + 1):
+			var key := _grid_key(x, y)
+			if not grid.has(key):
+				grid[key] = []
+			grid[key].append(rect)
+
+func _grid_hits(grid: Dictionary, rect: Rect2) -> bool:
+	var x0 := int(floor(rect.position.x / LABEL_GRID_CELL))
+	var x1 := int(floor(rect.end.x / LABEL_GRID_CELL))
+	var y0 := int(floor(rect.position.y / LABEL_GRID_CELL))
+	var y1 := int(floor(rect.end.y / LABEL_GRID_CELL))
+	for x in range(x0, x1 + 1):
+		for y in range(y0, y1 + 1):
+			for other in grid.get(_grid_key(x, y), []):
+				if rect.intersects(other):
+					return true
+	return false
+
+## Topmost label under a point, in draw order (hovered wins). A dictionary is
+## used because "" is a real key (the root hub), not a miss.
+func _label_key_at(at: Vector2) -> Dictionary:
+	var labels := label_layout()
+	for i in range(labels.size() - 1, -1, -1):
+		var rect: Rect2 = labels[i]["rect"]
+		if rect.has_point(at):
+			return {"hit": true, "key": String(labels[i]["key"])}
+	return {"hit": false, "key": ""}
+
+func _clear_hover() -> void:
+	if not _hover_active and _hover == "":
+		return
+	_hover_active = false
+	_hover = ""
+	_mark_map_dirty()
+	queue_redraw()
 
 ## Compact neon navigation bar: << < current/total > >> plus scope path.
 func _crumb_chain() -> Array[String]:
@@ -1387,6 +1853,11 @@ func _gui_input(event: InputEvent) -> void:
 				return
 			_dragging = false
 			mouse_default_cursor_shape = Control.CURSOR_ARROW
+			# Settle the label pass on release: the last small pan steps were
+			# translated, so labels that entered the viewport get placed now.
+			if _press_moved:
+				_mark_map_dirty()
+				queue_redraw()
 			# A clean click focuses the node instead of opening it: opening lives
 			# in the circle menu, so a click that follows a drag or lands after
 			# a pan can never fire accidentally.
@@ -1440,6 +1911,11 @@ func _gui_input(event: InputEvent) -> void:
 					_tap_node(tapped)
 				elif _hub_at(event.position):
 					_tap_hub()
+			# Settle the label pass on release: a mobile pan/pinch is delivered as
+			# many small deltas, so re-place once the finger lifts.
+			if _touches.is_empty() and (_press_moved or _pinch_used):
+				_mark_map_dirty()
+				queue_redraw()
 		accept_event()
 	elif event is InputEventScreenDrag:
 		var prev: Vector2 = _touches.get(event.index, event.position)
@@ -1473,9 +1949,21 @@ func _gui_input(event: InputEvent) -> void:
 			queue_redraw()
 			state_changed.emit()
 		else:
-			_hover = _node_at(event.position)
-			mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if _hover != "" else Control.CURSOR_ARROW
-			_mark_map_dirty()
+			# Hover the marker first, then its label. Hovering the text keeps the
+			# same highlight even when the pointer is not near the marker.
+			var node_key := _key_at(event.position)
+			var hover_active := node_key != "" or _hub_at(event.position)
+			var hover_key := node_key if hover_active else ""
+			if not hover_active:
+				var label_hit := _label_key_at(event.position)
+				if bool(label_hit.get("hit", false)):
+					hover_active = true
+					hover_key = String(label_hit.get("key", ""))
+			if hover_active != _hover_active or hover_key != _hover:
+				_hover_active = hover_active
+				_hover = hover_key
+				_mark_map_dirty()
+			mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if hover_active else Control.CURSOR_ARROW
 			queue_redraw()
 
 func _zoom_at(anchor: Vector2, factor: float) -> void:
@@ -1484,13 +1972,6 @@ func _zoom_at(anchor: Vector2, factor: float) -> void:
 	_map_offset = anchor - before * _map_scale
 	queue_redraw()
 	state_changed.emit()
-
-## Nearest node to a point — returns the note to open, not the tree key.
-func _node_at(at: Vector2) -> String:
-	var best := _key_at(at)
-	if best == "":
-		return ""
-	return String(_open_target.get(best, ""))
 
 # ------------------------------------------------------------- selection / menu
 
@@ -1502,7 +1983,7 @@ func _hub_at(at: Vector2) -> bool:
 	return at.distance_to(_to_screen(_pos[""])) <= 26.0
 
 ## Nearest node to a point — the tree key (folders + companion stems), which is
-## what selection, the menu and the camera need. `_node_at` maps it onward.
+## what selection, hover, the menu and the camera need.
 func _key_at(at: Vector2) -> String:
 	var m := _to_map(at)
 	var best := ""

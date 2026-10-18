@@ -421,5 +421,133 @@ func _ready() -> void:
 	GameManager.notes = saved_notes3
 	GameManager.links = saved_links3
 
+	# 17. Label placement and adaptive layout spacing. A crowded parent must get
+	#     a longer child ring than a one-child parent; labels must not overlap,
+	#     must stay in the free view, and a hovered label must draw last.
+	var saved_notes4: Array[String] = GameManager.notes
+	var saved_links4: Dictionary = GameManager.links
+	var saved_titles4: Dictionary = GameManager.titles
+	var saved_sep4: int = GameManager.graph_max_separate
+	var notes4: Array[String] = ["crowded.md", "sparse.md"]
+	for i in 60:
+		notes4.append("crowded/n%02d.md" % i)
+	notes4.append("sparse/only.md")
+	GameManager.notes = notes4
+	GameManager.links = {}
+	GameManager.titles = {}
+	GameManager.graph_max_separate = 100
+	gv._build_hierarchy()
+	gv._scope = ""
+	gv._scope_active = false
+	gv._rebuild_keys()
+	gv._layout_points()
+	gv._build_routes()
+	gv._fit_to_view()
+	gv._menu.clear()
+	gv._selected = ""
+	gv._hover = ""
+	gv._hover_active = false
+	gv._mark_map_dirty()
+	var crowded_edge: float = gv._pos["crowded/n00.md"].distance_to(gv._pos["crowded"])
+	var sparse_edge: float = gv._pos["sparse/only.md"].distance_to(gv._pos["sparse"])
+	check.call("crowded parent gets a longer child edge", crowded_edge > sparse_edge * 1.2)
+	check.call("sparse parent tightens its child edge", sparse_edge < crowded_edge)
+	check.call("child edge clamps a huge fan-out",
+		gv._child_edge(1000, 0.01, 100.0) <= 100.0 * 2.0 + 0.01)
+	check.call("child edge never collapses",
+		gv._child_edge(1, TAU, 100.0) >= 100.0 * 0.8 - 0.01)
+	# Enter the crowded scope: every child is a leaf, so the label pass runs at
+	# fit-all zoom (inside a scope labels do not wait for LABEL_ZOOM).
+	gv._scope = "crowded"
+	gv._scope_active = true
+	gv._rebuild_keys()
+	gv._layout_points()
+	gv._build_routes()
+	gv._fit_to_view()
+	gv._mark_map_dirty()
+	var labels: Array = gv.label_layout()
+	var overlaps := false
+	var outside := false
+	for i in labels.size():
+		var ra: Rect2 = labels[i]["rect"]
+		if not gv.view_rect().encloses(ra):
+			outside = true
+		for j in range(i + 1, labels.size()):
+			var rb: Rect2 = labels[j]["rect"]
+			if ra.intersects(rb):
+				overlaps = true
+	check.call("entered scope draws labels", labels.size() > 5)
+	check.call("label boxes do not overlap", not overlaps)
+	check.call("labels stay inside the free view", not outside)
+	# Hovered label: flagged for the highlight and drawn last so it wins any
+	# overlap that a forced/selected label may cause.
+	gv._hover = "crowded/n00.md"
+	gv._hover_active = true
+	gv._mark_map_dirty()
+	var hover_labels: Array = gv.label_layout()
+	var hover_index := -1
+	for i in hover_labels.size():
+		if bool(hover_labels[i]["hovered"]):
+			hover_index = i
+	check.call("hovered label is highlighted", hover_index >= 0)
+	check.call("hovered label draws last", hover_index == hover_labels.size() - 1)
+	# A slow pan is translated from the cached placement for cheapness, but once
+	# the accumulated translation passes LABEL_PAN_TRANSLATE the pass must re-place
+	# so labels scrolling into the viewport appear. Mobile showed the failure most
+	# after a pinch (zoomed in, every pan reveals new leaves).
+	gv._hover = ""
+	gv._hover_active = false
+	gv._mark_map_dirty()
+	gv._zoom_at(gv.size / 2.0, 2.0)
+	gv._map_offset = gv.size / 2.0 - gv._pos["crowded"] * gv._map_scale
+	gv._mark_map_dirty()
+	gv.label_layout()   # build the cache at this camera
+	for i in 40:
+		gv._map_offset += Vector2(16, 0)
+		gv.label_layout()
+	var cached_keys := {}
+	for item in gv.label_layout():
+		cached_keys[String(item["key"])] = true
+	gv._label_cache_valid = false   # force a fresh placement at the same camera
+	var fresh_keys := {}
+	for item in gv.label_layout():
+		fresh_keys[String(item["key"])] = true
+	var missing := 0
+	for k in fresh_keys:
+		if not cached_keys.has(k):
+			missing += 1
+	check.call("a slow pan re-places labels entering the view", missing == 0)
+	# Lifting the finger must settle the pass even when the pan itself stayed
+	# below the translate threshold — this is the mobile "labels stuck after a
+	# drag" report. A touch drag past TAP_SLOP then a release clears the cache.
+	var touch_press := InputEventScreenTouch.new()
+	touch_press.index = 0
+	touch_press.pressed = true
+	touch_press.position = gv.size * 0.5
+	gv._gui_input(touch_press)
+	var touch_drag := InputEventScreenDrag.new()
+	touch_drag.index = 0
+	touch_drag.position = touch_press.position + Vector2(GraphView.TAP_SLOP + 4.0, 0)
+	gv._gui_input(touch_drag)
+	var touch_release := InputEventScreenTouch.new()
+	touch_release.index = 0
+	touch_release.pressed = false
+	touch_release.position = touch_drag.position
+	gv._gui_input(touch_release)
+	check.call("touch release settles the label pass",
+		not gv._label_cache_valid and gv._map_dirty)
+	# Width cap: a long title is ellipsised and the result fits the cap.
+	var long_txt: String = gv._truncate_label(
+		"A very long note title that should not fit", 60.0, gv._label_font)
+	check.call("long labels are ellipsised", long_txt.ends_with("…"))
+	check.call("truncated label fits the cap",
+		gv._label_font.get_string_size(long_txt, HORIZONTAL_ALIGNMENT_LEFT,
+			-1, GraphView.LABEL_SIZE).x <= 61.0)
+	# Restore the synthetic vault for any later probe section.
+	GameManager.graph_max_separate = saved_sep4
+	GameManager.notes = saved_notes4
+	GameManager.links = saved_links4
+	GameManager.titles = saved_titles4
+
 	print("PROBE RESULT: %s (%d fails)" % ["OK" if _fails == 0 else "FAIL", _fails])
 	get_tree().quit(_fails)
