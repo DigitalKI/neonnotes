@@ -21,7 +21,7 @@ fit move into **⋮**.
 | **⬇ Export** | Save or share the current note |
 | **🔗 Links** | Show backlinks for the open note |
 | **⊛ Graph** | Show the vault's link graph |
-| **⋮** | Move…, Delete Note…, Backlinks, and the export actions |
+| **⋮** | Undo/Redo (in edit mode), Move…, Delete Note…, Backlinks, and the export actions |
 
 The sidebar contains the search field, an **📥 Capture to Inbox** button (beside the **🏷** tag browser), the vault tree,
 and a footer row with **? Help**, **🗑 Trash**, and **⚙ Settings**. The status bar at the bottom shows short messages and
@@ -39,6 +39,9 @@ In edit mode the top of the page shows a **◈ NOTE TITLE** panel and a
 **◈ NOTE TAGS** panel, a **Find in document…** field, and the Markdown source
 editor. The title and tags panels edit the note's metadata (see section 12);
 you never edit front matter by hand.
+
+In edit mode, **⋮** also offers **Undo** and **Redo**; a row is greyed out when
+there is nothing to undo or redo, and the history belongs to the open note.
 
 Type `/` by itself on a line to open the formatting menu. It inserts headings,
 emphasis, lists, quotes, tables, charts, and image snippets.

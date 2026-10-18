@@ -121,7 +121,6 @@ theme_override_constants/separation = 10
 
 [node name="EditPadding" type="MarginContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn" unique_id=1712346519]
 unique_name_in_owner = true
-visible = false
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
@@ -136,13 +135,13 @@ theme_override_constants/separation = 8
 unique_name_in_owner = true
 layout_mode = 2
 
-[node name="TitleRow" type="VBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/EditPadding/EditColumn/TitlePanel" unique_id=1452771203]
+[node name="TitleRow" type="HBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/EditPadding/EditColumn/TitlePanel" unique_id=600560715]
 layout_mode = 2
 theme_override_constants/separation = 4
 
 [node name="TitleLabel" type="Label" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/EditPadding/EditColumn/TitlePanel/TitleRow" unique_id=1411190849]
 layout_mode = 2
-text = "◈ NOTE TITLE"
+text = "◈ TITLE"
 
 [node name="TitleInput" type="LineEdit" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/EditPadding/EditColumn/TitlePanel/TitleRow" unique_id=1574681668]
 unique_name_in_owner = true
@@ -158,19 +157,13 @@ layout_mode = 2
 layout_mode = 2
 theme_override_constants/separation = 5
 
-[node name="TagsLabel" type="Label" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/EditPadding/EditColumn/TagsPanel/TagsRow" unique_id=1710661633]
-layout_mode = 2
-text = "◈ NOTE TAGS"
-
-[node name="TagsChips" type="HFlowContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/EditPadding/EditColumn/TagsPanel/TagsRow" unique_id=115003094]
-unique_name_in_owner = true
-layout_mode = 2
-theme_override_constants/h_separation = 6
-theme_override_constants/v_separation = 4
-
 [node name="TagsInputRow" type="HBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/EditPadding/EditColumn/TagsPanel/TagsRow" unique_id=814439955]
 layout_mode = 2
 theme_override_constants/separation = 6
+
+[node name="TagsLabel" type="Label" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/EditPadding/EditColumn/TagsPanel/TagsRow/TagsInputRow" unique_id=1710661633]
+layout_mode = 2
+text = "◈ TAGS"
 
 [node name="TagsInput" type="LineEdit" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/EditPadding/EditColumn/TagsPanel/TagsRow/TagsInputRow" unique_id=905177978]
 unique_name_in_owner = true
@@ -182,6 +175,12 @@ placeholder_text = "Add or pick a tag…"
 unique_name_in_owner = true
 layout_mode = 2
 text = "+ ADD"
+
+[node name="TagsChips" type="HFlowContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/EditPadding/EditColumn/TagsPanel/TagsRow" unique_id=115003094]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/h_separation = 6
+theme_override_constants/v_separation = 4
 
 [node name="SearchRow" type="HBoxContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/EditPadding/EditColumn" unique_id=471409606]
 unique_name_in_owner = true
@@ -222,12 +221,12 @@ placeholder_text = "# Write markdown here…"
 drag_and_drop_selection_enabled = false
 wrap_mode = 1
 
-[node name="NoteOverlay" type="Control" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn"]
+[node name="NoteOverlay" type="Control" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn" unique_id=880249384]
+z_index = 10
 layout_mode = 2
 mouse_filter = 2
-z_index = 10
 
-[node name="BacklinksCard" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/NoteOverlay" instance=ExtResource("23_backlinks")]
+[node name="BacklinksCard" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/NoteOverlay" unique_id=771285913 instance=ExtResource("23_backlinks")]
 unique_name_in_owner = true
 layout_mode = 1
 
@@ -314,6 +313,9 @@ layout_mode = 2
 unique_name_in_owner = true
 layout_mode = 0
 anchors_preset = 0
+anchor_left = 0.0
+anchor_right = 0.0
+grow_horizontal = 1
 
 [node name="CrtOverlay" type="ColorRect" parent="." unique_id=1821292982]
 visible = false

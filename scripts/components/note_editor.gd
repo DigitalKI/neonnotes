@@ -143,6 +143,7 @@ func load_note(rel: String, source: String) -> void:
 	_note_title = NoteMetadata.field(source, "title", rel.get_file().trim_suffix(".md"))
 	set_title_form(_note_title)
 	code_edit.text = NoteMetadata.body(source)
+	code_edit.clear_undo_history()
 	remember_saved_form()
 	refresh_note_tag_chips()
 	help_mode = false
@@ -339,6 +340,50 @@ func _on_text_changed() -> void:
 	# Keep the highlight/counter honest while the note is edited with a query up.
 	if _search_query != "":
 		recount_search_matches()
+
+
+# ------------------------------------------------------------ undo / redo history
+
+## True when the source editor is the visible note surface: a note is open,
+## not preview, not Help, and not covered by a full-screen page. The ⋮ menu
+## shows Undo/Redo only in this state.
+func is_editing() -> bool:
+	return source_mode and not help_mode and page_mode == "" \
+		and code_edit.visible and GameManager.current_rel != ""
+
+
+## Whether the editor history can step back/forward. TextEdit updates these
+## immediately; only its text_changed signal is deferred.
+func can_undo() -> bool:
+	return is_editing() and code_edit.has_undo()
+
+
+func can_redo() -> bool:
+	return is_editing() and code_edit.has_redo()
+
+
+## Menu actions: step the editor history. Keep focus in the editor because the
+## popup window took it; the deferred text_changed starts the normal autosave.
+func undo() -> void:
+	if not can_undo():
+		return
+	code_edit.undo()
+	code_edit.grab_focus.call_deferred()
+
+
+func redo() -> void:
+	if not can_redo():
+		return
+	code_edit.redo()
+	code_edit.grab_focus.call_deferred()
+
+
+## Blank the editor and forget its history (the open note was deleted or
+## removed by sync). Without clear_undo_history(), Undo could restore it.
+func clear_document() -> void:
+	autosave_timer.stop()
+	code_edit.text = ""
+	code_edit.clear_undo_history()
 
 
 # ------------------------------------------------------------ mobile selection handles
@@ -606,6 +651,7 @@ func show_help() -> void:
 	PreviewBuilder.pal_override = {}
 	PreviewBuilder.build(MarkdownParser.parse(load_help_doc()), content_body)
 	%ContentHost.scroll_vertical = 0
+	mode_changed.emit(false)
 
 
 func load_help_doc() -> String:
@@ -659,6 +705,7 @@ func reload_current() -> void:
 	_note_title = NoteMetadata.field(latest, "title", GameManager.current_rel.get_file().trim_suffix(".md"))
 	set_title_form(_note_title)
 	code_edit.text = NoteMetadata.body(latest)
+	code_edit.clear_undo_history()
 	remember_saved_form()
 	refresh_note_tag_chips()
 	render_preview(true)  # keep reading position across the re-render

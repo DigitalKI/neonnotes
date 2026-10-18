@@ -1,6 +1,6 @@
 # NeonNotes — Architecture
 
-_Last updated: 2026-10-17 · Godot 4.7 · renderer: `gl_compatibility`_
+_Last updated: 2026-10-18 · Godot 4.7 · renderer: `gl_compatibility`_
 
 Read this after [`../AGENTS.md`](../AGENTS.md). It is the orientation map, not a
 changelog. Deep dives belong in `docs/architecture/*.md` and are read on demand.
@@ -61,7 +61,7 @@ settings live in `user://settings.cfg`; exports and embedded media live under
 | `scripts/sync/sync_service.gd` | UDP discovery, pairing proof, manifest/stream transfer, LWW state |
 | `scripts/sync/sync_page.gd` | Sync settings/status page |
 | `scripts/export/*.gd` | PNG/GIF/HTML exporters and outbound share |
-| `scripts/components/note_editor.gd` | Note view: editor + preview, autosave/flush, find, mobile selection, title/tags |
+| `scripts/components/note_editor.gd` | Note view: editor + preview, autosave/flush, find, undo/redo, mobile selection, title/tags |
 | `scripts/components/vault_tree_component.gd` | Vault tree, drag/drop, move/delete orchestration, search/reveal |
 | `scripts/components/backlinks_card.gd` | Floating backlinks card over the note column; rows navigate through the tree |
 | `scripts/components/share_intake.gd` | OS share payload routing into `Capture`; plugin-free payload handling |
@@ -87,7 +87,10 @@ uncached notes 12/frame. `metadata_ready` refreshes the tree/backlinks/graph.
 Tree row → `VaultTreeComponent.note_requested` → `Main._on_note_selected` →
 `NoteEditor.load_note()`. Typing restarts the 0.5 s autosave; `flush()` →
 `_flush_state()` → `GameManager.write_note()` → `saved_cb` (graph digest
-invalidation, sync `note_saved`). Transitions call `flush()` first.
+invalidation, sync `note_saved`). Transitions call `flush()` first. Replacing
+the document wholesale (`load_note()`, `reload_current()`, `clear_document()`)
+also calls `CodeEdit.clear_undo_history()`; the ⋮ menu shows Undo/Redo only
+while `NoteEditor.is_editing()` is true.
 
 ### Move
 `VaultTreeComponent.move_path()` → `VaultMove.move_path()` (rename, repoint the
@@ -139,7 +142,10 @@ light each frame. `GraphDigestStore` builds focus-card digests on a worker;
 Backlinks tabs. `GraphView.focus_note()` is the outside-entry point (tree click,
 focus card child/backlink, links page): it leaves the current scope for the
 target's parent scope (or overview) and turns to its page, so an off-scope note
-is never silently ignored. `Main._set_graph_state()` owns dock/full-view
+is never silently ignored. Opening the map — the toolbar ⊛ toggle or the phone
+right-edge swipe — follows the open note on both form factors through
+`Main._graph_follow_note()`; on a phone there is no dock, so the same follow
+runs on the full-screen map. `Main._set_graph_state()` owns dock/full-view
 state; `_apply_dock_split()`/`_set_dock_split()` own the remembered divider.
 
 ### Export
@@ -159,6 +165,7 @@ output under `vault/exports/`. Optional CRT FX is baked only when enabled.
 | `tests/TestMoveDialog.tscn` | Move page + graph Move, self-nesting guards, Inbox rules |
 | `tests/TestDevIsolation.tscn` | Dev/MCP vault isolation, no settings persistence |
 | `tests/TestMetaCache.tscn` | Metadata index cache warm/cold, moves invalidate |
+| `tests/TestUndoRedo.tscn` | ⋮ Undo/Redo visibility, history availability, note-switch clear |
 | `tests/TestTreeReveal.tscn` | Reveal tree row after external selection |
 | `tests/TestPreviewFit.tscn` | Phone-width overflow (missing image placeholder) |
 | `tests/TestLinkResolve.tscn` | Unresolved wiki-link page/suggestions/create |

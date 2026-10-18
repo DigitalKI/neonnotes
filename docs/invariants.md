@@ -331,6 +331,12 @@ story. If a rule changes, change the code/test and this line together.
   the single global tuner. No runtime physics/force simulation; layout runs once
   per open/navigation. Guard: `scripts/dev/GraphProbe.tscn` (crowded parent gets
   a longer edge than a sparse one; clamps hold).
+- **INV-092 — Undo history belongs to one note.** `TextEdit.set_text()` records
+  an undo step, so every wholesale document replacement (`NoteEditor.load_note()`,
+  `reload_current()`, `clear_document()`) must call `clear_undo_history()`.
+  Otherwise Undo can restore the previous note and autosave it. `MoreMenuComponent`
+  shows Undo/Redo only while `NoteEditor.is_editing()`, greying out a direction
+  the history cannot take. Guard: `tests/TestUndoRedo.tscn`.
 
 ## Engine gotchas
 

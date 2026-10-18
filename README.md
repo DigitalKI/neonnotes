@@ -25,7 +25,8 @@ Notes live on disk as ordinary `.md` files in a vault folder. Open them in any
 editor, `grep` them, back them up with `rsync`, sync the folder however you
 like. The vault is *yours*.
 
-- Full Markdown editing with live syntax highlighting
+- Full Markdown editing with live syntax highlighting, plus Undo/Redo in the
+  **⋮** menu while editing (history stays with its note)
 - Live rendered preview
 - `/` **slash menu** for headings, emphasis, lists, quotes, tables, charts, and
   image snippets

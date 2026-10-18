@@ -236,6 +236,47 @@ func _ready() -> void:
 	_swipe(Vector2(w - 10.0, 400.0), Vector2(w - 6.0, 540.0))
 	await get_tree().process_frame
 	_check("a vertical grab in the edge band is not a swipe", not main.graph_view.visible)
+
+	# ---------------------------------------- phone: opening the map follows
+	# the note opened from the tree. A phone has no dock, so the map is always
+	# the full view; it used to reopen at the overview, ignoring the note the
+	# tree had just loaded.
+	main.vault_tree.select_note("Folder/Child.md")
+	await get_tree().process_frame
+	_check("a phone tree tap opens the note",
+		GameManager.current_rel == "Folder/Child.md")
+	_check("... and leaves the map closed", not main.graph_view.visible)
+	main._toggle_graph()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_check("the phone map selects the open note",
+		String(main.graph_view.view_state().get("selected_note", "")) == "Folder/Child.md")
+
+	# A folder companion is a group node, so following it enters its scope —
+	# the same state a dock tree click produces on desktop.
+	main._toggle_graph()  # back to the note
+	await get_tree().process_frame
+	main.vault_tree.select_note("Folder.md")
+	await get_tree().process_frame
+	main._toggle_graph()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_check("the phone map enters a folder companion's scope",
+		main.graph_view._scope == "Folder")
+	_check("... with the folder node selected", main.graph_view._selected == "Folder")
+
+	# The right-edge slide opens the map by a different route; it must follow
+	# the note too.
+	main._toggle_graph()  # back to the note
+	await get_tree().process_frame
+	main.vault_tree.select_note("A.md")
+	await get_tree().process_frame
+	_swipe(Vector2(w - 10.0, 400.0), Vector2(w * 0.4, 405.0))
+	await _slide_settles()
+	_check("the swiped-in phone map selects the open note",
+		String(main.graph_view.view_state().get("selected_note", "")) == "A.md")
+	main._toggle_graph()
+	await get_tree().process_frame
 	main.layout_component.is_mobile_layout = false
 
 	GameManager.vault_dir = original_vault

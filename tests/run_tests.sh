@@ -51,6 +51,9 @@ NEONNOTES_DEV=1 run_godot_test "DEV ISOLATION RESULT: OK" --headless --path . te
 # Metadata index cache: a warm boot rebuilds titles/tags/links from disk (stat
 # check) instead of re-reading every note; changes/moves invalidate correctly.
 run_godot_test "META CACHE RESULT: OK" --headless --path . tests/TestMetaCache.tscn
+# ⋮ Undo/Redo: rows are present only while editing, grey out when the history
+# cannot move, and the history is cleared on note switch (never cross notes).
+run_godot_test "UNDO REDO RESULT: OK" --headless --path . tests/TestUndoRedo.tscn
 run_godot_test "REVEAL RESULT: OK" --headless --path . tests/TestTreeReveal.tscn
 # Preview horizontal fit: an open note must not widen the shell past the screen
 # margins (a missing image embed's long file name used to do exactly that).

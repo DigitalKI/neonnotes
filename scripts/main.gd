@@ -433,7 +433,8 @@ func _on_sync_changed(_peer: String, _count: int, changed_paths: Array, structur
 	if GameManager.current_rel != "" and not GameManager.notes.has(GameManager.current_rel):
 		GameManager.current_file = ""
 		GameManager.current_rel = ""
-		code_edit.text = ""
+		editor.clear_document()
+		_sync_more_edit_actions()
 		_open_start_page.call_deferred()
 		return
 	if GameManager.current_rel != "" and changed_paths.has(GameManager.current_rel):
@@ -489,7 +490,8 @@ func _build_dynamic_ui() -> void:
 	# selection bar's "format" action.
 	editor.bind(_flash, slash_menu, toolbar.note_title, content_body)
 	editor.mode_changed.connect(func(editing: bool):
-		toolbar.mode_btn.text = "✎ Edit" if not editing else "◈ Preview")
+		toolbar.mode_btn.text = "✎ Edit" if not editing else "◈ Preview"
+		_sync_more_edit_actions())
 	slash_menu.applied.connect(func(): editor.hide_selection_overlay())
 
 	# ExportComponent owns the complete menu and the shared action IDs.
@@ -535,7 +537,9 @@ func _build_dynamic_ui() -> void:
 		more.position = Vector2i(int(toolbar.more_btn.global_position.x), int(toolbar.more_btn.global_position.y + toolbar.more_btn.size.y))
 		more.popup())
 	more.id_pressed.connect(_on_more_action)
+	more.about_to_popup.connect(_sync_more_edit_actions)
 	toolbar.more_btn.visible = true  # always available (delete/export/etc. on desktop too)
+	_sync_more_edit_actions()
 	# pages (new note, vault picker, media picker, sync) are scene-authored
 	# instances inside %Content; only their signals are connected here.
 	new_dialog.bind(vault_tree, editor, _refresh_list, _flash)
@@ -646,6 +650,17 @@ func _on_new_note() -> void:
 	_open_page(PAGE_NEW_NOTE, new_dialog)
 	new_dialog.begin()
 
+## Keep the ⋮ Undo/Redo block truthful: present only while the source editor
+## is the visible note surface, greyed out when the history has nowhere to go.
+## Runs on mode changes, page routes and every popup (history changes while the
+## menu is closed).
+func _sync_more_edit_actions() -> void:
+	var editing := editor.is_editing()
+	toolbar.more_menu.set_edit_actions_visible(editing)
+	if editing:
+		toolbar.more_menu.set_edit_actions_enabled(editor.can_undo(), editor.can_redo())
+
+
 ## The tree owns its delete button and the whole deletion orchestration; Main
 ## only keeps the ⋮ menu's Delete entry in sync with the tree selection.
 func _update_delete_controls(_column: int = 0) -> void:
@@ -670,7 +685,8 @@ func _delete_current_note() -> void:
 func _clear_open_note() -> void:
 	GameManager.current_file = ""
 	GameManager.current_rel = ""
-	editor.code_edit.text = ""
+	editor.clear_document()
+	_sync_more_edit_actions()
 	if backlinks_card.visible:
 		_refresh_backlinks()
 
@@ -733,6 +749,7 @@ func _open_page(mode: String, page: Control) -> void:
 	content_host.visible = false
 	for p in _pages():
 		p.visible = p == page
+	_sync_more_edit_actions()
 
 func _close_page() -> void:
 	page_mode = ""
@@ -1015,10 +1032,10 @@ func _toggle_graph() -> void:
 	var mobile := layout_component.is_mobile_layout
 	_set_graph_state(2 if mobile else GameManager.graph_presentation)
 	graph_view.open(GameManager.current_rel)
-	if not mobile:
-		# The dock follows the note that is already open, once the map has
-		# finished its (deferred) first layout.
-		_graph_follow_note.call_deferred(GameManager.current_rel)
+	# The map reopens on the note that is already open — the desktop dock and
+	# the phone's full screen alike — once it has finished its (deferred) first
+	# layout. Without this a phone map always reappeared on the overview.
+	_graph_follow_note.call_deferred(GameManager.current_rel)
 
 
 ## The nav bar's expand button: the map takes the whole content area (the full
@@ -1125,11 +1142,13 @@ func _persist_dock_width() -> void:
 	GameManager._save_settings()
 
 
-## The dock follows the open note: select its node and, when the node is a group
-## (a folder, or a note with child notes), enter it — the state pressing Enter in
-## the graph produces. Notes the map cannot reach are left alone.
+## The open map follows the open note: select its node and, when the node is a
+## group (a folder, or a note with child notes), enter it — the state pressing
+## Enter in the graph produces. Notes the map cannot reach are left alone. This
+## applies to the desktop dock and the phone's full-screen map alike; the
+## callers decide *when* (opening the map, a dock-mode tree click, a move).
 func _graph_follow_note(note: String) -> void:
-	if layout_component.is_mobile_layout or not _graph_dock_mode() or note == "":
+	if not _graph_open() or note == "":
 		return
 	graph_view.activate_note(note)
 
@@ -1203,6 +1222,9 @@ func _begin_graph_slide(opening: bool) -> void:
 		graph_expanded = true
 	if opening:
 		graph_view.open(GameManager.current_rel)
+		# Same follow as the toolbar toggle: the swiped-in map lands on the
+		# note the reader is showing, not on the overview.
+		_graph_follow_note.call_deferred(GameManager.current_rel)
 	_graph_slide.begin(opening)
 
 
@@ -1428,5 +1450,9 @@ func _on_more_action(id: int) -> void:
 			_move_selected()
 		MoreMenuComponent.ID_BACKLINKS:
 			_toggle_backlinks()
+		MoreMenuComponent.ID_UNDO:
+			editor.undo()
+		MoreMenuComponent.ID_REDO:
+			editor.redo()
 		_:
 			export_component.handle_action(id)
