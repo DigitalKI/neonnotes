@@ -4,7 +4,7 @@ extends Node
 ## safe-area + soft-keyboard insets. State (is_mobile_layout, drawer_open)
 ## lives here; the host reads it via properties. On mobile the drawer and
 ## %Content are mutually exclusive (full-screen drawer invariant — see
-## PROJECT_MEMORY.md).
+## docs/invariants.md).
 ##
 ## The graph dock / full view lives *inside* %Content (Main.tscn: ContentSplit >
 ## NoteColumn + GraphDock), so this component never has to know about it: the

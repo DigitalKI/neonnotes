@@ -13,8 +13,8 @@ It uses Godot's `gl_compatibility` renderer, so the same build runs on
 **Linux, Windows, and Android**.
 
 > **Status:** v2 development line, working toward a stable v3. See the
-> [Roadmap](#-roadmap) and [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md) for where
-> things actually stand right now.
+> [Roadmap](#-roadmap) and [`docs/roadmap.md`](docs/roadmap.md) for where things
+> actually stand right now.
 
 ---
 
@@ -147,10 +147,10 @@ dev-isolation, mobile-tree-touch, sync, per-vault-sync, and full headless smoke
 scenes. Smoke data lives in a disposable `user://neonnotes-smoke` vault; override
 the location with `NEONNOTES_SMOKE_VAULT` (never point it at a real vault).
 
-> The headless mobile-tree-touch test used to fail on every machine (see
-> [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md)); fixed 2026-10-08 — it injects input
-> in viewport-local space and no longer screenshots (the old `get_image()` was
-> null under the headless dummy renderer and hung the run, aborting the suite).
+> The headless mobile-tree-touch test used to fail on every machine; fixed
+> 2026-10-08 — it injects input in viewport-local space and no longer
+> screenshots (the old `get_image()` was null under the headless dummy renderer
+> and hung the run, aborting the suite).
 
 ### Build for Android
 
@@ -299,10 +299,14 @@ threads for anything heavy so the main thread never blocks.
 
 ## 🤖 Development notes
 
-- **Read [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md) before changing behavior** —
-  it records the current state, decisions, invariants, and known issues. Update
-  it when a task changes any of those. [`AGENTS.md`](AGENTS.md) is the condensed
-  workflow for AI agents.
+- **Read [`AGENTS.md`](AGENTS.md) first**, then
+  [`docs/architecture.md`](docs/architecture.md) for the module map/data flows,
+  [`docs/invariants.md`](docs/invariants.md) for rules,
+  [`docs/gotchas.md`](docs/gotchas.md) for engine/platform traps,
+  [`docs/roadmap.md`](docs/roadmap.md) for direction, and
+  [`docs/decisions.md`](docs/decisions.md) for settled decisions.
+  `python3 tools/context_audit.py` checks the kit; `python3 tools/repo_map.py`
+  prints a fresh file/symbol inventory.
 - **Dev/MCP sessions are isolated by opt-in.** `NEONNOTES_DEV=1` (set
   automatically by the godot-mcp `play_scene` tool) or `NEONNOTES_VAULT=<path>`
   redirects a run to a disposable `user://neonnotes-dev` vault, suppresses
@@ -332,7 +336,8 @@ whole vault is rescanned on the main thread), deferred link indexing, and a
 progressive tree build.
 
 Live status, decisions, and known issues are in
-[`PROJECT_MEMORY.md`](PROJECT_MEMORY.md).
+[`docs/roadmap.md`](docs/roadmap.md). The module map and recipes are in
+[`docs/architecture.md`](docs/architecture.md).
 
 ---
 

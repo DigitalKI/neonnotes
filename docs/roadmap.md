@@ -1,0 +1,101 @@
+# NeonNotes — Roadmap
+
+_Last updated: 2026-10-17_
+
+Direction and open work only. Finished items are deleted (git is the history).
+Pending decisions state the question and the current recommendation.
+
+## Goal
+
+Stable v3: the desktop and Android app are reliable, and sync is verified
+phone ↔ PC over the local network.
+
+## Now
+
+- **Graph label and layout redesign** — discussed 2026-10-17, **not built**.
+  Current labels are Orbitron 11 px, drawn to the right on a 72% background
+  rect, with no collision handling. On a synthetic 111-note vault the current
+  view keeps 32/111 labels at fit-all (29%) and 84/111 at 1.5× (76%); labels
+  collide even when allowed. A probe found collision-aware placement raises the
+  keep rate to 50% / 85%.
+  Pending decisions:
+  1. **Default label style** — outline-only white/black (recommended) or keep
+     the background style as default?
+  2. **Font family** — keep Orbitron, switch to the app body font, or make it
+     configurable?
+  3. **Overview labels** — label only folders/centre/selected/hovered at
+     fit-all, with leaves appearing by zoom? (recommended)
+  4. **Variable edge length** — adaptive child-ring radius for crowded folders
+     (recommended; fit-all gets slightly smaller) or keep fit-all exact and rely
+     on label filtering only?
+  5. **Density control** — user-facing max labels / label density, or automatic?
+  Recommended first pass: configurable outline labels, collision-aware
+  placement (priority + 4–8 candidate positions), viewport culling, width cap,
+  overview LOD, adaptive child-ring radius, and tests that assert no drawn label
+  rects intersect.
+
+## Next
+
+- **Sync re-verification** — LAN sync is already verified phone ↔ PC; re-run that
+  check after any protocol/tombstone/manifest change.
+- **Attachments** (proposed, not built): non-image shares (PDF, video, audio)
+  are refused. Supporting them means importing bytes into the vault (e.g.
+  `vault/files/`), rendering a link/placeholder, and syncing the bytes.
+- **Share-to end-to-end** — the intake is wired and the debug APK packages the
+  plugin, but a real browser/Photos share has not been observed end-to-end.
+  iOS only gains "Open With"; a share-sheet entry needs a Share Extension.
+- **Selection overlay** — confirm the magnifier feel and edge auto-scroll on a
+  real device.
+- **Parser block cache** — the highlighter runs a full `parse()` per text
+  revision. The full highlight path is ~98 ms for 2,064 lines (the parse alone
+  is ~7 ms; painting/shaping dominates). Cache per-block results by content
+  hash.
+- **Incremental/worker vault scan** — `GameManager.scan_notes()` re-reads the
+  whole vault on the main thread (launch, vault switch, move, sync); target an
+  incremental or worker scan.
+- **Graph layout on a worker** — radial layout (~80 ms) and level BFS (~30 ms)
+  hitch the first overview build at ~2,000 visible nodes.
+- **Graph scale** — `GraphModel.MAX_NODES` (400) is a stop-gap; aggregation is
+  deferred. MultiMesh markers are already in place; the remaining work is
+  deciding how oversized clusters are summarized.
+- **MP4/social-video export** — no MP4 MovieWriter in this build; the AVI path
+  segfaults headless. Needs bundled FFmpeg or a GDExtension.
+- **Sync hardening** — content hashes, conflict detection, cryptographic
+  pairing, encrypted transport.
+- **Graph-first direction (G1–G4)** — make the graph the centre: semantic zoom
+  node cards/digests, tag/content filters, explicit folder expand/collapse,
+  hover previews, create links from the graph. Neon City is the eventual 3D
+  skin over the same model. The current label/layout pass is scoped readability
+  work, not the full visual redesign; decide whether G1 should precede the Neon
+  City redesign.
+- **APK hygiene** — `include_filter="*.md"` currently ships `README.md`,
+  `AGENTS.md`, and this context kit; only `docs/help.md` is needed at runtime.
+
+## Known bugs / risks
+
+- Drag inside-move drop zones still want a visual confirmation on-device.
+- Companion-note collisions (`name-2.md`) after sync merges need watching.
+- Graph labels overlap; no collision filter yet (see Now).
+- CRT overlay GPU cost measured ~15–16% on an AMD 820M; don't claim a GPU win
+  without a fresh measurement.
+- Sync transport is unencrypted; trusted-LAN only.
+- Android share target needs one rendered frame after install; a dozing/locked
+  phone never enables it.
+- Cold boot still scans on the main thread; the metadata cache only helps warm
+  boots.
+
+## Perf watch
+
+Baselines are device/version dependent; re-measure with the benches.
+
+- Boot (SM-A165M, 2026-09): ≈2.9 s release / ≈4.7 s debug to first note.
+- Metadata cache (1,089 notes, warm): `[boot] metadata` ≈18 ms; shell ready
+  ≈108 ms. Cold run unchanged.
+- Graph: ≈6–7 ms/frame at 1,000–4,000 nodes; ≈220–275 draw calls.
+- Parser: `MarkdownParser.parse()` ≈7 ms / 2,064 lines; full highlight path
+  ≈98 ms (rebuild ≈79 ms).
+- Scan: ≈84 ms / 1,000 notes full-file on desktop.
+
+Commands: `NEONNOTES_BOOT_DEBUG=1 godot --path .`,
+`godot --headless --path . --script scripts/dev/bench_scan.gd`,
+`NEONNOTES_DEV=1 godot --path . scenes/dev/GraphBench.tscn`.

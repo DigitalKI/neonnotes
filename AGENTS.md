@@ -1,9 +1,30 @@
 # NeonNotes Agent Workflow
 
-NeonNotes is a Godot 4.7 markdown note-taking app. Preserve the existing
-scene-first UI shell, plain Markdown vault, `gl_compatibility` renderer, and
-tab indentation. Read `PROJECT_MEMORY.md` before changing behavior and update
-its current status, decisions, or known issues when a task changes them.
+NeonNotes is a Godot 4.7 markdown note-taking app. Preserve the scene-first UI
+shell, plain Markdown vault, `gl_compatibility` renderer, and tab indentation.
+
+## Read order
+
+1. **This file** — workflow, safety, commands.
+2. [`docs/architecture.md`](docs/architecture.md) — where things are, data
+   flows, tests, and “where to change X” recipes.
+3. [`docs/invariants.md`](docs/invariants.md) — rules that must not be broken.
+4. [`docs/gotchas.md`](docs/gotchas.md) — when debugging engine/platform issues.
+5. [`docs/roadmap.md`](docs/roadmap.md) — when planning or changing scope.
+6. [`docs/decisions.md`](docs/decisions.md) and the relevant ADR — before
+   changing a settled behavior.
+7. Code and tests — for facts.
+
+**Precedence:** code/tests win on factual behavior; invariants and decisions win
+on project intent. If they disagree, fix the doc or the code in the same change.
+
+Useful commands:
+
+```bash
+python3 tools/repo_map.py                      # fresh file/symbol inventory
+python3 tools/repo_map.py --check docs/architecture.md
+python3 tools/context_audit.py                 # broken links, duplicate IDs, coverage
+```
 
 ## Validation
 
@@ -51,11 +72,42 @@ run without one of those.
   cleared. There is no auto-detection on editor/desktop launches — that would
   hijack a normal run's vault and sync. Set one of those env vars for every
   automated launch.
-- Flush edits before switching notes, modes, sync, or closing.
-- Preserve folder-as-note merging, drag/drop link rewriting, and mobile drawer behavior.
-- Keep exports under `vault/exports/` and embedded media under `vault/media/`.
-- Do not edit files in `addons/godot-mcp/` unless the task is specifically about the bridge.
-- Always use worker threads (`Thread`) for any calculation you foresee being
-  intense (long-running encoding, large buffers, heavy per-frame work) so the
-  main thread/UI stays responsive; yield frames while waiting instead of
-  blocking on `wait_to_finish()` synchronously.
+- Flush edits before switching notes, modes, sync, or closing (INV-004).
+- Preserve folder-as-note merging, drag/drop link rewriting, and mobile drawer
+  behavior (INV-011, INV-040, INV-042).
+- Keep exports under `vault/exports/` and embedded media under `vault/media/`
+  (INV-018); do not edit `addons/godot-mcp/` unless the task is about the bridge
+  (INV-017).
+- Use worker threads for heavy work (INV-015). Tabs for indentation; every
+  GDScript file ends with a newline. A new `class_name` needs one
+  `godot --headless --editor --quit` before smoke tests (INV-016).
+
+## Updating context
+
+Update the right artifact, not a general memory file:
+
+| Change | Artifact |
+|---|---|
+| A rule that must not be broken | `docs/invariants.md` |
+| An engine/platform trap | `docs/gotchas.md` |
+| A settled decision / why | `docs/decisions.md` (+ ADR if the rationale is long) |
+| Direction, pending question, bug, perf watch | `docs/roadmap.md` |
+| Module structure, data flow, recipe, test map | `docs/architecture.md` |
+| User-facing behavior/setup | `README.md` or `docs/help.md` |
+| How agents work here | this file |
+
+Do not add dated state bullets. Finished roadmap items are deleted; git is the
+history. Run `python3 tools/context_audit.py` before finishing a context change.
+
+## Document ownership
+
+- `README.md` — user-facing features, setup, build.
+- `docs/help.md` — in-app help (shipped; keep it a single document).
+- `AGENTS.md` — agent workflow and safety.
+- `docs/architecture.md` — orientation map and recipes.
+- `docs/invariants.md` — invariants and rules.
+- `docs/gotchas.md` — engine/platform traps (on demand).
+- `docs/roadmap.md` — direction and open work.
+- `docs/decisions.md` / `docs/decisions/ADR-*.md` — settled decisions.
+- `PROJECT_MEMORY.md` — retired and removed. Do not recreate it; the kit above
+  is the replacement.

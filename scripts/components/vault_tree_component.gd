@@ -150,7 +150,7 @@ func build() -> void:
 	# accidentally opens a note or closes the mobile sidebar drawer.
 	side_tree.gui_input.connect(_on_tree_gui_input)
 	# drag notes/folders between folders + reorder rows (registered once; see
-	# refresh() and the Android repeat-drag gotcha in PROJECT_MEMORY.md)
+	# refresh() and the Android repeat-drag gotcha in docs/invariants.md)
 	_tree_menu.id_pressed.connect(func(id: int):
 		if id == 1:
 			delete_requested.emit())
