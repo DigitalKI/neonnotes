@@ -127,6 +127,7 @@ var _selected := ""             # focused node (tree key)
 var _scope := ""                # current entered group; empty = whole vault root
 var _scope_active := false       # distinguishes explicit root entry from overview       # distinguishes entered root from Overview
 var _page := 0                   # child page within current scope
+var _page_capacity := 1          # child slots per page in the current scope
 var _page_children: Array[String] = []
 var _page_count := 1
 var _scope_history: Array[Dictionary] = []
@@ -336,7 +337,7 @@ func _on_metadata_ready() -> void:
 func open(center_note: String = "") -> void:
 	if _suspended_state.is_empty() and _pending_restore.is_empty():
 		_reset_nav(center_note)
-	_menu.clear()
+	_drop_focus()
 	_press_moved = false
 	_pinch_used = false
 	_map_ready = false
@@ -535,9 +536,7 @@ func refresh_graph() -> void:
 		_reselect(keep_selected, false)
 	else:
 		_selected = ""
-		_menu.clear()
-		if blur_cb.is_valid():
-			blur_cb.call()
+		_drop_focus()
 	queue_redraw()
 	nav_changed.emit()
 	state_changed.emit()
@@ -694,6 +693,7 @@ func _rebuild_keys() -> void:
 			break
 		context.append(anc)
 	var page_capacity := maxi(1, max(10, GameManager.graph_max_page) - context.size() - 1)
+	_page_capacity = page_capacity
 	_page_count = maxi(1, ceili(float(_page_children.size()) / float(page_capacity)))
 	_page = clampi(_page, 0, _page_count - 1)
 	var lo := _page * page_capacity
@@ -736,7 +736,7 @@ func _enter_group(key: String) -> void:
 	_scope_active = true
 	_page = 0
 	_selected = key
-	_menu.clear()
+	_drop_focus()
 	_rebuild_keys()
 	_layout_points()
 	_build_routes()
@@ -765,7 +765,7 @@ func _navigate_back() -> void:
 	_layout_points()
 	_build_routes()
 	_selected = _scope if _scope != "" else ""
-	_menu.clear()
+	_drop_focus()
 	if _selected != "":
 		_tween_to(_selected)
 	else:
@@ -779,7 +779,7 @@ func _go_overview() -> void:
 	_scope_active = false
 	_page = 0
 	_selected = ""
-	_menu.clear()
+	_drop_focus()
 	_rebuild_keys()
 	_layout_points()
 	_build_routes()
@@ -798,7 +798,7 @@ func _set_page(page: int) -> void:
 		return
 	_page = next
 	_selected = ""
-	_menu.clear()
+	_drop_focus()
 	_rebuild_keys()
 	_layout_points()
 	_build_routes()
@@ -1810,7 +1810,7 @@ func _navigate_to_ancestor(target: String) -> void:
 	_layout_points()
 	_build_routes()
 	_selected = _scope
-	_menu.clear()
+	_drop_focus()
 	_tween_to(_selected)
 	queue_redraw()
 	state_changed.emit()
@@ -1997,16 +1997,24 @@ func _key_at(at: Vector2) -> String:
 			best = k
 	return best
 
-## Close the circle menu after a press outside it — and tell Main to drop the
-## focus card with it, so the two always open and close together.
-func _close_menu() -> void:
-	if not _menu.open:
-		return
+## Drop the circle menu and the focus card together. The card is Main's (via
+## `blur_cb`) and the two are one focus affordance: navigation that replaces
+## the selection (enter/back/pager/overview/breadcrumb) must drop both, or the
+## card is left describing a node that is no longer selected.
+func _drop_focus() -> void:
 	_menu.clear()
 	if blur_cb.is_valid():
 		blur_cb.call()
-	_mark_map_dirty()
-	queue_redraw()
+
+## A press outside the menu closes the focus. This runs on every outside press,
+## even when the menu is already closed: a card left visible by navigation must
+## still be dismissible by clicking the map.
+func _close_menu() -> void:
+	var had_menu := _menu.open
+	_drop_focus()
+	if had_menu:
+		_mark_map_dirty()
+		queue_redraw()
 
 ## A clean tap landed on `key`: focus it exactly as before (selection, circle
 ## menu, focus callback), then tell the host. Only the desktop dock acts on that
@@ -2074,25 +2082,56 @@ func refocus() -> void:
 		return
 	focus_cb.call(node_rel(_selected))
 
-## Focus a node chosen outside the canvas (focus-card child list): select its
-## node when it is on the map, entering its parent scope first when needed.
-## False means "not reachable on the map" — the caller can open the note.
+## Focus a node chosen outside the canvas (focus-card child list, tree click):
+## select its node, entering the scope that contains it when the current scope
+## hides it. False means "not reachable on the map" — the caller can open the
+## note.
 func focus_note(note: String) -> bool:
 	if _root_home != "" and note == _root_home:
 		_select_hub()
 		return true
 	var stem := note.trim_suffix(".md")
 	var key := stem if _children.has(stem) else note
-	if not _pos.has(key):
+	if not _keys.has(key) and not _reveal_key(key):
 		return false
-	if not _keys.has(key):
-		var p := String(_parent.get(key, ""))
-		if p == "" or not _keys.has(p):
-			return false
-		_enter_group(p)
-		if not _keys.has(key):
-			return false
 	_select(key)
+	return true
+
+## Bring `key` into the visible set. The graph only lays out what the current
+## scope (and page) contains, so a note in another branch has no position at
+## all: navigate to the scope that owns it rather than giving up. The owning
+## scope is its parent group; a root-level node needs the overview. A target on
+## another page of the same scope turns to that page. False = not in the
+## hierarchy (Inbox captures, unknown paths).
+func _reveal_key(key: String) -> bool:
+	if _keys.has(key):
+		return true
+	# Anything absent from both hierarchy maps is not part of the knowledge map
+	# at all (Inbox captures, unknown paths).
+	if not _children.has(key) and not _parent.has(key):
+		return false
+	var parent := String(_parent.get(key, ""))
+	var next_active := parent != ""
+	# Remember the state we are leaving so Back can return to it. Staying in the
+	# same scope (a page turn) must not push a duplicate entry.
+	if parent != _scope or _scope_active != next_active:
+		_scope_history.append({
+			"scope": _scope, "scope_active": _scope_active, "page": _page,
+		})
+	_scope = parent
+	_scope_active = next_active
+	_page = 0
+	_selected = ""
+	_drop_focus()
+	_rebuild_keys()
+	if _scope_active and not _keys.has(key) and _page_children.has(key):
+		# The target is a child of this scope but sits on another page.
+		_page = int(_page_children.find(key) / maxi(1, _page_capacity))
+		_rebuild_keys()
+	if not _keys.has(key):
+		return false
+	_layout_points()
+	_build_routes()
 	return true
 
 ## Focus a node: camera glides so the node and its immediate neighbours
@@ -2157,7 +2196,7 @@ func _activate_menu(action: String) -> void:
 		_collapsed.erase(_selected)
 		_enter_group(_selected)
 		return
-	_menu.clear()
+	_drop_focus()
 	if action == "Move":
 		var target := _move_target_rel()
 		if move_cb.is_valid() and target != "":

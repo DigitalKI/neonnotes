@@ -61,10 +61,14 @@ static func move_path(src_rel: String, dst_dir: String, moved_cb: Callable) -> S
 		if FileAccess.file_exists(vault.path_join(companion)) and not FileAccess.file_exists(comp_target):
 			DirAccess.rename_absolute(vault.path_join(companion), comp_target)
 		_rewrite_folder_links(src_rel, new_rel)
-	# keep the open note consistent if it was the one moved
-	if GameManager.current_rel == src_rel:
-		GameManager.current_file = target
-		GameManager.current_rel = new_rel
+	# Keep the open note consistent when the move carries it: the note itself,
+	# any note inside a moved folder, or a folder's companion note. Repointing
+	# only the exact source left a folder-note's companion on its old path (the
+	# editor would keep saving there and the graph/tree lost the open row).
+	var remapped_open := PathRemap.moved(GameManager.current_rel, src_rel, new_rel)
+	if remapped_open != GameManager.current_rel:
+		GameManager.current_rel = remapped_open
+		GameManager.current_file = vault.path_join(remapped_open)
 	if moved_cb.is_valid():
 		# Report both the old and the new paths: the old ones become tombstones,
 		# the new ones must clear any tombstone peers still hold for them (a

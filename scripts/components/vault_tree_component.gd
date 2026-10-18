@@ -13,9 +13,9 @@ signal capture_requested
 @onready var side_tree: Tree = %SideTree
 @onready var tree_delete_btn: Button = %TreeDeleteBtn
 @onready var capture_btn: Button = %CaptureBtn
-@onready var backlinks_panel: PanelContainer = %BacklinksPanel
-@onready var backlinks_box: VBoxContainer = %BacklinksBox
 @onready var config_btn: Button = %ConfigBtn
+@onready var help_btn: Button = %HelpBtn
+@onready var trash_btn: Button = %TrashBtn
 @onready var search: LineEdit = %Search
 @onready var tag_browse_btn: Button = %TagBrowseBtn
 @onready var active_tags: HFlowContainer = %ActiveTags
@@ -60,36 +60,6 @@ var _tag_suggest: TagSuggest
 
 ## Wire behavior once the scene nodes are ready. The host connects
 ## palette_btn/vault_btn/sync_btn/tree_delete_btn signals itself.
-
-# ---------------------------------------------- backlinks panel (moved from main.gd)
-
-func toggle_backlinks() -> void:
-	backlinks_panel.visible = not backlinks_panel.visible
-	if backlinks_panel.visible:
-		refresh_backlinks()
-
-func refresh_backlinks() -> void:
-	for c in backlinks_box.get_children():
-		c.queue_free()
-	var title := Label.new()
-	title.name = "BacklinksTitle"
-	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	backlinks_box.add_child(title)
-	if GameManager.current_file == "":
-		title.text = "Open a note to see backlinks"
-		return
-	var target := GameManager.current_rel.get_file().trim_suffix(".md")
-	var links := WikiLinks.backlinks(target)
-	if links.is_empty():
-		title.text = "⇠ No notes link to “%s”" % target
-		return
-	title.text = "⇠ %d note(s) link here" % links.size()
-	for f in links:
-		var b := Button.new()
-		b.name = "Back_" + f.validate_filename()
-		b.text = "◈ " + f.trim_suffix(".md")
-		b.pressed.connect(select_note.bind(f))
-		backlinks_box.add_child(b)
 
 func build() -> void:
 	_search_timer.one_shot = true
@@ -863,8 +833,10 @@ func _perform_drop(src: String, it: TreeItem, section: int) -> void:
 		# Result paths are stale after the move; re-run the current query so the
 		# filtered tree reflects the new structure.
 		_restart_search()
-	refresh()
-	# reopen if the open note was the one moved/renamed
+	# The shell's refresh rebuilds the graph's node set as well as the tree; a
+	# bare refresh() here used to leave the map frozen on the pre-drop hierarchy.
+	_refresh_after_change()
+	# reopen if no note was open before the drop
 	if GameManager.current_rel == "" and new_rel.ends_with(".md"):
 		select_note(new_rel)
 	flash_cb.call("Moved → " + new_rel)
@@ -1079,9 +1051,18 @@ func has_children(rel: String) -> bool:
 ## after a rescan, blanking the note view when the open note is deleted, and
 ## the help-mode guard (the Help showcase page must not be deleted).
 var sync_note_deleted_cb: Callable = func(_rel: String) -> void: pass
-var refresh_cb: Callable = func() -> void: pass
+## Injected by Main. Rebuilds both the tree and the graph after a mutation
+## (delete/move/sync). When unwired (standalone panel), refresh the tree only.
+var refresh_cb: Callable
 var clear_note_cb: Callable = func() -> void: pass
 var is_help_cb: Callable = func() -> bool: return false
+
+
+func _refresh_after_change() -> void:
+	if refresh_cb.is_valid():
+		refresh_cb.call()
+	else:
+		refresh()
 
 
 ## Delete the note/folder row currently selected in the vault tree.
@@ -1202,7 +1183,7 @@ func _perform_delete(rel: String, keep_children: bool = false) -> void:
 		NoteCrud.scrub_order(moved)
 		VaultMove.prune_empty_dirs()
 		GameManager.scan_notes()
-		refresh_cb.call()
+		_refresh_after_change()
 		if GameManager.current_rel != "":
 			select_note(GameManager.current_rel)
 		flash_cb.call("Deleted %s — children moved to %s" % [folder_rel.get_file(), parent_dir if parent_dir != "" else "vault root"])
@@ -1227,7 +1208,7 @@ func _perform_delete(rel: String, keep_children: bool = false) -> void:
 		sync_note_deleted_cb.call(deleted_path)
 	VaultMove.prune_empty_dirs()
 	GameManager.scan_notes()
-	refresh_cb.call()
+	_refresh_after_change()
 
 	if deleted_current:
 		var dir := deleted_note.get_base_dir() if deleted_note.contains("/") else ""

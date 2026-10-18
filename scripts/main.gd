@@ -163,6 +163,12 @@ func _phase_theme_layout() -> void:
 		for new_path in new_paths:
 			sync_service.note_restored(new_path)
 		sync_service.note_saved()
+		# A drop can carry the open note to a new path (the note itself, a note
+		# inside a moved folder, or a folder companion). The tree's refresh runs
+		# after this callback, so follow on idle, once the graph has been rebuilt.
+		if _graph_dock_mode() and GameManager.current_rel != "" \
+				and new_paths.has(GameManager.current_rel):
+			_graph_follow_note.call_deferred(GameManager.current_rel)
 	vault_tree.note_requested.connect(_on_note_selected)
 	vault_tree.delete_requested.connect(func(): vault_tree.delete_selected_node())
 	# Deletion orchestration lives in the tree; Main injects shell hooks.

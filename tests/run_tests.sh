@@ -67,6 +67,15 @@ run_godot_test "CARD RESULT: OK" --headless --path . tests/TestGraphCard.tscn
 # Graph dock (desktop right panel: follow-the-note, tap actions, remembered
 # width, expand to the full view) + the mobile screen-edge swipes.
 run_godot_test "GRAPH DOCK RESULT: OK" --headless --path . tests/TestGraphDock.tscn
+# Tree → graph follow: a tree click in another branch (or another page of the
+# same scope) must move the dock's selection, not leave the old scope frozen.
+run_godot_test "GRAPH TREE SYNC RESULT: OK" --headless --path . tests/TestGraphTreeSync.tscn
+# Tree drag → graph: a drop must rebuild the map, and when it carries the open
+# note (including a folder-note companion) the dock must follow it.
+run_godot_test "GRAPH TREE DRAG RESULT: OK" --headless --path . tests/TestGraphTreeDrag.tscn
+# Graph probe: tap/focus/menu, root hub, routes, adaptive layout spacing and the
+# collision-aware label pass (no overlapping boxes, hovered drawn last).
+run_godot_test "PROBE RESULT: OK" --headless --path . scripts/dev/GraphProbe.tscn
 # Sync delete/move propagation over loopback (real frame protocol + tombstones).
 run_godot_test "SYNC DELETE/MOVE RESULT: OK" --headless --path . tests/TestSyncDeleteMove.tscn
 # Sync identity is per vault (in-folder id + device-local phrase); switching

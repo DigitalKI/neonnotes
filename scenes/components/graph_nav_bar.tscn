@@ -15,70 +15,10 @@ script = ExtResource("1_nav")
 layout_mode = 2
 theme_override_constants/separation = 2
 
-[node name="Row1" type="HBoxContainer" parent="Col" unique_id=1397416041]
+[node name="RowCrumbs" type="HBoxContainer" parent="Col" unique_id=1841356502]
 layout_mode = 2
 
-[node name="Pager" type="HBoxContainer" parent="Col/Row1" unique_id=1881669744]
-unique_name_in_owner = true
-layout_mode = 2
-theme_override_constants/separation = 4
-
-[node name="FirstBtn" type="Button" parent="Col/Row1/Pager" unique_id=398916282]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(25, 0)
-layout_mode = 2
-tooltip_text = "First page"
-theme_override_font_sizes/font_size = 13
-text = "<<"
-
-[node name="PrevBtn" type="Button" parent="Col/Row1/Pager" unique_id=765899530]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(25, 0)
-layout_mode = 2
-tooltip_text = "Previous page"
-theme_override_font_sizes/font_size = 13
-text = "<"
-
-[node name="PageLabel" type="Label" parent="Col/Row1/Pager" unique_id=1386714041]
-unique_name_in_owner = true
-layout_mode = 2
-theme_override_font_sizes/font_size = 13
-text = "1/1"
-horizontal_alignment = 1
-
-[node name="NextBtn" type="Button" parent="Col/Row1/Pager" unique_id=1339051246]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(25, 0)
-layout_mode = 2
-tooltip_text = "Next page"
-theme_override_font_sizes/font_size = 13
-text = ">"
-
-[node name="LastBtn" type="Button" parent="Col/Row1/Pager" unique_id=1175507321]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(25, 0)
-layout_mode = 2
-tooltip_text = "Last page"
-theme_override_font_sizes/font_size = 13
-text = ">>"
-
-[node name="Control" type="Control" parent="Col/Row1" unique_id=1461146207]
-layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="ExpandBtn" type="Button" parent="Col/Row1" unique_id=417679346]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(25, 0)
-layout_mode = 2
-tooltip_text = "Full screen graph"
-theme_override_font_sizes/font_size = 14
-toggle_mode = true
-text = "▣"
-
-[node name="Row2" type="HBoxContainer" parent="Col" unique_id=1841356502]
-layout_mode = 2
-
-[node name="HomeBtn" type="Button" parent="Col/Row2" unique_id=46204689]
+[node name="HomeBtn" type="Button" parent="Col/RowCrumbs" unique_id=46204689]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(25, 0)
 layout_mode = 2
@@ -86,7 +26,67 @@ tooltip_text = "Overview"
 theme_override_font_sizes/font_size = 14
 text = "⌂"
 
-[node name="Crumbs" type="HFlowContainer" parent="Col/Row2" unique_id=556921094]
+[node name="Crumbs" type="HFlowContainer" parent="Col/RowCrumbs" unique_id=556921094]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
+
+[node name="RowNav" type="HBoxContainer" parent="Col" unique_id=1397416041]
+layout_mode = 2
+
+[node name="Pager" type="HBoxContainer" parent="Col/RowNav" unique_id=1881669744]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="FirstBtn" type="Button" parent="Col/RowNav/Pager" unique_id=398916282]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(25, 0)
+layout_mode = 2
+tooltip_text = "First page"
+theme_override_font_sizes/font_size = 13
+text = "<<"
+
+[node name="PrevBtn" type="Button" parent="Col/RowNav/Pager" unique_id=765899530]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(25, 0)
+layout_mode = 2
+tooltip_text = "Previous page"
+theme_override_font_sizes/font_size = 13
+text = "<"
+
+[node name="PageLabel" type="Label" parent="Col/RowNav/Pager" unique_id=1386714041]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "1/1"
+horizontal_alignment = 1
+
+[node name="NextBtn" type="Button" parent="Col/RowNav/Pager" unique_id=1339051246]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(25, 0)
+layout_mode = 2
+tooltip_text = "Next page"
+theme_override_font_sizes/font_size = 13
+text = ">"
+
+[node name="LastBtn" type="Button" parent="Col/RowNav/Pager" unique_id=1175507321]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(25, 0)
+layout_mode = 2
+tooltip_text = "Last page"
+theme_override_font_sizes/font_size = 13
+text = ">>"
+
+[node name="Control" type="Control" parent="Col/RowNav" unique_id=1461146207]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ExpandBtn" type="Button" parent="Col/RowNav" unique_id=417679346]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(25, 0)
+layout_mode = 2
+tooltip_text = "Full screen graph"
+theme_override_font_sizes/font_size = 14
+toggle_mode = true
+text = "▣"

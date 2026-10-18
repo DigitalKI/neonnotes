@@ -43,6 +43,7 @@ func _ready() -> void:
 	# builds finish before the next section mutates the note list.
 	await _run_card_checks(check)
 	await _run_inset_checks(check)
+	await _run_collapsed_focus_checks(check)
 	await _run_graph_state_checks(check)
 	await _run_store_checks(check)
 
@@ -364,7 +365,8 @@ func _run_inset_checks(check: Callable) -> void:
 	await get_tree().process_frame
 	var blurs := [0]
 	gv2.blur_cb = func() -> void: blurs[0] += 1
-	var shot_notes: Array[String] = ["hub.md", "sec.md", "sec/one.md", "sec/two.md"]
+	var shot_notes: Array[String] = ["hub.md", "sec.md", "sec/one.md", "sec/two.md",
+		"sec/sub.md", "sec/sub/one.md"]
 	var saved_notes2: Array[String] = GameManager.notes
 	var saved_links2: Dictionary = GameManager.links
 	GameManager.notes = shot_notes
@@ -376,13 +378,76 @@ func _run_inset_checks(check: Callable) -> void:
 	check.call("focus_note selects a mapped note", gv2.focus_note("sec/one.md"))
 	check.call("focus moved the selection to the child", gv2._selected == "sec/one.md")
 	gv2._menu.open = true
+	var menu_blur: int = blurs[0]
 	gv2._close_menu()
-	check.call("outside press closes the menu and blurs", blurs[0] == 1)
+	check.call("outside press closes the menu and blurs", blurs[0] == menu_blur + 1)
+	# Navigation replaces the selection, so the menu and the card must drop
+	# together: entering a group and jumping to a breadcrumb ancestor used to
+	# leave the card describing the node that was no longer selected.
+	var enter_blur: int = blurs[0]
+	gv2._select("sec")
+	gv2._enter_group("sec")
+	check.call("entering a group closes the menu and card",
+		not gv2._menu.open and blurs[0] == enter_blur + 1)
+	gv2._enter_group("sec/sub")
+	gv2._select("sec/sub/one.md")
+	var crumb_blur: int = blurs[0]
+	gv2._navigate_to_ancestor("sec")
+	check.call("a breadcrumb ancestor closes the menu and card",
+		not gv2._menu.open and blurs[0] == crumb_blur + 1)
+	gv2._select("sec/one.md")
+	var overview_blur: int = blurs[0]
+	gv2._activate_nav("crumb:")
+	check.call("the root crumb closes the menu and card",
+		not gv2._menu.open and blurs[0] == overview_blur + 1)
+	# The outside press is the universal dismissal: it must reach the card even
+	# when navigation already cleared the menu.
+	var outside_blur: int = blurs[0]
+	gv2._close_menu()
+	check.call("outside press dismisses a card with no menu",
+		blurs[0] == outside_blur + 1)
 	check.call("focus_note falls back when the note is unmapped",
 		not gv2.focus_note("nope.md"))
 	GameManager.notes = saved_notes2
 	GameManager.links = saved_links2
 	gv2.queue_free()
+
+# ------------------------------------------------ collapsed / hidden scopes
+
+## A backlink (or child row) can point at a node the current view hides: a
+## child of an oversized collapsed folder, or a note on another page. Focusing
+## it must open that collapsed area / turn that page, not silently ignore it.
+func _run_collapsed_focus_checks(check: Callable) -> void:
+	var saved_notes: Array[String] = GameManager.notes
+	var saved_sep: int = GameManager.graph_max_separate
+	GameManager.graph_max_separate = 2
+	var notes: Array[String] = ["_homepage.md", "Big.md"]
+	for i in 8:
+		notes.append("Big/Note%02d.md" % i)
+	GameManager.notes = notes
+
+	var gv: GraphView = load("res://scripts/render/graph_view.gd").new()
+	gv.size = Vector2(800, 600)
+	add_child(gv)
+	await get_tree().process_frame
+	gv.open("")
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	check.call("an oversized folder collapses in the overview",
+		bool(gv._collapsed.get("Big", false)))
+	check.call("a collapsed folder's children have no node",
+		not gv._keys.has("Big/Note05.md"))
+	check.call("focusing a note inside a collapsed node succeeds",
+		gv.focus_note("Big/Note05.md"))
+	check.call("the collapsed folder is opened to reveal the note",
+		gv._scope == "Big" and gv._scope_active)
+	check.call("the revealed note becomes the selection",
+		gv._selected == "Big/Note05.md")
+
+	gv.queue_free()
+	GameManager.notes = saved_notes
+	GameManager.graph_max_separate = saved_sep
 
 # ------------------------------------------------------- refresh + restore
 
