@@ -12,28 +12,6 @@ phone ↔ PC over the local network.
 
 ## Now
 
-- **Graph label and layout redesign** — discussed 2026-10-17, **not built**.
-  Current labels are Orbitron 11 px, drawn to the right on a 72% background
-  rect, with no collision handling. On a synthetic 111-note vault the current
-  view keeps 32/111 labels at fit-all (29%) and 84/111 at 1.5× (76%); labels
-  collide even when allowed. A probe found collision-aware placement raises the
-  keep rate to 50% / 85%.
-  Pending decisions:
-  1. **Default label style** — outline-only white/black (recommended) or keep
-     the background style as default?
-  2. **Font family** — keep Orbitron, switch to the app body font, or make it
-     configurable?
-  3. **Overview labels** — label only folders/centre/selected/hovered at
-     fit-all, with leaves appearing by zoom? (recommended)
-  4. **Variable edge length** — adaptive child-ring radius for crowded folders
-     (recommended; fit-all gets slightly smaller) or keep fit-all exact and rely
-     on label filtering only?
-  5. **Density control** — user-facing max labels / label density, or automatic?
-  Recommended first pass: configurable outline labels, collision-aware
-  placement (priority + 4–8 candidate positions), viewport culling, width cap,
-  overview LOD, adaptive child-ring radius, and tests that assert no drawn label
-  rects intersect.
-
 ## Next
 
 - **Sync re-verification** — LAN sync is already verified phone ↔ PC; re-run that
@@ -54,7 +32,9 @@ phone ↔ PC over the local network.
   whole vault on the main thread (launch, vault switch, move, sync); target an
   incremental or worker scan.
 - **Graph layout on a worker** — radial layout (~80 ms) and level BFS (~30 ms)
-  hitch the first overview build at ~2,000 visible nodes.
+  hitch the first overview build at ~2,000 visible nodes. If adaptive radial
+  spacing is still not enough, a one-time force relaxation after the radial pass
+  (worker, then freeze) is the next option; no runtime physics.
 - **Graph scale** — `GraphModel.MAX_NODES` (400) is a stop-gap; aggregation is
   deferred. MultiMesh markers are already in place; the remaining work is
   deciding how oversized clusters are summarized.
@@ -65,9 +45,9 @@ phone ↔ PC over the local network.
 - **Graph-first direction (G1–G4)** — make the graph the centre: semantic zoom
   node cards/digests, tag/content filters, explicit folder expand/collapse,
   hover previews, create links from the graph. Neon City is the eventual 3D
-  skin over the same model. The current label/layout pass is scoped readability
-  work, not the full visual redesign; decide whether G1 should precede the Neon
-  City redesign.
+  skin over the same model. The completed label/layout pass was scoped
+  readability work, not the full visual redesign; decide whether G1 should
+  precede the Neon City redesign.
 - **APK hygiene** — `include_filter="*.md"` currently ships `README.md`,
   `AGENTS.md`, and this context kit; only `docs/help.md` is needed at runtime.
 
@@ -75,7 +55,6 @@ phone ↔ PC over the local network.
 
 - Drag inside-move drop zones still want a visual confirmation on-device.
 - Companion-note collisions (`name-2.md`) after sync merges need watching.
-- Graph labels overlap; no collision filter yet (see Now).
 - CRT overlay GPU cost measured ~15–16% on an AMD 820M; don't claim a GPU win
   without a fresh measurement.
 - Sync transport is unencrypted; trusted-LAN only.
@@ -92,6 +71,8 @@ Baselines are device/version dependent; re-measure with the benches.
 - Metadata cache (1,089 notes, warm): `[boot] metadata` ≈18 ms; shell ready
   ≈108 ms. Cold run unchanged.
 - Graph: ≈6–7 ms/frame at 1,000–4,000 nodes; ≈220–275 draw calls.
+- Graph labels: a full placement pass is ≈7 ms at ~1,000 visible keys (headless
+  CPU); a pure pan translates the cached boxes instead of re-placing (<1 ms).
 - Parser: `MarkdownParser.parse()` ≈7 ms / 2,064 lines; full highlight path
   ≈98 ms (rebuild ≈79 ms).
 - Scan: ≈84 ms / 1,000 notes full-file on desktop.

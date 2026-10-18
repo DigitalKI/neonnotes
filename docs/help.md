@@ -18,14 +18,13 @@ fit move into **⋮**.
 | **☰** | Open or close the sidebar (mobile drawer) |
 | **+ New** | Create a note |
 | **✎ Edit** / **◈ Preview** | Switch between Markdown source and rendered preview |
-| **? Help** | This page |
 | **⬇ Export** | Save or share the current note |
 | **🔗 Links** | Show backlinks for the open note |
 | **⊛ Graph** | Show the vault's link graph |
-| **⋮** | Save Now, Move…, Delete Note…, Help, Backlinks, Graph, the export actions, and Open Trash… |
+| **⋮** | Move…, Delete Note…, Backlinks, and the export actions |
 
 The sidebar contains the search field, an **📥 Capture to Inbox** button (beside the **🏷** tag browser), the vault tree,
-an optional backlinks panel, and **⚙ Settings**. The status bar at the bottom shows short messages and
+and a footer row with **? Help**, **🗑 Trash**, and **⚙ Settings**. The status bar at the bottom shows short messages and
 a small sync indicator (grey = not paired, red = paired/error, gold = syncing,
 green = up to date).
 
@@ -183,8 +182,9 @@ Use `[[Note name]]` to link to a note, or add a custom label with
 `[[Note name|Read this note]]`. Clicking a wiki-link opens the matching note.
 Wiki-links also support folder paths, for example `[[projects/roadmap]]`.
 
-**🔗 Links** opens a backlinks panel listing every note that links to the open
-note; click an entry to open it.
+**🔗 Links** opens a floating backlinks card at the top of the note area,
+listing every note that links to the open note; click an entry to open it, or
+**✕** to dismiss the card.
 
 ### External links
 
@@ -204,8 +204,12 @@ to open its note. Drag to pan, scroll the wheel or pinch to zoom; hover
 highlights a node, and note labels
 appear as you zoom in. Selecting a node opens a radial menu with **Open**,
 **Move** and **Delete** (plus **Enter** on a folder); **Move** relocates that
-note or folder and re-focuses it. **⚙ Settings → Graph neighbor levels** (1–10)
-controls how many hops out from the current note the map expands.
+note or folder and re-focuses it. In the full view, a focused node also shows a
+card with its **Content**, **Backlinks**, and (for folders) **Children** tabs.
+Press a backlink to focus that note on the map — the card also opens a
+collapsed folder or turns the page that was hiding it. **⚙ Settings → Graph
+neighbor levels** (1–10) controls how many hops out from the current note the
+map expands.
 
 ## 10. Callouts
 
@@ -285,7 +289,7 @@ deleted.
 
 Deleting a note or folder moves it to the Trash instead of erasing it; a folder
 takes its whole subtree (children, companion note, and embedded media) with it.
-Open **⋮ → 🗑 Open Trash…** to restore an item or delete it permanently. Trashed
+Open the **🗑 Trash** button at the bottom of the sidebar to restore an item or delete it permanently. Trashed
 items are kept for **30 days** and then removed automatically. The Trash is
 device-local: it is never synchronized, though deleting an item still propagates
 as a normal delete to paired devices.
@@ -348,12 +352,13 @@ GIF, HTML, and Markdown; on desktop, Share falls back to the clipboard and the
 OS file manager. Turn on **Apply CRT FX on export** in Settings to bake the
 scanlines into exported images.
 
-The export actions are also available from **⋮**, together with **💾 Save Now**.
+The export actions are also available from **⋮**.
 
 ## 17. Mobile and responsive layout
 
 On narrow screens, toolbar actions move into **⋮**, the sidebar becomes a
-drawer, and the editor resizes around the on-screen keyboard. The editor wraps
+drawer, and the editor resizes around the on-screen keyboard. Help and Trash
+stay in the sidebar footer inside the drawer. The editor wraps
 long lines and uses a touch-friendly scrollbar. Touch and hold a tree row to
 drag it. Rotate to landscape when working with wide tables or charts.
 

@@ -20,6 +20,6 @@ user explicitly chose this over force-directed.
 
 - Positions are stable, testable, and cheap to render (`_bg` MultiMesh nodes,
   batched edge geometry).
-- Crowded folders need adaptive radii and label collision handling (roadmap),
-  not physics.
+- Crowded folders use adaptive child-ring radii (`_child_edge()`) and
+  collision-aware label placement, not physics.
 - A future 3D "Neon City" skin should reuse the same model/semantics.

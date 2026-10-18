@@ -31,8 +31,12 @@ story. If a rule changes, change the code/test and this line together.
   moves/backlinks can miss links. Guard: `scripts/common/GameManager.gd`.
 - **INV-006 — Move only through `move_path()`.** The ⋮ Move page, graph Move,
   and drops all call `VaultTreeComponent.move_path()`; a non-drop move also
-  calls `after_external_move()`. Never use `DirAccess.rename_absolute()`
-  directly. Guard: `tests/TestMoveDialog.tscn`, `tests/TestVaultTreeDrag.tscn`.
+  calls `after_external_move()`. Every move must refresh tree **and** graph
+  (the drop uses Main's `refresh_cb`, not the tree's `refresh()`), and
+  `VaultMove` must repoint the open note when the move carries it (the note,
+  a child of a moved folder, or the folder companion). Never use
+  `DirAccess.rename_absolute()` directly. Guard: `tests/TestMoveDialog.tscn`,
+  `tests/TestVaultTreeDrag.tscn`, `tests/TestGraphTreeDrag.tscn`.
 - **INV-007 — Trash stays hidden and unsynced.** `vault/.trash/` is invisible to
   `scan_notes()`, tree, search, graph, and `_valid_sync_path`. Restore fires
   `note_restored()` for **every** restored path; delete fires `note_deleted()`
@@ -175,9 +179,10 @@ story. If a rule changes, change the code/test and this line together.
 - **INV-051 — Static graph layers need explicit invalidation.** Any mutation of
   `_pos`/`_keys`/`_collapsed`/`_levels`/`_selected`/`_hover` calls
   `_mark_map_dirty()`. Nodes are MultiMesh instances rebuilt by `_sync_nodes()`;
-  pan/zoom is caught in `_process`. `INSTANCE_CUSTOM` is spatial-only, so the
-  node shader uses material uniforms and three marker meshes. Guard:
-  `scripts/dev/bench_graph.gd`.
+  pan/zoom is caught in `_process` via `_mark_camera_dirty()` (static layers
+  repaint, but the label cache survives a pure pan). `INSTANCE_CUSTOM` is
+  spatial-only, so the node shader uses material uniforms and three marker
+  meshes. Guard: `scripts/dev/bench_graph.gd`.
 - **INV-052 — Link routes lag boot by design.** `scan_paths()` clears `links`;
   `load_metadata_async()` fills them 12 notes/frame. Anything deriving
   routes/levels/labels from `GameManager.links`/`titles` must refresh on
@@ -192,12 +197,26 @@ story. If a rule changes, change the code/test and this line together.
 - **INV-055 — Graph digest/card.** `GraphDigest.summarize()` runs on a worker via
   `GraphDigestStore`; `GraphDigest.note_card()/folder_card()` build view-models
   on the main thread. Main owns card layout via `relayout_cb`; autowrap Labels
-  need `custom_minimum_size.x >= 200`; `show_model()` re-places deferred.
-  Guard: `tests/TestGraphCard.tscn`.
-- **INV-056 — Graph labels are currently simple.** Orbitron 11 px, right of the
-  node, 72% background rect; there is **no** width cap, viewport culling, or
-  collision filtering yet. Label/layout redesign is a roadmap item; do not
-  assume those limits exist. Guard: `GraphView._draw_labels`.
+  need `custom_minimum_size.x >= 200`; `show_model()` re-places deferred. The
+  card and the circle menu are one focus affordance: every navigation that
+  clears the menu (enter/back/pager/overview/breadcrumb) calls `_drop_focus()`
+  so `blur_cb` closes the card too, and an outside press always blurs even when
+  the menu is already closed. Guard: `tests/TestGraphCard.tscn`.
+- **INV-056 — Graph labels are code-tuned and collision-aware.** Appearance
+  lives in `GraphView`'s `LABEL_*` constants (no settings UI by design): outline
+  fill/outline by default (`LABEL_STYLE` can switch to background/none),
+  `LABEL_FONT`, `LABEL_SIZE`, `LABEL_MAX_WIDTH`. `label_layout()` is the pure
+  placement pass: viewport culling, priority (selected → centre → folder → focus
+  leaf → scope leaf → other), outward candidate anchors, width cap/ellipsis,
+  and collision filtering against labels + node discs + the circle menu via a
+  spatial hash. Hovered labels use `LABEL_HOVER_COLOR`, are forced visible, and
+  are drawn last so they win any overlap. A pure pan may translate the cached
+  boxes, but the drift is measured from where the cache was placed: once it
+  exceeds `LABEL_PAN_TRANSLATE`, and again on pointer release, the pass must
+  re-place so labels entering the viewport appear. Do not reintroduce the old
+  "every leaf labelled at fit-all" rule. Guard: `scripts/dev/GraphProbe.tscn`
+  (no intersecting boxes, all inside `view_rect`, hovered last, slow pan
+  re-places) in `tests/run_tests.sh`.
 - **INV-057 — Selection overlay never reads the framebuffer.** The loupe is a
   font-scaled redraw; `get_texture().get_image()` per frame is too costly under
   `gl_compatibility`. The loupe stays above the finger (flip-below removed),
@@ -304,6 +323,14 @@ story. If a rule changes, change the code/test and this line together.
 - **INV-090 — `export_presets.cfg` `include_filter="*.md"` ships all Markdown**
   (README, AGENTS, this kit, help). The app only needs `docs/help.md`; narrow the
   filter if internal docs should not be packaged. Guard: `export_presets.cfg`.
+- **INV-091 — Graph radial layout is deterministic and adaptively spaced.**
+  `_assign_sectors()` receives an explicit `base_edge`; `_child_edge()` derives
+  each parent's child-ring radius from fan-out and usable angular slot (clamped
+  by `LAYOUT_MIN/MAX_RING_FACTOR`), `LAYOUT_CHILD_SCALE` shrinks deeper levels,
+  and `LAYOUT_MIN_SECTOR_GAP` separates sibling subtrees. `LAYOUT_SPACING` is
+  the single global tuner. No runtime physics/force simulation; layout runs once
+  per open/navigation. Guard: `scripts/dev/GraphProbe.tscn` (crowded parent gets
+  a longer edge than a sparse one; clamps hold).
 
 ## Engine gotchas
 

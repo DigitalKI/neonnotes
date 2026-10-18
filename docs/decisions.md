@@ -47,6 +47,8 @@ revisited.
   history survives a vault move.
 - **Single `GraphView` reused as dock and full view** — one renderer, two
   layouts; `Main` owns the state.
+- **Graph labels are code-tuned, not a settings page** — `LABEL_*` constants in
+  `GraphView`; outline white/black by default, collision-aware, hovered last.
 - **No sync encryption yet** — trusted-LAN only; keep the phrase private.
 - **IME autocorrect off** on stored-value inputs — Android mangles large pastes.
 - **Toolbar icons are monochrome text glyphs** — emoji render as dim bitmaps on

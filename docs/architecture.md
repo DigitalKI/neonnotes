@@ -57,12 +57,13 @@ settings live in `user://settings.cfg`; exports and embedded media live under
 | `scripts/markdown/wiki_links.gd` | Link extraction, resolution, backlinks, graph |
 | `scripts/render/preview_builder.gd` | Markdown → RichTextLabel blocks, charts, FX |
 | `scripts/render/graph_model.gd` | Renderer-agnostic graph levels/edges |
-| `scripts/render/graph_view.gd` | Radial map: layout, static layers, MultiMesh nodes, focus/nav |
+| `scripts/render/graph_view.gd` | Radial map: adaptive layout, collision-aware labels, static layers, MultiMesh nodes, focus/nav |
 | `scripts/sync/sync_service.gd` | UDP discovery, pairing proof, manifest/stream transfer, LWW state |
 | `scripts/sync/sync_page.gd` | Sync settings/status page |
 | `scripts/export/*.gd` | PNG/GIF/HTML exporters and outbound share |
 | `scripts/components/note_editor.gd` | Note view: editor + preview, autosave/flush, find, mobile selection, title/tags |
 | `scripts/components/vault_tree_component.gd` | Vault tree, drag/drop, move/delete orchestration, search/reveal |
+| `scripts/components/backlinks_card.gd` | Floating backlinks card over the note column; rows navigate through the tree |
 | `scripts/components/share_intake.gd` | OS share payload routing into `Capture`; plugin-free payload handling |
 | `scripts/components/slide_surface.gd` | Floating-panel slide/dock transitions for the drawer and graph |
 | `scripts/components/edge_swipe_component.gd` | Mobile edge-drag claims (drawer/map), tap/scroll preservation |
@@ -96,6 +97,10 @@ Emptied-dir pruning is **not** inside `VaultMove.move_path()`: the drag path
 prunes inline in `VaultTreeComponent._perform_drop()`; the Move page/graph call
 `after_external_move()` (`VaultMove.prune_empty_ancestors()` + restart search).
 The ⋮ Move page and the graph Move both funnel through `move_path()`.
+A drop refreshes through Main's shell callback (rebuilding both tree and
+graph), and `moved_cb` makes the graph dock follow the open note when the move
+carried it. `VaultMove` repoints `current_rel` for the note itself, notes inside
+a moved folder, and a folder's companion note.
 
 ### Delete, trash, restore
 `VaultTreeComponent.delete_node()` → `TrashStore.move_to_trash()` (note or whole
@@ -122,11 +127,19 @@ special (pinned row, not a move destination, not a graph node).
 ### Graph
 `GraphModel` builds levels/edges from `GameManager.notes` + `links`.
 `GraphView.open()` rebuilds keys, then `_layout_points()` / `_assign_sectors()`
-lay out radial sectors; `_build_edge_geometry()`/`_build_rail_geometry()` batch
-the links and `_sync_nodes()` updates the MultiMesh markers. `_bg`/`_nodes`/
+lay out radial sectors with an adaptive child-ring radius (`_child_edge()`);
+`label_layout()` resolves outline-style labels with priority, outward anchors,
+viewport culling, width caps and collision filtering, and `_draw_labels()` only
+paints the result. A pure pan translates the cached boxes; accumulated drift
+(or pointer release) re-places them so labels entering the view appear. `_build_edge_geometry()`/`_build_rail_geometry()` batch the
+links and `_sync_nodes()` updates the MultiMesh markers. `_bg`/`_nodes`/
 `_overlay` repaint only via `_mark_map_dirty()`, while `_draw` emits the animated
 light each frame. `GraphDigestStore` builds focus-card digests on a worker;
-`GraphFocusCard` renders them. `Main._set_graph_state()` owns dock/full-view
+`GraphFocusCard` renders them in Content, Children (folder companions) and
+Backlinks tabs. `GraphView.focus_note()` is the outside-entry point (tree click,
+focus card child/backlink, links page): it leaves the current scope for the
+target's parent scope (or overview) and turns to its page, so an off-scope note
+is never silently ignored. `Main._set_graph_state()` owns dock/full-view
 state; `_apply_dock_split()`/`_set_dock_split()` own the remembered divider.
 
 ### Export
@@ -153,6 +166,8 @@ output under `vault/exports/`. Optional CRT FX is baked only when enabled.
 | `tests/TestSelectionOverlay.tscn` | Android selection bar, loupe, edge auto-scroll |
 | `tests/TestGraphCard.tscn` | Graph digest/card, form factors, nav, view restore |
 | `tests/TestGraphDock.tscn` | Graph dock/full view, follow-note, swipes |
+| `tests/TestGraphTreeSync.tscn` | Tree click follows into another scope/page |
+| `tests/TestGraphTreeDrag.tscn` | Tree drop rebuilds the graph and follows the moved note |
 | `tests/TestSyncDeleteMove.tscn` | Loopback sync protocol, tombstones, moves |
 | `tests/TestPerVaultSync.tscn` | Per-vault identity, unpair/reset |
 | Smoke (`NEONNOTES_SMOKE=1`) | End-to-end shell: notes, order, find, graph, sync |
@@ -178,6 +193,9 @@ output under `vault/exports/`. Optional CRT FX is baked only when enabled.
 - **Add a graph action:** add it to `GraphRadialMenu.show_for()` and handle the
   callback in `GraphView`/`Main`; keep dock tap behavior (action) separate from
   full-view tap (selection).
+- **Tune graph labels/layout:** edit the `LABEL_*` / `LAYOUT_*` constants at the
+  top of `GraphView`; there is no settings UI by design. Labels are a pure
+  `label_layout()` pass that the probe can assert on.
 - **Add a test:** `tests/TestX.tscn` + `tests/test_x.gd` printing
   `RESULT: OK`; add a `run_godot_test` line. Use `NEONNOTES_DEV=1`,
   `NEONNOTES_VAULT=<scratch>`, or the smoke vault — never the real vault.

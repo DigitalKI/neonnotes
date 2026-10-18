@@ -48,7 +48,7 @@ before a new one gets created.
 ### 🗑️ Recoverable deletes (Trash)
 Deleting a note or folder doesn't erase it. The whole target — folder subtree,
 companion note, and embedded media included — moves into a local **Trash**,
-restorable from **⋮ → 🗑 Open Trash…**. Items are kept for **30 days**, then
+restorable from the **🗑 Trash** button at the bottom of the sidebar. Items are kept for **30 days**, then
 purged automatically. The Trash is device-local and never synced; the deletion
 itself still propagates to paired devices as a tombstone.
 
