@@ -3,7 +3,7 @@
 [ext_resource type="Script" uid="uid://blcr73uhsp6w4" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Shader" uid="uid://d0udygsyay06s" path="res://shaders/crt.gdshader" id="3_crt"]
 [ext_resource type="Script" uid="uid://54xformjxgfq" path="res://scripts/render/graph_view.gd" id="4_graph"]
-[ext_resource type="PackedScene" path="res://scenes/components/toolbar.tscn" id="5_toolbar"]
+[ext_resource type="PackedScene" uid="uid://dt74vuwyi405f" path="res://scenes/components/toolbar.tscn" id="5_toolbar"]
 [ext_resource type="PackedScene" uid="uid://cj1ama86pqcoo" path="res://scenes/components/status_bar.tscn" id="6_status"]
 [ext_resource type="PackedScene" uid="uid://dr4466qx0hbpp" path="res://scenes/components/side_panel.tscn" id="7_side"]
 [ext_resource type="PackedScene" uid="uid://dsdpg5sa7q611" path="res://scenes/components/settings_page.tscn" id="8_settings"]
@@ -15,11 +15,12 @@
 [ext_resource type="PackedScene" path="res://scenes/components/trash_page.tscn" id="15_trash"]
 [ext_resource type="Script" uid="uid://dph74sbqhogxo" path="res://scripts/components/note_editor.gd" id="16_editor"]
 [ext_resource type="PackedScene" uid="uid://btocosm80dy4s" path="res://scenes/components/link_resolve_dialog.tscn" id="17_link_resolve"]
-[ext_resource type="PackedScene" path="res://scenes/components/graph_focus_card.tscn" id="18_card"]
-[ext_resource type="PackedScene" path="res://scenes/components/graph_nav_bar.tscn" id="19_nav"]
-[ext_resource type="PackedScene" path="res://scenes/components/graph_links_page.tscn" id="20_links"]
+[ext_resource type="PackedScene" uid="uid://b2dnuhafqp4mr" path="res://scenes/components/graph_focus_card.tscn" id="18_card"]
+[ext_resource type="PackedScene" uid="uid://dupuug6hpwe4b" path="res://scenes/components/graph_nav_bar.tscn" id="19_nav"]
+[ext_resource type="PackedScene" uid="uid://0o625k6ee537" path="res://scenes/components/graph_links_page.tscn" id="20_links"]
 [ext_resource type="PackedScene" path="res://scenes/components/capture_page.tscn" id="21_capture"]
-[ext_resource type="PackedScene" path="res://scenes/components/move_dialog.tscn" id="22_move"]
+[ext_resource type="PackedScene" uid="uid://b3mljc6qcvcef" path="res://scenes/components/move_dialog.tscn" id="22_move"]
+[ext_resource type="PackedScene" path="res://scenes/components/backlinks_card.tscn" id="23_backlinks"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMat_crt"]
 shader = ExtResource("3_crt")
@@ -77,7 +78,7 @@ layout_mode = 2
 size_flags_horizontal = 3
 script = ExtResource("16_editor")
 
-[node name="ContentSplit" type="HSplitContainer" parent="Root/WorkspaceMargin/Workspace/Content"]
+[node name="ContentSplit" type="HSplitContainer" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=1483723381]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -85,7 +86,7 @@ size_flags_vertical = 3
 split_offsets = PackedInt32Array(560)
 split_offset = 560
 
-[node name="NoteColumn" type="MarginContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit"]
+[node name="NoteColumn" type="MarginContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit" unique_id=120056703]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -94,13 +95,6 @@ theme_override_constants/margin_left = 0
 theme_override_constants/margin_top = 0
 theme_override_constants/margin_right = 0
 theme_override_constants/margin_bottom = 0
-
-[node name="GraphDock" type="PanelContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit"]
-unique_name_in_owner = true
-visible = false
-custom_minimum_size = Vector2(240, 0)
-layout_mode = 2
-
 
 [node name="ContentHost" type="ScrollContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn" unique_id=1622826570]
 unique_name_in_owner = true
@@ -228,12 +222,20 @@ placeholder_text = "# Write markdown here…"
 drag_and_drop_selection_enabled = false
 wrap_mode = 1
 
-[node name="SettingsPage" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=740001001 instance=ExtResource("8_settings")]
+[node name="NoteOverlay" type="Control" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn"]
+layout_mode = 2
+mouse_filter = 2
+z_index = 10
+
+[node name="BacklinksCard" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/NoteColumn/NoteOverlay" instance=ExtResource("23_backlinks")]
+unique_name_in_owner = true
+layout_mode = 1
+
+[node name="GraphDock" type="PanelContainer" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit" unique_id=2025996107]
 unique_name_in_owner = true
 visible = false
+custom_minimum_size = Vector2(240, 0)
 layout_mode = 2
-size_flags_horizontal = 3
-size_flags_vertical = 3
 
 [node name="GraphView" type="Control" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/GraphDock" unique_id=938625459]
 unique_name_in_owner = true
@@ -243,14 +245,16 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 script = ExtResource("4_graph")
 
-[node name="GraphNavBar" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/GraphDock/GraphView" instance=ExtResource("19_nav")]
+[node name="GraphNavBar" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/GraphDock/GraphView" unique_id=1964949066 instance=ExtResource("19_nav")]
 unique_name_in_owner = true
 layout_mode = 1
-anchors_preset = 10
-anchor_right = 1.0
-grow_horizontal = 2
-offset_top = 6.0
-offset_bottom = 78.0
+
+[node name="SettingsPage" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=740001001 instance=ExtResource("8_settings")]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
 
 [node name="SyncPage" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=300854830 instance=ExtResource("14_sync_page")]
 visible = false
@@ -278,8 +282,7 @@ layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="GraphLinksPage" parent="Root/WorkspaceMargin/Workspace/Content" instance=ExtResource("20_links")]
-unique_name_in_owner = true
+[node name="GraphLinksPage" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=207421513 instance=ExtResource("20_links")]
 visible = false
 layout_mode = 2
 size_flags_horizontal = 3
@@ -290,14 +293,12 @@ layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="CapturePage" parent="Root/WorkspaceMargin/Workspace/Content" instance=ExtResource("21_capture")]
-unique_name_in_owner = true
+[node name="CapturePage" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=2010016229 instance=ExtResource("21_capture")]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="MoveDialog" parent="Root/WorkspaceMargin/Workspace/Content" instance=ExtResource("22_move")]
-unique_name_in_owner = true
+[node name="MoveDialog" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=1789480705 instance=ExtResource("22_move")]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
@@ -311,8 +312,11 @@ layout_mode = 2
 
 [node name="GraphFocusCard" parent="." unique_id=1689561051 instance=ExtResource("18_card")]
 unique_name_in_owner = true
+layout_mode = 0
+anchors_preset = 0
 
 [node name="CrtOverlay" type="ColorRect" parent="." unique_id=1821292982]
+visible = false
 material = SubResource("ShaderMat_crt")
 layout_mode = 1
 anchors_preset = 15

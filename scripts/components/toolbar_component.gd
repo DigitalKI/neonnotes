@@ -9,7 +9,6 @@ extends HFlowContainer
 @onready var note_title: Label = %NoteTitle
 @onready var new_btn: Button = %NewBtn
 @onready var mode_btn: Button = %ModeBtn
-@onready var help_btn: Button = %HelpBtn
 @onready var export_btn: MenuButton = %ExportBtn
 @onready var backlinks_btn: Button = %BacklinksBtn
 ## Dedicated graph toggle, the toolbar's outermost control (top-right corner).

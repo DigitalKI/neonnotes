@@ -201,6 +201,12 @@ func _run_smoke() -> void:
 	# help page
 	m._show_help()
 	fails += _check(m.editor.is_help() and m.content_host.get_child_count() > 0, "help page renders")
+	# Help must replace an open page, not sit behind it (Settings/Trash use the
+	# same page slot, so the shared close path covers both).
+	m._open_page(m.PAGE_SETTINGS, m.settings_page)
+	m._show_help()
+	fails += _check(m.page_mode == "" and not m.settings_page.visible and m.editor.is_help(),
+		"help closes an open page")
 	# html exporter
 	var html := HtmlExporter.to_html(doc)
 	fails += _check(html.begins_with("<!DOCTYPE") or html.begins_with("<html"), "html export produces doc")
@@ -373,6 +379,33 @@ func _run_smoke() -> void:
 	fails += _check(m.page_mode == m.PAGE_CAPTURE, "sidebar 📥 opens the capture page")
 	m.capture_page.close_btn.pressed.emit()
 	fails += _check(m.page_mode == "", "capture ✕ Close returns to the note view")
+	# Backlinks are a floating card over the note column now, not a panel at
+	# the bottom of the tree. The card must list linking notes and stay at the
+	# top (y-offset near 0) without taking height from the tree.
+	GameManager.write_note("sub/backlinker.md",
+			"---\ntitle: \"Backlinker\"\n---\n\n[[demo]]\n")
+	# Same target written as a vault path: the card and the graph card must
+	# both count it (raw-basename matching used to miss path-qualified links).
+	GameManager.write_note("sub/path_backlinker.md",
+			"---\ntitle: \"Path Backlinker\"\n---\n\n[[sub/demo]]\n")
+	GameManager.scan_notes()
+	m._refresh_list()
+	m.vault_tree.select_note("sub/demo.md")
+	await m.get_tree().process_frame
+	fails += _check(m.vault_tree.get_node_or_null("SideVBox/BacklinksPanel") == null,
+		"backlinks no longer sit at the bottom of the tree")
+	m._toggle_backlinks()
+	await m.get_tree().process_frame
+	var card_top: float = float(m.backlinks_card.get_global_rect().position.y) \
+			- float(m.note_column.get_global_rect().position.y)
+	fails += _check(m.backlinks_card.visible
+			and m.backlinks_card.get_parent() == m.note_column.get_node("NoteOverlay")
+			and card_top >= 0.0 and card_top < 40.0,
+		"backlinks open as a floating card at the top of the note area")
+	fails += _check(m.backlinks_card.rows_box.get_child_count() == 2,
+		"backlinks card resolves bare-name and path-qualified links alike")
+	m.backlinks_card.close_btn.pressed.emit()
+	fails += _check(not m.backlinks_card.visible, "backlinks card ✕ dismisses it")
 	# The graph has two shapes on desktop: the dock (a side panel beside the
 	# note) and the full view (the whole content area). Opening a note from the
 	# tree leaves the *full* view — the note must not land behind the map — while

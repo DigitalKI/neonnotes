@@ -19,10 +19,11 @@ const CARD_MAX_W := 380.0
 const CARD_MIN_H := 120.0
 const SCREEN_MARGIN := 12.0
 const PORTRAIT_FRACTION := 1.0 / 3.0
-signal child_selected(rel: String)   # a row in a folder's child list
-signal tag_selected(tag: String)     # a tag chip: filter the vault by it
-signal links_opened                  # the links header button: show them all
-signal title_opened(rel: String)     # the title: open that note (like menu Open)
+signal child_selected(rel: String)      # a row in a folder's child list
+signal backlink_selected(rel: String)   # a row in the backlinks list
+signal tag_selected(tag: String)        # a tag chip: filter the vault by it
+signal links_opened                     # the links header button: show them all
+signal title_opened(rel: String)        # the title: open that note (like menu Open)
 
 ## Bounded lists: the card must stay readable rather than exhaustive. Links
 ## do not list here at all — the header button opens the full links page, so
@@ -31,6 +32,9 @@ const MAX_TAGS := 16
 const MAX_CHILDREN_VISIBLE := 60
 const CHILD_ROW_H := 19.0
 const CHILDREN_MAX_H := 220.0
+const MAX_BACKLINKS_VISIBLE := 60
+const BACKLINK_ROW_H := 19.0
+const BACKLINKS_MAX_H := 220.0
 ## Desktop preview floor: the corner card sizes itself to its content, so the
 ## preview needs a height to make the card open tall enough to read. Phone
 ## rail/sheet are fixed-size, so there the preview shrinks and scrolls instead.
@@ -43,22 +47,26 @@ const PREVIEW_MIN_H := 200.0
 @onready var tabs_row: HBoxContainer = %CardTabs
 @onready var tab_content: Button = %TabContent
 @onready var tab_children: Button = %TabChildren
+@onready var tab_backlinks: Button = %TabBacklinks
 @onready var links_row: HBoxContainer = %LinksRow
 @onready var links_header: Label = %CardLinksHeader
 @onready var links_btn: Button = %CardLinksBtn
 @onready var children_header: Label = %CardChildrenHeader
 @onready var children_scroll: ScrollContainer = %CardChildrenScroll
 @onready var children_box: VBoxContainer = %CardChildren
+@onready var backlinks_header: Label = %CardBacklinksHeader
+@onready var backlinks_scroll: ScrollContainer = %CardBacklinksScroll
+@onready var backlinks_box: VBoxContainer = %CardBacklinks
 @onready var preview_scroll: ScrollContainer = %CardPreviewScroll
 @onready var preview_box: VBoxContainer = %CardPreview
 @onready var meta_spacer: Control = %CardMetaSpacer
 @onready var meta_label: Label = %CardMeta
 
 var _model := {}
-## Folder cards have two tabs: the note's own content first, the child list
-## second (memory: "notes that have child notes should show the note content,
-## and on a second tab the list of child nodes").
-var _folder_tab := "content"
+## The card's active tab: the note's own content, the child list (folder cards
+## only), or the notes linking here. Content stays first so a focused node keeps
+## showing its preview by default.
+var _tab := "content"
 ## Injected by Main: re-place the card for the current form factor. The shell
 ## owns the form-factor decision (phone portrait/landscape vs desktop); the
 ## card never guesses it, so `show_model()` asks instead of laying out itself.
@@ -70,6 +78,7 @@ func _ready() -> void:
 	links_btn.pressed.connect(func(): links_opened.emit())
 	tab_content.pressed.connect(func(): _set_tab("content"))
 	tab_children.pressed.connect(func(): _set_tab("children"))
+	tab_backlinks.pressed.connect(func(): _set_tab("backlinks"))
 	# The title doubles as an "open note" affordance, like the circle menu's
 	# Open action; the label needs to stop ignoring the mouse to receive taps.
 	title_label.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -110,17 +119,19 @@ func apply_theme() -> void:
 	links_btn.add_theme_color_override("font_color", c["accent"])
 	# Tabs: the active one is disabled (it IS the view) but bright; the other
 	# stays pressable and dim.
-	for tab in [tab_content, tab_children]:
+	for tab in [tab_content, tab_children, tab_backlinks]:
 		tab.add_theme_color_override("font_color", c["accent2"])
 		tab.add_theme_color_override("font_disabled_color", c["accent"])
 		tab.add_theme_font_size_override("font_size", 12)
 	children_header.add_theme_color_override("font_color", Color(c["accent2"].r, c["accent2"].g, c["accent2"].b, 0.75))
+	backlinks_header.add_theme_color_override("font_color", Color(c["accent2"].r, c["accent2"].g, c["accent2"].b, 0.75))
 	meta_label.add_theme_color_override("font_color", Color(c["text"].r, c["text"].g, c["text"].b, 0.5))
 	# Header labels are small captions; the title carries the hierarchy.
-	for caption in [links_header, children_header]:
+	for caption in [links_header, children_header, backlinks_header]:
 		caption.add_theme_font_size_override("font_size", maxi(11, GameManager.font_size - 4))
 	meta_label.add_theme_font_size_override("font_size", maxi(11, GameManager.font_size - 3))
 	_style_scrollbar(children_scroll)
+	_style_scrollbar(backlinks_scroll)
 	_style_scrollbar(preview_scroll)
 	if not _model.is_empty():
 		_render()
@@ -144,7 +155,7 @@ func _style_scrollbar(scroll: ScrollContainer) -> void:
 
 func show_model(model: Dictionary) -> void:
 	_model = model
-	_folder_tab = "content"
+	_tab = "content"
 	if _model.is_empty():
 		close()
 		return
@@ -171,28 +182,41 @@ func _render() -> void:
 	title_label.text = String(_model.get("title", ""))
 	title_label.tooltip_text = String(_model.get("rel", ""))
 
+	# A model swap can change kind while a tab is open (a folder card becomes
+	# a note card, or vice versa): the child tab only exists for folders.
+	if not is_folder and _tab == "children":
+		_tab = "content"
+	var show_body := _tab == "content"
+	var show_children := is_folder and _tab == "children"
+	var show_backlinks := _tab == "backlinks"
+
 	_render_tags(_model.get("tags", []) as Array)
-	var show_body := true
+	# Every card exposes Content + Backlinks; a folder companion inserts the
+	# Children tab between them, so Backlinks is its third tab.
+	tabs_row.visible = true
+	tab_children.visible = is_folder
+	tab_content.disabled = _tab == "content"
+	tab_children.disabled = _tab == "children"
+	tab_backlinks.disabled = _tab == "backlinks"
+
 	if is_folder:
 		_render_children(_model.get("children", []) as Array)
-		links_row.visible = false
-		tabs_row.visible = true
-		tab_content.disabled = _folder_tab == "content"
-		tab_children.disabled = _folder_tab == "children"
-		show_body = _folder_tab == "content"
-		children_header.visible = not show_body
-		children_scroll.visible = not show_body
 	else:
-		_render_links()
-		tabs_row.visible = false
-		children_header.visible = false
-		children_scroll.visible = false
 		_clear(children_box)
+	children_header.visible = show_children
+	children_scroll.visible = show_children
+
+	var has_links := _render_links()
+	links_row.visible = not is_folder and show_body and has_links
+
+	_render_backlinks(_model.get("backlinks", []) as Array)
+	backlinks_header.visible = show_backlinks
+	backlinks_scroll.visible = show_backlinks
 
 	_render_preview(String(_model.get("preview", "")) if show_body else "")
-	# The preview scroll expands to fill the card; the spacer only pushes the
-	# meta line to the bottom when there is no preview to take that space.
-	meta_spacer.visible = not preview_scroll.visible
+	# The body scroll expands to fill the card; the spacer only pushes the meta
+	# line to the bottom on the content tab when there is no preview.
+	meta_spacer.visible = show_body and not preview_scroll.visible
 	meta_label.text = _meta_text()
 	meta_label.visible = show_body and meta_label.text != ""
 
@@ -265,17 +289,16 @@ func _render_tags(tags: Array) -> void:
 		tags_chips.add_child(more)
 
 ## Outgoing links: one compact header row with a count; the button opens the
-## full links page so the excerpt keeps the card's space.
-func _render_links() -> void:
+## full links page so the excerpt keeps the card's space. Returns whether the
+## row has anything to show (the caller owns its visibility on the tabs).
+func _render_links() -> bool:
 	var links: Array = _model.get("links", [])
-	links_row.visible = not links.is_empty()
 	links_header.text = "⇢ LINKS · %d" % links.size()
+	return not links.is_empty()
 
 func _render_children(children: Array) -> void:
 	_clear(children_box)
-	children_header.visible = true
 	children_header.text = "▣ %d NOTES" % children.size()
-	children_scroll.visible = true
 	children_scroll.scroll_vertical = 0
 	# Size the viewport to the list (bounded): a 2-child folder should not
 	# reserve a 90 px empty window, while a 60-child one stays scrollable.
@@ -302,6 +325,41 @@ func _render_children(children: Array) -> void:
 	if children.size() > shown:
 		children_box.add_child(_more_label(children.size() - shown))
 
+## Notes that link here. Rows are navigation like the child list: a press asks
+## Main to focus that node on the map, which also enters any collapsed scope
+## or page that currently hides it.
+func _render_backlinks(backlinks: Array) -> void:
+	_clear(backlinks_box)
+	backlinks_header.text = "⇠ BACKLINKS · %d" % backlinks.size()
+	backlinks_scroll.scroll_vertical = 0
+	# Match the child list: size to the rows, but keep a real list scrollable.
+	var rows := minf(backlinks.size(), MAX_BACKLINKS_VISIBLE)
+	backlinks_scroll.custom_minimum_size = Vector2(0,
+		maxf(BACKLINK_ROW_H, minf(rows * BACKLINK_ROW_H + 6.0, BACKLINKS_MAX_H)))
+	var c := GameManager.palette()
+	var shown := mini(backlinks.size(), MAX_BACKLINKS_VISIBLE)
+	for i in shown:
+		var entry: Dictionary = backlinks[i]
+		var row := Button.new()
+		row.text = "◈ " + String(entry.get("title", ""))
+		row.flat = true
+		row.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		row.focus_mode = Control.FOCUS_NONE
+		row.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		row.add_theme_color_override("font_color", Color(c["accent2"].r, c["accent2"].g, c["accent2"].b, 0.9))
+		row.tooltip_text = String(entry.get("rel", ""))
+		var rel := String(entry.get("rel", ""))
+		row.pressed.connect(func(): backlink_selected.emit(rel))
+		backlinks_box.add_child(row)
+	if backlinks.size() > shown:
+		backlinks_box.add_child(_more_label(backlinks.size() - shown))
+	if backlinks.is_empty():
+		var empty := Label.new()
+		empty.text = "No notes link here."
+		empty.add_theme_color_override("font_color", Color(c["text"].r, c["text"].g, c["text"].b, 0.5))
+		empty.add_theme_font_size_override("font_size", maxi(11, GameManager.font_size - 3))
+		backlinks_box.add_child(empty)
+
 ## Passive overflow note (children list is scrollable, so it stays a label).
 func _more_label(count: int) -> Label:
 	var more := Label.new()
@@ -311,11 +369,14 @@ func _more_label(count: int) -> Label:
 	more.add_theme_font_size_override("font_size", maxi(11, GameManager.font_size - 3))
 	return more
 
-## Switch the folder card's tab and re-render in place.
+## Switch the card's tab and re-render in place. The child tab only exists on
+## folder cards, so a stale note model never switches to it.
 func _set_tab(tab: String) -> void:
-	if _folder_tab == tab:
+	if _tab == tab:
 		return
-	_folder_tab = tab
+	if tab == "children" and String(_model.get("kind", "note")) != "folder":
+		return
+	_tab = tab
 	if not _model.is_empty():
 		_render()
 

@@ -55,10 +55,17 @@ func _ready() -> void:
 	_check("dedicated toggle is visible", main.toolbar.graph_toggle_btn.visible)
 	var popup: PopupMenu = main.toolbar.more_menu
 	var graph_items := 0
+	var save_items := 0
 	for i in popup.item_count:
 		if popup.get_item_text(i).contains("Graph"):
 			graph_items += 1
+		if popup.get_item_text(i).contains("Save Now"):
+			save_items += 1
 	_check("⋮ no longer offers the graph", graph_items == 0)
+	_check("⋮ no longer offers Save Now", save_items == 0)
+	_check("⋮ menu rows are padded for touch",
+		popup.get_theme_constant("v_separation") >= 10
+		and popup.get_theme_constant("item_start_padding") >= 10)
 	main.layout_component.update_layout(true)
 	_check("the toggle survives the cramped toolbar", main.toolbar.graph_toggle_btn.visible)
 
@@ -144,6 +151,25 @@ func _ready() -> void:
 	main.graph_view.focus_note("A.md")
 	await get_tree().process_frame
 	_check("the full view shows the focus card", main.focus_card.is_open())
+
+	# Backlink rows are navigation: focusing B (inside Folder) lists A, and a
+	# press on that row leaves the folder scope for A's node and re-renders the
+	# card. This is the card signal → Main → GraphView.focus_note() path.
+	main.graph_view.focus_note("Folder/B.md")
+	await get_tree().process_frame
+	var b_model: Dictionary = main.focus_card.model()
+	var b_backlinks: Array = b_model.get("backlinks", [])
+	_check("the focus card lists the note's backlink",
+		b_backlinks.size() == 1 and String(b_backlinks[0]["rel"]) == "A.md")
+	(main.focus_card.tab_backlinks as BaseButton).pressed.emit()
+	var backlink_row := main.focus_card.backlinks_box.get_child(0) as BaseButton
+	backlink_row.pressed.emit()
+	await get_tree().process_frame
+	_check("a backlink row refocuses the map",
+		String(main.graph_view.view_state().get("selected_note", "")) == "A.md")
+	_check("a backlink row updates the card",
+		String(main.focus_card.model().get("rel", "")) == "A.md")
+
 	main._toggle_graph_expanded()
 	await get_tree().process_frame
 	_check("contracting returns to the dock", main.graph_docked and not main.graph_expanded)

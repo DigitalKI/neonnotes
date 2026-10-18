@@ -37,7 +37,6 @@ var note_title: Label
 var toolbar: Control
 var content_host: ScrollContainer
 var more_btn: Control
-var help_btn: Control
 var backlinks_btn: Control
 var export_btn: Control
 var status_bar: Control
@@ -136,7 +135,6 @@ func update_layout(force: bool = false) -> void:
 	# (⋮ itself is ALWAYS visible — it hosts Delete etc. on desktop too)
 	var cramped := mobile or vp.x < 980.0
 	more_btn.visible = true
-	help_btn.visible = not cramped
 	backlinks_btn.visible = not cramped
 	export_btn.visible = not cramped
 	if mobile:

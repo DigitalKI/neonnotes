@@ -6,9 +6,6 @@ extends PopupMenu
 ## scene-authored child popup by itself \u2014 main.gd opens it from
 ## MoreBtn.pressed (same pattern as export_menu.tscn).
 
-const ID_SAVE_NOW := 30
 const ID_MOVE := 34
 const ID_DELETE_NOTE := 31
-const ID_TRASH := 32
-const ID_HELP := 10
 const ID_BACKLINKS := 11

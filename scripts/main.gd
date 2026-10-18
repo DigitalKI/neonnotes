@@ -30,6 +30,8 @@ const MONO_FONT := preload("res://assets/fonts/ShareTechMono-Regular.ttf")
 @onready var editor: NoteEditor = %Content
 @onready var graph_view: GraphView = %GraphView
 @onready var focus_card: GraphFocusCard = %GraphFocusCard
+## Floating backlinks card over the note column (not the old tree footer panel).
+@onready var backlinks_card: BacklinksCard = %BacklinksCard
 @onready var graph_nav: GraphNavBar = %GraphNavBar
 @onready var links_page: GraphLinksPage = %GraphLinksPage
 @onready var sync_page: SyncPage = %SyncPage
@@ -142,7 +144,6 @@ func _phase_theme_layout() -> void:
 	layout_component.toolbar = toolbar
 	layout_component.content_host = %ContentHost
 	layout_component.more_btn = toolbar.more_btn
-	layout_component.help_btn = toolbar.help_btn
 	layout_component.backlinks_btn = toolbar.backlinks_btn
 	layout_component.export_btn = toolbar.export_btn
 	layout_component.status_bar = status_bar
@@ -180,6 +181,8 @@ func _phase_theme_layout() -> void:
 	_update_delete_controls(0)
 	vault_tree.build()
 	vault_tree.config_btn.pressed.connect(_toggle_settings)
+	vault_tree.help_btn.pressed.connect(_show_help)
+	vault_tree.trash_btn.pressed.connect(_open_trash)
 	capture_page.bind(_flash)
 	capture_page.captured.connect(_on_captured)
 	# ✕ Close must leave the capture page like any other page's close; without
@@ -202,9 +205,11 @@ func _phase_theme_layout() -> void:
 	_digest_store.name = "GraphDigestStore"
 	add_child(_digest_store)
 	_digest_store.digest_ready.connect(_on_digest_ready)
-	# Card rows navigate: a child press focuses that node on the map; a tag
-	# chip filters the vault exactly like typing "#tag" into the tree search.
+	# Card rows navigate: a child or backlink press focuses that node on the map
+	# (revealing the scope/page hiding it); a tag chip filters the vault exactly
+	# like typing "#tag" into the tree search.
 	focus_card.child_selected.connect(_focus_card_child)
+	focus_card.backlink_selected.connect(_focus_card_child)
 	focus_card.tag_selected.connect(_filter_by_tag_from_card)
 	focus_card.links_opened.connect(_open_graph_links_page)
 	focus_card.title_opened.connect(_open_graph_note)
@@ -396,7 +401,7 @@ func _on_metadata_ready() -> void:
 	_boot_mark("metadata")
 	_card_maps.clear()
 	_refresh_list()
-	if vault_tree.backlinks_panel.visible:
+	if backlinks_card.visible:
 		_refresh_backlinks()
 
 
@@ -472,8 +477,10 @@ func _build_dynamic_ui() -> void:
 	toolbar.menu_btn.pressed.connect(layout_component.toggle_sidebar)
 	toolbar.new_btn.pressed.connect(_on_new_note)
 	toolbar.mode_btn.pressed.connect(func(): editor.toggle_mode())
-	toolbar.help_btn.pressed.connect(_show_help)
 	toolbar.backlinks_btn.pressed.connect(_toggle_backlinks)
+	# A backlink row navigates like a tree click: reveal + open through the tree,
+	# so selection, graph-follow, drawer close and flush stay on one path.
+	backlinks_card.backlink_selected.connect(func(rel: String): vault_tree.select_note(rel))
 	toolbar.graph_toggle_btn.pressed.connect(_toggle_graph)
 	slash_menu.name = "SlashMenu"
 	add_child(slash_menu)
@@ -632,7 +639,7 @@ func _load_note_into_editor(fname: String) -> void:
 	editor.load_note(fname, source)
 	_boot_mark("note-highlight")
 	help_folder = fname.get_base_dir() if fname.contains("/") else ""
-	if vault_tree.backlinks_panel.visible:
+	if backlinks_card.visible:
 		_refresh_backlinks()
 
 func _on_new_note() -> void:
@@ -664,14 +671,19 @@ func _clear_open_note() -> void:
 	GameManager.current_file = ""
 	GameManager.current_rel = ""
 	editor.code_edit.text = ""
+	if backlinks_card.visible:
+		_refresh_backlinks()
 
 # ------------------------------------------------- help
 
 ## Help behaves like opening a note: it replaces any page and, on mobile,
 ## collapses the tree drawer so the help content is full-screen.
 func _show_help() -> void:
+	# Help replaces whatever page is open (Settings, Trash, Capture, …):
+	# close it first so its content is hidden and the note view is restored
+	# before the Help document takes over.
 	if page_mode != "":
-		return  # a page owns the screen until it closes
+		_close_page()
 	editor.show_help()
 	# Help replaces the note view, so the full map gives the screen up; the
 	# docked panel is a navigation side panel and can stay beside the help text.
@@ -811,8 +823,10 @@ func _apply_card_layout() -> void:
 		else {"left": 0.0, "top": 0.0, "right": 0.0, "bottom": 0.0}
 	graph_view.view_inset = inset
 
-## A child row in a folder card was pressed: focus it on the map, or open the
-## note when the map cannot reach it (off-page under the pagination limit).
+## A child or backlink row was pressed: focus it on the map, or open the note
+## when the map cannot reach it (unknown path / not part of the hierarchy).
+## `GraphView.focus_note()` enters a collapsed aggregate or turns the page when
+## the target's scope is not currently laid out, so it opens hidden areas.
 func _focus_card_child(rel: String) -> void:
 	if not graph_view.focus_note(rel):
 		_open_graph_note(rel)
@@ -973,10 +987,10 @@ func _theme_dialogs() -> void:
 	capture_page.apply_theme()
 
 func _toggle_backlinks() -> void:
-	vault_tree.toggle_backlinks()
+	backlinks_card.toggle()
 
 func _refresh_backlinks() -> void:
-	vault_tree.refresh_backlinks()
+	backlinks_card.refresh()
 
 ## The toolbar's graph toggle (top-right, always visible). On desktop it opens
 ## the dock — the map beside the note — and closes it again; on a phone the map
@@ -1407,18 +1421,11 @@ func _flash(msg: String) -> void:
 
 func _on_more_action(id: int) -> void:
 	match id:
-		MoreMenuComponent.ID_SAVE_NOW:
-			editor.flush()
-			_flash("✓ Saved")
 		MoreMenuComponent.ID_DELETE_NOTE:
 			if not vault_tree.side_tree.get_selected() == vault_tree.side_tree.get_root():
 				_delete_current_note()
 		MoreMenuComponent.ID_MOVE:
 			_move_selected()
-		MoreMenuComponent.ID_TRASH:
-			_open_trash()
-		MoreMenuComponent.ID_HELP:
-			_show_help()
 		MoreMenuComponent.ID_BACKLINKS:
 			_toggle_backlinks()
 		_:

@@ -214,6 +214,7 @@ static func note_card(rel: String, digest: Dictionary, resolve_maps: Array = [])
 		"title": GameManager.note_title(rel),
 		"tags": tags_for(rel),
 		"links": outbound,
+		"backlinks": backlinks_for(rel),
 		"children": [] as Array[String],
 		"excerpt": String(digest.get("excerpt", "")),
 		"preview": String(digest.get("preview", "")),
@@ -258,6 +259,7 @@ static func folder_card(rel: String, digest: Dictionary) -> Dictionary:
 		"title": GameManager.note_title(rel),
 		"tags": own,
 		"links": [] as Array[Dictionary],
+		"backlinks": backlinks_for(rel),
 		"children": children,
 		"child_count": children.size(),
 		"excerpt": String(digest.get("excerpt", "")),
@@ -286,5 +288,23 @@ static func tags_for(rel: String) -> Array[String]:
 		var s := String(tag)
 		if s != "" and not out.has(s):
 			out.append(s)
+	return out
+
+## Notes that link to this one, ready for the card's backlinks tab. Backlinks
+## come from the in-memory link index (`WikiLinks.backlinks`), so the card can
+## render them without touching disk.
+static func backlinks_for(rel: String) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for source in WikiLinks.backlinks(rel):
+		out.append({
+			"rel": source,
+			"title": GameManager.note_title(source),
+		})
+	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		var at := String(a["title"])
+		var bt := String(b["title"])
+		if at == bt:
+			return String(a["rel"]) < String(b["rel"])
+		return at < bt)
 	return out
 

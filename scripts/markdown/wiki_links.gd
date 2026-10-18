@@ -30,12 +30,22 @@ static func resolve_with(target: String, maps: Array) -> String:
 static func backlinks(target: String) -> Array[String]:
 	# Answers from the cached link index — previously this read every note
 	# body off disk each time the backlinks panel refreshed.
+	#
+	# Resolve both sides to a concrete vault path instead of comparing raw
+	# basenames. Callers legitimately pass either a bare stem ("note") or a
+	# vault-relative path ("folder/note.md"); comparing stems made the graph
+	# card (full rel) and the toolbar backlinks card (bare stem) disagree when
+	# a note was linked by path. Resolving also folds [[note]], [[note.md]],
+	# and [[folder/note]] into the same target.
+	var maps := resolve_maps()
+	var wanted := resolve_with(target.get_basename(), maps)
+	if wanted == "":
+		return []
 	var result: Array[String] = []
-	var want := target.strip_edges().get_basename().to_lower()
 	for filename in GameManager.notes:
-		if filename.get_basename().to_lower() == want: continue
+		if filename == wanted: continue
 		for link in GameManager.links.get(filename, []):
-			if String(link).get_basename().to_lower() == want:
+			if resolve_with(String(link).get_basename(), maps) == wanted:
 				result.append(filename)
 				break
 	return result

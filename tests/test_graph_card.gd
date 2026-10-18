@@ -109,7 +109,11 @@ func _run_view_model_checks(check: Callable) -> void:
 		"sec.md": ["alpha"] as Array, "sec/one.md": ["beta"] as Array,
 		"sec/two.md": ["alpha", "gamma"] as Array,
 	}
-	GameManager.links = {"sec.md": ["Other Note", "nowhere"] as Array}
+	GameManager.links = {
+		"sec.md": ["Other Note", "nowhere"] as Array,
+		"Other Note.md": ["sec"] as Array,
+		"sec/one.md": ["sec.md"] as Array,
+	}
 
 	var note_model: Dictionary = GraphDigest.note_card("sec.md", {}, WikiLinks.resolve_maps())
 	check.call("note card falls back to the index title", String(note_model["title"]) == "Section")
@@ -121,6 +125,38 @@ func _run_view_model_checks(check: Callable) -> void:
 		and String(links[1]["resolved"]) == "" and String(links[1]["raw"]) == "nowhere")
 	check.call("note card is flagged as not-yet-detailed", not bool(note_model["detail_ready"]))
 	check.call("note card has no children", (note_model["children"] as Array).is_empty())
+	var backlinks: Array = note_model["backlinks"]
+	check.call("note card lists notes that link here",
+		backlinks.size() == 2 and String(backlinks[0]["rel"]) == "sec/one.md"
+		and String(backlinks[1]["rel"]) == "Other Note.md")
+	check.call("backlink rows carry their display title",
+		String(backlinks[0]["title"]) == "One" and String(backlinks[1]["title"]) == "Other Note")
+	var self_listed := false
+	for entry in backlinks:
+		if String(entry["rel"]) == "sec.md":
+			self_listed = true
+	check.call("a note never lists itself as a backlink", not self_listed)
+
+	# Resolution, not raw basename equality: the toolbar card passes a stem and
+	# the graph card passes a vault-relative path, so [[target]], [[target.md]]
+	# and [[folder/...]] links must all count for the same note.
+	var saved_notes: Array[String] = GameManager.notes
+	var saved_links: Dictionary = GameManager.links
+	var saved_titles: Dictionary = GameManager.titles
+	GameManager.notes = ["target.md", "a.md", "b.md", "folder/c.md"]
+	GameManager.titles = {}
+	GameManager.links = {
+		"a.md": ["target"] as Array,
+		"b.md": ["target.md"] as Array,
+		"folder/c.md": ["target"] as Array,
+	}
+	var by_rel: Array[String] = WikiLinks.backlinks("target.md")
+	var by_stem: Array[String] = WikiLinks.backlinks("target")
+	check.call("backlinks resolve bare, extensioned and nested wiki-links",
+		by_rel == (["a.md", "b.md", "folder/c.md"] as Array) and by_stem == by_rel)
+	GameManager.notes = saved_notes
+	GameManager.links = saved_links
+	GameManager.titles = saved_titles
 
 	var folder_model: Dictionary = GraphDigest.folder_card("sec.md", {"excerpt": "inside"})
 	check.call("folder detected by its children", GraphDigest.is_folder("sec.md"))
@@ -166,6 +202,11 @@ func _run_card_checks(check: Callable) -> void:
 	check.call("card hides the children section for a note", not card.children_scroll.visible)
 	check.call("card renders the source preview", card.preview_scroll.visible
 		and card.preview_box.get_child_count() > 0)
+	check.call("note card shows content and backlinks tabs",
+		card.tabs_row.visible and card.tab_content.visible
+		and not card.tab_children.visible and card.tab_backlinks.visible)
+	check.call("note card starts on the content tab",
+		card.tab_content.disabled and not card.tab_backlinks.disabled)
 	check.call("card meta is human readable",
 		card.meta_label.text.contains("created Mar 4, 2020")
 		and card.meta_label.text.contains("edited today")
@@ -241,8 +282,35 @@ func _run_card_checks(check: Callable) -> void:
 	(card.tab_content as BaseButton).pressed.emit()
 	check.call("content tab shows the preview", card.preview_scroll.visible
 		and not card.children_scroll.visible)
+
+	# Backlinks tab: available on both card kinds; its third position on a
+	# folder card follows Content and Children.
+	(card.tab_backlinks as BaseButton).pressed.emit()
+	check.call("folder backlinks tab lists notes linking here",
+		card.backlinks_scroll.visible and card.backlinks_box.get_child_count() == 2)
+	check.call("backlinks tab replaces the body and child list",
+		not card.preview_scroll.visible and not card.children_scroll.visible
+		and not card.children_header.visible)
+	check.call("backlinks header counts the rows",
+		card.backlinks_header.text == "⇠ BACKLINKS · 2")
+	var picked_backlink := [""]
+	card.backlink_selected.connect(func(rel: String) -> void: picked_backlink[0] = rel)
+	(card.backlinks_box.get_child(0) as BaseButton).pressed.emit()
+	check.call("backlink row press carries the source note",
+		picked_backlink[0] == "sec/one.md")
 	card.show_model(GraphDigest.note_card("sec.md", {}, []))
-	check.call("note card has no tabs", not card.tabs_row.visible)
+	check.call("note card keeps the backlinks tab",
+		card.tabs_row.visible and card.tab_backlinks.visible
+		and not card.tab_children.visible)
+	(card.tab_backlinks as BaseButton).pressed.emit()
+	check.call("note card backlinks tab shows the list",
+		card.backlinks_scroll.visible and not card.preview_scroll.visible)
+	card.show_model({"kind": "note", "title": "Lonely", "tags": [], "children": [],
+		"links": [], "backlinks": [], "excerpt": "", "created": "", "updated": ""})
+	(card.tab_backlinks as BaseButton).pressed.emit()
+	check.call("empty backlinks tab explains itself",
+		card.backlinks_scroll.visible and card.backlinks_header.text == "⇠ BACKLINKS · 0"
+		and (card.backlinks_box.get_child(0) as Label).text == "No notes link here.")
 
 	host.queue_free()
 
