@@ -8,6 +8,7 @@ const TextMatchScript := preload("res://scripts/common/text_match.gd")
 const TextSearchScript := preload("res://scripts/common/text_search.gd")
 const KnowledgeIndexScript := preload("res://scripts/common/knowledge_index.gd")
 const RelationshipEngineScript := preload("res://scripts/common/relationship_engine.gd")
+const LinkCommandScript := preload("res://scripts/common/link_command.gd")
 
 var failures := 0
 
@@ -22,6 +23,7 @@ func _init() -> void:
 	_check_graph_model()
 	_check_knowledge_index()
 	_check_explicit_relationships()
+	_check_link_command()
 	_check_inbox_path()
 	_check_media_import()
 	_check_dev_session_detection()
@@ -371,6 +373,23 @@ func _check_explicit_relationships() -> void:
 		"relationships are typed by provenance and kind")
 	_check(r0["evidence"].is_empty() and r0["source_locations"].is_empty(),
 		"explicit relationships carry no evidence until Phase 2")
+
+## LinkCommand text transforms: canonical target form, append (idempotent) and
+## strip (alias-aware, escape-safe) — the pure half of Phase 1's link editing.
+func _check_link_command() -> void:
+	var notes: Array[String] = ["A.md", "B.md", "Folder/Note.md", "Other/Note.md"]
+	_check(LinkCommandScript.link_target_for("B.md", notes) == "B",
+		"a unique bare name is the short link target")
+	_check(LinkCommandScript.link_target_for("Folder/Note.md", notes) == "Folder/Note",
+		"a duplicated basename uses the vault-relative path")
+	var appended := LinkCommandScript.append_link("# A\n\ntext\n", "B")
+	_check(appended.ends_with("\n[[B]]\n"), "append places the link on its own line")
+	_check(LinkCommandScript.append_link(appended, "B") == appended,
+		"append is idempotent when the link already exists")
+	_check(LinkCommandScript.strip_link("see [[B|the bee]] and [[Folder/Note]]", "B") == "see  and [[Folder/Note]]",
+		"strip removes an aliased link")
+	_check(LinkCommandScript.strip_link("literal \\[[B]] text", "B") == "literal \\[[B]] text",
+		"strip leaves an escaped link alone")
 
 func _check_tag_suggest() -> void:
 	_check(TagMatchScript.score("jw", "jw") == 0, "exact tag match ranks first")

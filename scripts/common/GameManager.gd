@@ -720,6 +720,31 @@ func _apply_note_meta(name: String, meta: Dictionary) -> void:
 func refresh_index() -> void:
 	index.build()
 
+## Add an explicit [[wiki-link]] from `src_rel` to `dst_rel` (ADR-0013 Phase 1).
+## Writes canonical Markdown; a no-op when the link is already present. Returns
+## true when the note changed.
+func link_notes(src_rel: String, dst_rel: String) -> bool:
+	if src_rel == "" or dst_rel == "" or src_rel == dst_rel:
+		return false
+	var text := read_note(src_rel)
+	var out := LinkCommand.append_link(text, LinkCommand.link_target_for(dst_rel, notes))
+	if out == text:
+		return false
+	write_note(src_rel, out)
+	return true
+
+## Remove every [[wiki-link]] from `src_rel` that targets `dst_rel`. Returns true
+## when the note changed.
+func unlink_notes(src_rel: String, dst_rel: String) -> bool:
+	if src_rel == "" or dst_rel == "":
+		return false
+	var text := read_note(src_rel)
+	var out := LinkCommand.strip_link(text, LinkCommand.link_target_for(dst_rel, notes))
+	if out == text:
+		return false
+	write_note(src_rel, out)
+	return true
+
 
 func _read_note_meta_abs(path: String) -> Dictionary:
 	return _parse_note_meta(TextIO.read_text(path))

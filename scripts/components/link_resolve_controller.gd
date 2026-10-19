@@ -76,12 +76,7 @@ func create_link(target: String) -> void:
 ## Link target to write for `rel`: the bare name when it is unique across the
 ## vault (Obsidian-friendly), otherwise the vault-relative path.
 func _link_target_for(rel: String) -> String:
-	var noext := rel.trim_suffix(".md")
-	var base := noext.get_file()
-	for other in GameManager.notes:
-		if other != rel and String(other).trim_suffix(".md").get_file() == base:
-			return noext
-	return base
+	return LinkCommand.link_target_for(rel, GameManager.notes)
 
 
 ## Every note as a ranking candidate: match on the vault path and the bare name.
