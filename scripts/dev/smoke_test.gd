@@ -51,7 +51,7 @@ func _run_smoke() -> void:
 		GameManager.current_file = GameManager.vault_abs() + "/features.md"
 		GameManager.current_rel = "features.md"
 		m.code_edit.text = _SMOKE_FEATURES
-		m.note_title.text = "Features"
+		m.toolbar.note_title.text = "Features"
 		m.editor.render_preview()
 		for i in 6:
 			await m.get_tree().process_frame
@@ -74,7 +74,7 @@ func _run_smoke() -> void:
 		m.editor.help_mode = false
 		m.editor.source_mode = false
 		m.code_edit.text = "---\ntitle: \"Smoke\"\n---\n\n[[Demo]]\n\n%%g%% ++f++"
-		m.note_title.text = "Smoke"
+		m.toolbar.note_title.text = "Smoke"
 		m.editor.render_preview()
 	# tree with folders
 	GameManager.write_note("sub/demo.md", "---\ntitle: \"Sub\"\n---\n\nhi\n")
