@@ -55,6 +55,12 @@ phone ↔ PC over the local network.
   segfaults headless. Needs bundled FFmpeg or a GDExtension.
 - **Sync hardening** — content hashes, conflict detection, cryptographic
   pairing, encrypted transport.
+- **Easy vault switching** — a device-local known-vaults registry (path → vault
+  id + pairing/peer state) with a picker that switches vaults while preserving
+  per-vault pairing. `INV-021`/`INV-028` already key identity by vault id, so
+  switching away and back keeps peers. Identity stays on `GameManager` for now;
+  a first-class `VaultRegistry` service is planned (see
+  `architecture/gamemanager-split.md`).
 - **APK hygiene** — `include_filter="*.md"` currently ships `README.md`,
   `AGENTS.md`, and this context kit; only `docs/help.md` is needed at runtime.
 

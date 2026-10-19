@@ -1,6 +1,13 @@
 # RelationshipEngine & KnowledgeIndex — design
 
-_Status: proposal (Phase 0 of the graph-as-editor plan, ADR-0013) · not yet implemented_
+_Status: partially implemented (Phase 0 of the graph-as-editor plan, ADR-0013)_
+
+_Implemented: `RelationshipEngine` — the pure read-side queries (`resolve_maps`,
+`resolve`, `resolve_with`, `backlinks`, `notes_linking_to`, `all_tags`,
+`inbox_notes`, `note_title`). `WikiLinks` and `GameManager` delegate to it;
+public APIs are unchanged. Still planned: the `KnowledgeIndex` data holder, the
+`KnowledgeRelationship` shape, `explicit_relationships`, `build_neighbourhood`,
+and inference._
 
 Phase 0 turns the graph from a renderer over `GameManager`'s raw index into a
 layered read model shared by the graph editor, search, backlinks, and (later)
@@ -151,16 +158,18 @@ Phase 4 (candidate-phrase placement + edge inspection).
 
 ## Migration map
 
+_(done)_ marks rows already landed; the rest are planned.
+
 | Current symbol | New home |
 |---|---|
 | `GameManager.notes/titles/tags/links` | `KnowledgeIndex` fields |
 | `GameManager.scan_*` / `_index_note_metadata` / `_meta_for` | `KnowledgeIndex.build` (GameManager keeps the async drip + `metadata_ready`) |
-| `WikiLinks.resolve_maps/resolve/resolve_with` | `RelationshipEngine` |
-| `WikiLinks.backlinks` | `RelationshipEngine.backlinks` |
+| `WikiLinks.resolve_maps/resolve/resolve_with` | `RelationshipEngine` _(done)_ |
+| `WikiLinks.backlinks` | `RelationshipEngine.backlinks` _(done)_ |
 | `WikiLinks.graph` | `RelationshipEngine.explicit_relationships` |
 | `GraphModel._hierarchy` | `KnowledgeIndex` build (parent_of/children_of) |
 | `GraphModel.neighbours/compute_levels/build/_add_edges` | `RelationshipEngine` (build_neighbourhood + explicit_relationships) |
-| `GameManager.all_tags/inbox_notes/note_title/notes_linking_to` | `RelationshipEngine` |
+| `GameManager.all_tags/inbox_notes/note_title/notes_linking_to` | `RelationshipEngine` _(done)_ |
 | `GraphView._resolved_links/_rebuild_resolve_maps` | deleted → `KnowledgeIndex.resolved_links()` |
 | `GraphDigest` reads of `GameManager.links/tags/notes` | `RelationshipEngine` + `KnowledgeIndex` |
 

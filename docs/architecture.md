@@ -50,6 +50,7 @@ settings live in `user://settings.cfg`; exports and embedded media live under
 | `scripts/common/trash_store.gd` | Recoverable delete/restore/purge in `vault/.trash/` |
 | `scripts/common/vault_move.gd` | Pure move/rename + wiki-link rewrite; empty-folder prune helper |
 | `scripts/common/path_remap.gd` | Static path remap helpers |
+| `scripts/common/relationship_engine.gd` | Pure read-side queries: resolve, backlinks, tags, inbox, titles |
 | `scripts/common/media_import.gd` | Image import, SAF/content URIs, destination naming |
 | `scripts/common/capture.gd` | Inbox capture/import API (`capture_text/link/image`, `import_markdown`) |
 | `scripts/common/tag_match.gd`, `text_match.gd`, `text_search.gd` | Tag ranking, edit distance, find-in-document |
@@ -87,9 +88,16 @@ settings live in `user://settings.cfg`; exports and embedded media live under
 | `tools/repo_map.py`, `tools/context_audit.py` | Context-kit generation/audit |
 
 _Planned (ADR-0013):_ a `KnowledgeIndex` (owned cache) → `RelationshipEngine`
-(pure read/inference) → `GraphModel` (data shape) → `GraphView` layering is
-designed but not yet implemented; see
+(pure read/inference) → `GraphModel` (data shape) → `GraphView` layering.
+`RelationshipEngine` now holds the read-side queries (resolve/backlinks/tags/
+inbox/titles); the `KnowledgeIndex` data holder, the `KnowledgeRelationship`
+shape, traversal (`build_neighbourhood`) and inference remain planned; see
 [`architecture/relationship-engine.md`](architecture/relationship-engine.md).
+
+_Planned (Phase 0):_ `GameManager` decomposes into owned `KnowledgeIndex` +
+`ThemeConfig` services (identity stays on the autoload; a `VaultRegistry` is
+planned for easy vault switching); see
+[`architecture/gamemanager-split.md`](architecture/gamemanager-split.md).
 
 ## 4. Data flows
 
