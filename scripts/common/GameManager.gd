@@ -139,7 +139,18 @@ var vault_dir := VAULT_DIR
 var dev_session := false  # true when this run is editor/MCP-driven (isolated vault)
 var current_file := ""  # absolute path of the open note ("" = none)
 var current_rel := ""   # vault-relative path of the open note ("" = none)
-var notes: Array[String] = []
+## Derived read model shared by the graph, backlinks and (later) the graph
+## editor (ADR-0013). Owns the raw note/title/tag/link data plus the derived
+## structure (folder spine, resolve maps, resolved links), rebuilt on
+## scan/write/move. The `notes`/`titles`/`tags`/`links` properties forward to it,
+## so consumers keep their existing `GameManager.notes`-style reads while the
+## index stays the single source of truth.
+var index := KnowledgeIndex.new()
+var notes: Array[String]:
+	get:
+		return index.notes
+	set(value):
+		index.notes = value
 ## In-memory half of the metadata index for the ACTIVE vault:
 ## rel -> {"m": mtime, "s": size, "t": title, "g": tags, "l": links}.
 var _meta_cache := {}
@@ -199,7 +210,6 @@ static func gen_device_code() -> String:
 
 
 func _ready() -> void:
-	index = KnowledgeIndex.new()
 	_load_settings()
 	# An explicitly-marked agent/test session (MCP `play_scene` sets
 	# NEONNOTES_DEV=1, or NEONNOTES_VAULT is set) must run against a disposable
@@ -572,15 +582,22 @@ func reset_vault_words() -> void:
 	_save_vault_identity()
 	sync_identity_changed.emit()
 
-var titles := {}  # relative path -> front-matter title ("" = use filename)
-var tags := {}    # relative path -> Array[String] from front-matter "tags:"
-var links := {}   # relative path -> Array[String] outbound [[wiki-link]] targets
+var titles: Dictionary:
+	get:
+		return index.titles
+	set(value):
+		index.titles = value
+var tags: Dictionary:
+	get:
+		return index.tags
+	set(value):
+		index.tags = value
+var links: Dictionary:
+	get:
+		return index.links
+	set(value):
+		index.links = value
 var links_ready := false  # true once scan_notes() has indexed the whole vault
-## Derived read model shared by the graph, backlinks and (later) the graph
-## editor (ADR-0013). GameManager owns it and rebuilds it on scan/write/move so
-## the folder-as-note spine, resolve maps and resolved links are computed once,
-## not re-derived per query by every consumer.
-var index: KnowledgeIndex
 # custom sort order per folder: {"folder/sub": ["note.md", …]} persisted in
 # vault/.neonnotes.json (synced like a note, tiny and human-readable)
 const ORDER_FILE := ".neonnotes.json"
@@ -696,16 +713,11 @@ func _apply_note_meta(name: String, meta: Dictionary) -> void:
 	tags[name] = meta["tags"]
 	links[name] = meta["links"]
 
-## Rebuild the derived `index` snapshot from the current raw fields. Called after
-## every scan/write/move that changes notes/titles/tags/links, so consumers read
-## a fresh derivation without re-deriving it themselves (ADR-0013).
+## Rebuild the derived structure from the current raw fields (which live in the
+## index via the forwarding properties above). Called after every scan/write/
+## move, so consumers read a fresh derivation without re-deriving it themselves
+## (ADR-0013).
 func refresh_index() -> void:
-	if index == null:
-		index = KnowledgeIndex.new()
-	index.notes = notes
-	index.titles = titles
-	index.tags = tags
-	index.links = links
 	index.build()
 
 

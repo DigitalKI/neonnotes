@@ -4,16 +4,15 @@ _Status: complete (Phase 0 of the graph-as-editor plan, ADR-0013)_
 
 Phase 0 is landed: the relationship/provenance model is defined and the layered
 read model is wired end-to-end with no visible behavior change — `GameManager`
-owns a `KnowledgeIndex` snapshot (`index` + `refresh_index()`, rebuilt on
-scan/write/move); `RelationshipEngine` carries the read side
-(`explicit_relationships`) and all traversal (`neighbours`, `compute_levels`,
-`build_neighbourhood`); `GraphModel` is a pure data shape; `GraphView` serves
-resolved links and the level map from the shared index/engine, and
-`WikiLinks.graph` delegates to `explicit_relationships` + the index spine.
-`WikiLinks` and `GameManager` keep their public APIs. `tests/run_tests.sh` is
-green throughout. Phase 1 (explicit graph editing) and Phase 2 (inference) are
-next; the raw fields still live on `GameManager` and move into `KnowledgeIndex`
-as an incremental cleanup (see the migration map).
+owns a `KnowledgeIndex` (`index` + `refresh_index()`, rebuilt on scan/write/move);
+`RelationshipEngine` carries the read side (`explicit_relationships`) and all
+traversal (`neighbours`, `compute_levels`, `build_neighbourhood`); `GraphModel`
+is a pure data shape; `GraphView` serves resolved links and the level map from
+the shared index/engine, and `WikiLinks.graph` delegates to
+`explicit_relationships` + the index spine. `WikiLinks` and `GameManager` keep
+their public APIs (`notes`/`titles`/`tags`/`links` now forward to the index, so
+it is the single owner of the raw data). `tests/run_tests.sh` is green
+throughout. Phase 1 (explicit graph editing) and Phase 2 (inference) are next.
 
 Phase 0 turns the graph from a renderer over `GameManager`'s raw index into a
 layered read model shared by the graph editor, search, backlinks, and (later)
@@ -168,8 +167,8 @@ _(done)_ marks rows already landed; the rest are planned.
 
 | Current symbol | New home |
 |---|---|
-| `GameManager.notes/titles/tags/links` | `KnowledgeIndex` fields |
-| `GameManager.scan_*` / `_index_note_metadata` / `_meta_for` | `KnowledgeIndex.build` (GameManager keeps the async drip + `metadata_ready`) |
+| `GameManager.notes/titles/tags/links` | `KnowledgeIndex` fields _(done — forwarding properties)_ |
+| `GameManager.scan_*` / `_index_note_metadata` / `_meta_for` | `KnowledgeIndex.build` (GameManager keeps the async drip + `metadata_ready`) _(done — build is the index's recompute)_ |
 | `WikiLinks.resolve_maps/resolve/resolve_with` | `RelationshipEngine` _(done)_ |
 | `WikiLinks.backlinks` | `RelationshipEngine.backlinks` _(done)_ |
 | `WikiLinks.graph` | `RelationshipEngine.explicit_relationships` _(done)_ |
@@ -177,7 +176,7 @@ _(done)_ marks rows already landed; the rest are planned.
 | `GraphModel.neighbours/compute_levels/build/_add_edges` | `RelationshipEngine` (build_neighbourhood + explicit_relationships) _(done)_ |
 | `GameManager.all_tags/inbox_notes/note_title/notes_linking_to` | `RelationshipEngine` _(done)_ |
 | `GraphView._resolved_links/_rebuild_resolve_maps` | deleted → `KnowledgeIndex.resolved_links()` _(done)_ |
-| `GraphDigest` reads of `GameManager.links/tags/notes` | `RelationshipEngine` + `KnowledgeIndex` (derived reads done via the engine; raw reads stay on `GameManager` until the raw-field move above) |
+| `GraphDigest` reads of `GameManager.links/tags/notes` | `RelationshipEngine` + `KnowledgeIndex` _(done — derived reads via the engine; raw reads forward to the index)_ |
 
 `WikiLinks` shrinks to a thin alias or is deleted; `GameManager.extract_wiki_links()`
 + `wiki_link_regex()` remain the single parser (they already own the canonical
