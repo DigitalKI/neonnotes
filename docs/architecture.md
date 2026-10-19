@@ -48,10 +48,12 @@ settings live in `user://settings.cfg`; exports and embedded media live under
 | `scripts/common/vault_move.gd` | Pure move/rename + wiki-link rewrite; empty-folder prune helper |
 | `scripts/common/path_remap.gd` | Static path remap helpers |
 | `scripts/common/media_import.gd` | Image import, SAF/content URIs, destination naming |
-| `scripts/common/capture.gd` | Inbox capture API (`capture_text/link/image`) |
+| `scripts/common/capture.gd` | Inbox capture/import API (`capture_text/link/image`, `import_markdown`) |
 | `scripts/common/tag_match.gd`, `text_match.gd`, `text_search.gd` | Tag ranking, edit distance, find-in-document |
 | `scripts/common/graph_digest.gd`, `graph_digest_store.gd` | Graph preview view-models + worker-thread cache |
 | `scripts/common/dev_session.gd` | Opt-in dev/MCP isolation policy |
+| `scripts/common/backup_service.gd` | Vault zip backup/restore, manifest, zip-slip, SAF URI copy |
+| `scripts/common/markdown_importer.gd` | Plain `.md` import; media skipped, title/created injected |
 | `scripts/markdown/markdown_parser.gd` | Unified block + inline parse; per-line model |
 | `scripts/markdown/markdown_highlighter.gd` | Editor tinting from parser spans/markers |
 | `scripts/markdown/wiki_links.gd` | Link extraction, resolution, backlinks, graph |
@@ -64,9 +66,11 @@ settings live in `user://settings.cfg`; exports and embedded media live under
 | `scripts/components/note_editor.gd` | Note view: editor + preview, autosave/flush, find, undo/redo, mobile selection, title/tags |
 | `scripts/components/vault_tree_component.gd` | Vault tree, drag/drop, move/delete orchestration, search/reveal |
 | `scripts/components/backlinks_card.gd` | Floating backlinks card over the note column; rows navigate through the tree |
-| `scripts/components/share_intake.gd` | OS share payload routing into `Capture`; plugin-free payload handling |
+| `scripts/components/share_intake.gd` | OS share/open-with payload routing into `Capture`; plugin-free payload handling |
 | `scripts/components/slide_surface.gd` | Floating-panel slide/dock transitions for the drawer and graph |
 | `scripts/components/edge_swipe_component.gd` | Mobile edge-drag claims (drawer/map), tap/scroll preservation |
+| `scripts/components/backup_page.gd` | Backup page: worker zip, in-app desktop save, Android SAF save |
+| `scripts/components/import_page.gd` | Import/Restore page: auto-detect, replace vs new vault |
 | `scripts/components/graph_*.gd` | Graph nav bar, focus card, radial menu, links page |
 | `scripts/components/*.gd` | Remaining shell components/pages: theme, layout, toolbar, selection, dialogs |
 | `scripts/dev/*.gd` | Benchmarks, probes, smoke driver; excluded from exports |
@@ -121,11 +125,11 @@ identity: `.neonnotes-id` in the vault; peers/phrase device-local in
 
 ### Capture and share
 `Capture.capture_text/link/image()` writes an ordinary note under `vault/Inbox/`
-and images under `vault/media/`, then registers the path. `ShareIntake` routes
-text/link and image payloads through `Capture`; non-image files are refused
-(the plugin copies them to app cache, not the vault). A received share triggers
-one rescan/refresh. The Inbox is a plain vault folder; only presentation is
-special (pinned row, not a move destination, not a graph node).
+and images under `vault/media/`; `import_markdown()` copies a `.md` file in
+unchanged. `ShareIntake` routes text/link/image and Markdown (shared or opened
+via Android's **Open with** picker) through `Capture`; other files are refused.
+The Inbox is a plain vault folder; only presentation is special (pinned row, not
+a move destination, not a graph node).
 
 ### Graph
 `GraphModel` builds levels/edges from `GameManager.notes` + `links`.
@@ -152,6 +156,14 @@ state; `_apply_dock_split()`/`_set_dock_split()` own the remembered divider.
 `ExportComponent` → `Exporter` (PNG 2×), `GifWriter` (worker), `HtmlExporter`;
 output under `vault/exports/`. Optional CRT FX is baked only when enabled.
 
+### Backup, restore and import
+`SettingsComponent.backup_cb/import_cb` → `Main._on_open_backup/import` →
+`PAGE_BACKUP`/`PAGE_IMPORT`. `BackupService` writes `manifest.json` + `vault/…`
+(hidden entries on) on a worker; Android copies the zip to a SAF URI. A backup
+offers replace (pre-restore snapshot, identity kept) or a new vault (fresh id,
+auto-switch). Other `.md` archives go through `MarkdownImporter` (plain `.md`,
+common wrapper stripped, bare note gets `title`/`created`); sync pauses/resumes.
+
 ## 5. Test map
 
 | Test | Guards |
@@ -177,6 +189,7 @@ output under `vault/exports/`. Optional CRT FX is baked only when enabled.
 | `tests/TestGraphTreeDrag.tscn` | Tree drop rebuilds the graph and follows the moved note |
 | `tests/TestSyncDeleteMove.tscn` | Loopback sync protocol, tombstones, moves |
 | `tests/TestPerVaultSync.tscn` | Per-vault identity, unpair/reset |
+| `tests/TestBackupImport.tscn` | Zip round-trip, zip-slip, hidden files, clear-vault identity, Markdown import |
 | Smoke (`NEONNOTES_SMOKE=1`) | End-to-end shell: notes, order, find, graph, sync |
 
 ## 6. Where to change X
@@ -208,6 +221,9 @@ output under `vault/exports/`. Optional CRT FX is baked only when enabled.
   `NEONNOTES_VAULT=<scratch>`, or the smoke vault — never the real vault.
 - **Add media/export:** import through `MediaImport` into `vault/media/`; render
   through `Exporter`/`GifWriter`/`HtmlExporter` into `vault/exports/`.
+- **Add a backup/import option:** `BackupService` (zip + manifest + SAF copy);
+  `MarkdownImporter` (plain `.md` only). Keep restore-always-asks and
+  Markdown-always-new-vault; extend `tests/TestBackupImport.tscn`.
 
 ## 7. Performance baselines
 

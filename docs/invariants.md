@@ -1,6 +1,6 @@
 # NeonNotes — Invariants & Gotchas
 
-_Last updated: 2026-10-17_
+_Last updated: 2026-10-18_
 
 Read this after [`architecture.md`](architecture.md). Rules here are timeless:
 state them as imperatives, link the guard, and never replace them with a dated
@@ -121,6 +121,46 @@ story. If a rule changes, change the code/test and this line together.
 - **INV-030 — Release APKs must include `android.permission.INTERNET`.** If sync
   fails with sub-200 ms connect timeouts, check the installed manifest and
   logcat first. Guard: both Android presets.
+
+## Backup & import
+
+- **INV-100 — Backup never contains secrets.** A backup zip includes the vault
+  (`media/`, `Inbox/`, `.trash/`, `.neonnotes.json`, `.neonnotes-id`) plus
+  `manifest.json`, but never `user://settings.cfg` or any sync phrase/peer data.
+  `exports/` is derived and excluded unless the user opts in. Guard:
+  `BackupService.vault_files`, `tests/TestBackupImport.tscn`.
+- **INV-101 — Never extract over the live vault.** Restore/import stages into
+  `user://backups`/`user://imports`, validates every zip entry (reject absolute,
+  `..`, empty segments — zip-slip), and only then clears/copies. A replace takes
+  an automatic pre-restore backup first. Guard: `BackupService.safe_rel_entry`,
+  `ImportPage._do_replace`.
+- **INV-102 — Restore always asks; replace is full, new gets a fresh id.** A
+  NeonNotes backup always presents **Replace current vault** and **Create new
+  vault**. Replace keeps the current `.neonnotes-id` and `exports/`, clears the
+  rest, and copies the backup in. A new vault drops the backup's id file so
+  `set_vault_dir()` mints a fresh identity, then auto-switches. Guard:
+  `ImportPage._do_replace/_do_new_vault`, `Main._on_backup_restore_done`.
+- **INV-103 — Markdown import always creates a new vault.** Nothing from a
+  Markdown folder/zip overwrites the current vault. Only `.md` files are copied;
+  non-Markdown media is skipped; no Obsidian/Anytype syntax conversion. Existing
+  front matter is copied verbatim; a note with none gets a minimal `title` and
+  `created` header. Guard: `MarkdownImporter`.
+- **INV-104 — Android backups leave app-private storage.** Save through the
+  Storage Access Framework (`DisplayServer.file_dialog_show` with
+  `FILE_DIALOG_MODE_SAVE_FILE`) and copy the finished zip to the returned
+  `content://` URI in chunks. Never leave the only copy in `user://` (wiped on
+  uninstall). Open/import likewise copies the SAF URI to a local temp first
+  because `ZIPReader` cannot open a URI. Guard: `BackupPage`, `ImportPage`.
+- **INV-105 — Vault walks enable hidden entries; Markdown walks do not.**
+  `DirAccess.include_hidden` defaults to `false`. Backup/restore must set it to
+  `true` (Trash, order file, vault id); Markdown import must leave it `false` so
+  `.obsidian/`, `.trash/`, and `.git/` are skipped. Guard:
+  `BackupService._collect_vault`, `MarkdownImporter._collect_md`.
+- **INV-106 — Backup/import work runs on a worker with progress + cancel.**
+  Flush the editor and pause sync discovery first (`is_discovery_running()`),
+  then run `BackupService`/`MarkdownImporter` on a `Thread`; resume discovery
+  only if it was running. Guard: `BackupPage`, `ImportPage`,
+  `Main._pause_sync_for_operation`.
 
 ## UI, navigation, mobile
 
@@ -301,7 +341,8 @@ story. If a rule changes, change the code/test and this line together.
   Warn on Android/iOS if the singleton is missing; never fail silently.
   Guard: `scripts/components/share_intake.gd`, `tests/TestShareIntake.tscn`.
 - **INV-085 — Share filters only advertise storable types.** Text, image, and
-  `SEND_MULTIPLE image/*`; re-apply the trim when upgrading the addon. Non-image
+  `SEND_MULTIPLE image/*`; Markdown is storable through the separate Open-with
+  activity. Re-apply the trim when upgrading the addon. Non-image, non-Markdown
   files are cache copies, not vault content; never create a note claiming they
   were saved.
   Guard: `addons/SharePlugin`, `tests/TestShareIntake.tscn`.
@@ -337,6 +378,15 @@ story. If a rule changes, change the code/test and this line together.
   Otherwise Undo can restore the previous note and autosave it. `MoreMenuComponent`
   shows Undo/Redo only while `NoteEditor.is_editing()`, greying out a direction
   the history cannot take. Guard: `tests/TestUndoRedo.tscn`.
+- **INV-093 — Android Open-with is separate from the share-target toggle.**
+  `addons/MarkdownOpen` injects an always-enabled `MarkdownOpenActivity` with
+  `ACTION_VIEW` filters for Markdown. It rewrites the intent as `ACTION_SEND`
+  and starts the Godot launcher, so SharePlugin/ShareIntake handles the file and
+  `Capture.import_markdown()` copies it into the Inbox unchanged. Do not route
+  it through the toggleable `ShareTargetActivity`, and do not make Open-with
+  depend on `GameManager.share_target_enabled`. Guard: `addons/MarkdownOpen`,
+  `scripts/components/share_intake.gd`, `tests/TestShareIntake.tscn`,
+  `tests/TestCapture.tscn`.
 
 ## Engine gotchas
 

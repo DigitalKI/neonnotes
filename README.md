@@ -71,6 +71,19 @@ be baked into exported images (`Apply CRT FX on export` in Settings). On Android
 you also get system sharing; on desktop, Share falls back to the clipboard and
 the OS file manager.
 
+### 💾 Backup, restore, and import
+**⚙ Settings ▸ 💾 Back up…** writes the whole vault to a single `.zip` — notes,
+media, Inbox, Trash, ordering, and the vault id, plus a manifest. On Android the
+system save picker puts the archive outside app-private storage (Downloads,
+Drive, etc.); on desktop you pick any folder. Exported PNG/GIF/HTML is excluded
+by default (there is a toggle).
+
+**⚙ Settings ▸ 📥 Import…** auto-detects the file. A NeonNotes backup offers
+**Replace current vault** (with an automatic pre-restore backup) or **Create new
+vault** (fresh identity, auto-switched). A folder or zip of Markdown always
+imports into a new vault; only `.md` files are copied (media is skipped), and a
+note without front matter gets a minimal `title`/`created` header.
+
 ### 📥 Inbox and capture
 **📥** at the top of the sidebar (beside the **🏷** tag browser) opens
 **Capture to Inbox** — paste a link or text, or import an image into
@@ -83,9 +96,15 @@ other note — drag one out to file it.
 On Android and iOS the system **share sheet** can post straight into the Inbox:
 share a link, an image or a piece of text to **NeonNotes** and it appears as an
 Inbox note (a shared link keeps the page title and its URL; shared images are
-imported into `vault/media/`). Links, images and text only — video, audio and
-documents are not offered, since NeonNotes cannot store them. Toggle the
-`Share to NeonNotes` entry in **⚙ Settings**.
+imported into `vault/media/`). The share sheet offers links, images and text
+only — video, audio and documents are not offered, since NeonNotes cannot store
+them. Toggle the `Share to NeonNotes` entry in **⚙ Settings**.
+
+On Android, NeonNotes also appears in the system **Open with** picker for
+Markdown files (`.md` / `.markdown`). Opening one copies it into the Inbox
+under its file name (unsafe characters sanitized), preserving its text and
+front matter, and leaves the original file where it is. The Open-with entry is independent of the
+`Share to NeonNotes` toggle.
 
 
 ### 📁 Moving notes
@@ -171,8 +190,8 @@ that the **release preset currently has `permissions/internet=false`**, so a
 release build will fail at LAN sync — set it to `true` there as well.
 
 Both Android presets use the **Gradle build** because `addons/SharePlugin`
-(incoming share sheet) is a v2 Android plugin and Godot only compiles a plugin's
-AAR into the APK through Gradle. Install the build template once from the editor
+(incoming share sheet) and `addons/MarkdownOpen` (Open with) are Android
+plugins, and Godot only compiles a plugin's AAR into the APK through Gradle. Install the build template once from the editor
 (**Project ▸ Install Android Build Template…**); after that the export commands
 above pick it up. The first Gradle export is noticeably slower than a plain one.
 
@@ -265,6 +284,8 @@ treated as a vault note.
 |---|---|
 | **📂 Select Vault** | Point the app at a different vault folder |
 | **⇄ Sync / Pair Devices** | Open the LAN sync page (pair, unpair, reset words) |
+| **💾 Back up…** | Save the whole vault as a `.zip` (outside app data on Android) |
+| **📥 Import…** | Restore a backup or import a folder/zip of Markdown |
 | **Graph neighbor levels** | How many hops the graph expands (1–10) |
 | **Open at startup** | Last opened page, or the vault homepage |
 | **Style** | Palette: Synthwave, Midnight Drive, Toxic Terminal, Arcade Sunset |
@@ -281,7 +302,7 @@ treated as a vault note.
 | `scenes/main/Main.tscn` | Authored UI shell; instances component subscenes |
 | `scripts/main.gd` | Wiring: modes, autosave, sync, pages, smoke test |
 | `scripts/common/GameManager.gd` | Autoload — vault state, scan, palettes, settings, link index |
-| `scripts/common/` | Vault CRUD, trash, media import, dev-session policy |
+| `scripts/common/` | Vault CRUD, trash, media import, backup/import, dev-session policy |
 | `scripts/markdown/` | Parser, highlighter, wiki-link extraction/resolution |
 | `scripts/render/` | Preview builder, chart view, graph model/view, FX |
 | `scripts/sync/` | LAN discovery, handshake, streaming transfer |

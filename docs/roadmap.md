@@ -1,6 +1,6 @@
 # NeonNotes — Roadmap
 
-_Last updated: 2026-10-17_
+_Last updated: 2026-10-18_
 
 Direction and open work only. Finished items are deleted (git is the history).
 Pending decisions state the question and the current recommendation.
@@ -16,12 +16,25 @@ phone ↔ PC over the local network.
 
 - **Sync re-verification** — LAN sync is already verified phone ↔ PC; re-run that
   check after any protocol/tombstone/manifest change.
+- **Backup/import on-device verification** — the SAF save/open paths compile and
+  are unit-tested, but the Android system pickers have only been reviewed from
+  the docs; verify save-to-Downloads/Drive and import-from-Files on a device.
+- **Obsidian/Anytype conversion** — import currently copies plain `.md` only
+  (media skipped, no syntax conversion). Add a normalization profile for
+  `![[image]]` embeds, heading/block anchors, aliases, inline tags, and multiline
+  front-matter tags.
+- **Backup automation** — manual backup + restore are built; consider
+  pre-destructive snapshots, retention, and optional encryption.
 - **Attachments** (proposed, not built): non-image shares (PDF, video, audio)
   are refused. Supporting them means importing bytes into the vault (e.g.
   `vault/files/`), rendering a link/placeholder, and syncing the bytes.
 - **Share-to end-to-end** — the intake is wired and the debug APK packages the
   plugin, but a real browser/Photos share has not been observed end-to-end.
   iOS only gains "Open With"; a share-sheet entry needs a Share Extension.
+- **Android Open-with end-to-end** — the always-enabled `ACTION_VIEW` bridge is
+  packaged and its merged manifest has been inspected, but opening a `.md` from
+  a real file manager has not been observed on-device. Verify the chooser entry,
+  cold and warm starts, the `content://` copy, and the Inbox import.
 - **Selection overlay** — confirm the magnifier feel and edge auto-scroll on a
   real device.
 - **Parser block cache** — the highlighter runs a full `parse()` per text
@@ -58,6 +71,10 @@ phone ↔ PC over the local network.
 - CRT overlay GPU cost measured ~15–16% on an AMD 820M; don't claim a GPU win
   without a fresh measurement.
 - Sync transport is unencrypted; trusted-LAN only.
+- Restored files get restore-time mtimes (`ZIPPacker` stores no per-file times),
+  so the first sync after a restore treats them as new writes.
+- Backup reads each file whole into memory (`ZIPPacker` has no streaming API);
+  a vault with very large media can spike memory on a phone.
 - Android share target needs one rendered frame after install; a dozing/locked
   phone never enables it.
 - Cold boot still scans on the main thread; the metadata cache only helps warm

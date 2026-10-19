@@ -308,6 +308,8 @@ Open **⚙ Settings** from the bottom of the sidebar.
 | --- | --- |
 | **📂 Select Vault** | Point the app at a different vault folder |
 | **⇄ Sync / Pair Devices** | Open the LAN sync page (section 15) |
+| **💾 Back up…** | Save the whole vault as a `.zip` (section 19) |
+| **📥 Import…** | Restore a backup or import Markdown (section 19) |
 | **Graph neighbor levels** | How many hops the graph expands (1–10) |
 | **Open at startup** | Last opened page, or the vault homepage |
 | **Style** | Palette: Synthwave, Midnight Drive, Toxic Terminal, Arcade Sunset |
@@ -408,8 +410,49 @@ app's **Share** button can post straight into your Inbox:
   title — only a shared *link* is titled with the page title).
 
 Videos, audio, PDFs and other documents are **not** offered: the share sheet only
-lists NeonNotes for links and images it can actually store, so it never promises
-something it would have to refuse.
+lists NeonNotes for links, text and images it can actually store, so it never
+promises something it would have to refuse. Markdown files use **Open with**
+instead (below).
 
 Turn the entry on or off with **⚙ Settings ▸ Share to NeonNotes** (the row is
 disabled on desktop, where there is no system share sheet).
+
+### Opening Markdown files on Android
+
+Android's file manager can open `.md` and `.markdown` files with NeonNotes.
+Pick **NeonNotes** in the **Open with** chooser and the file is copied into the
+Inbox under its file name (unsafe characters sanitized), then opened. The copy keeps the document's text
+and front matter unchanged; the original file is not moved. The Open-with entry
+is separate from **Share to NeonNotes** — turning sharing off does not remove
+it.
+
+## 19. Backup and import
+
+**⚙ Settings ▸ 💾 Back up…** writes the whole vault to one `.zip`: notes,
+nested folders, `media/`, `Inbox/`, `.trash/`, the ordering file, and the vault
+id, plus a `manifest.json`. Exported PNG/GIF/HTML under `exports/` is excluded
+by default; tick **Include exported files** to keep it. Backups are not
+encrypted, and the sync pairing phrase is never included.
+
+Choose where the archive goes. On **Android** the system save picker is used, so
+the file can land in **Downloads**, **Drive**, or another provider outside
+app-private storage — a zip left inside `user://` would disappear on uninstall.
+On **desktop** the themed save dialog lets you pick any folder. Both pickers
+list `.zip` archives only; a desktop name without an extension gets `.zip`
+appended.
+
+**⚙ Settings ▸ 📥 Import…** auto-detects what you chose:
+
+- **A NeonNotes backup** offers two choices. **Replace current vault** overwrites
+  the vault in place (after an automatic pre-restore backup) and keeps its
+  identity. **Create new vault** extracts into a new folder, gives it a fresh
+  identity, and switches to it.
+- **A folder or zip of Markdown** (Obsidian vault, Anytype export, or any plain
+  Markdown tree) always creates a **new vault** — it never overwrites. Only `.md`
+  files are copied; images and other media are skipped for now, and the Markdown
+  syntax is copied as-is. A note with no front matter gets a minimal `title` and
+  `created` header; existing front matter is preserved verbatim.
+
+Restoring or importing pauses sync, stages the files outside the live vault,
+and resumes sync when it finishes. The first sync after a restore may upload the
+restored files because their on-disk times are new.

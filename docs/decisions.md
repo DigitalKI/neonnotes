@@ -1,6 +1,6 @@
 # NeonNotes — Decisions
 
-_Last updated: 2026-10-17_
+_Last updated: 2026-10-18_
 
 Settled decisions only; pending questions live in [`roadmap.md`](roadmap.md).
 Most decisions are one line. A decision gets an ADR file when the rationale is
@@ -39,6 +39,15 @@ revisited.
 - **ADR-0010 — Metadata-first sync.** Probe fingerprint → manifest → only
   requested payloads; no file bodies in the hot path. →
   [`decisions/ADR-0010-metadata-first-sync.md`](decisions/ADR-0010-metadata-first-sync.md)
+- **ADR-0011 — Portable zip backups; restore asks, import makes a new vault.**
+  Manifest-tagged vault zip, SAF save on Android; replace keeps identity, new
+  vault gets a fresh id; Markdown import never overwrites. →
+  [`decisions/ADR-0011-backup-import.md`](decisions/ADR-0011-backup-import.md)
+- **ADR-0012 — Android Open-with reuses the share pipe.** An always-enabled
+  `ACTION_VIEW` activity rewrites Markdown intents as `ACTION_SEND`, so
+  SharePlugin/ShareIntake remain the only payload path; it is independent of
+  the share-target toggle. →
+  [`decisions/ADR-0012-android-open-with.md`](decisions/ADR-0012-android-open-with.md)
 
 ## One-line decisions
 
