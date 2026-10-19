@@ -55,14 +55,46 @@ phone ↔ PC over the local network.
   segfaults headless. Needs bundled FFmpeg or a GDExtension.
 - **Sync hardening** — content hashes, conflict detection, cryptographic
   pairing, encrypted transport.
-- **Graph-first direction (G1–G4)** — make the graph the centre: semantic zoom
-  node cards/digests, tag/content filters, explicit folder expand/collapse,
-  hover previews, create links from the graph. Neon City is the eventual 3D
-  skin over the same model. The completed label/layout pass was scoped
-  readability work, not the full visual redesign; decide whether G1 should
-  precede the Neon City redesign.
 - **APK hygiene** — `include_filter="*.md"` currently ships `README.md`,
   `AGENTS.md`, and this context kit; only `docs/help.md` is needed at runtime.
+
+### Graph as a knowledge-base editor
+
+_Replaces the former "Graph-first (G1–G4)" bullet. Rationale: ADR-0013._
+
+The graph becomes an interactive **editor and analysis surface** over the same
+Markdown knowledge model — never a second source of truth. Relationships are
+typed by provenance (explicit / inferred / suggested / rejected) and discovered
+by an explainable signal engine. Phased, in `Next` (not `Now`):
+
+- **Phase 0 — architecture prep**: define the relationship/provenance model
+  without changing visible behavior; add tests for identity and provenance.
+- **Phase 1 — explicit graph editing (first milestone)**: select two nodes,
+  create/remove an explicit relationship that writes a canonical `[[wiki-link]]`
+  into Markdown; backlinks reflect it; no graph-only state; no inference yet.
+- **Phase 2 — relationship engine**: deterministic signals (tags, lexical
+  overlap, shared neighbours, structural proximity) with structured evidence,
+  explainable scores and configurable weights; no auto-mutation.
+- **Phase 3 — suggestions & gaps**: render inferred edges differently; inspect
+  evidence; accept (→ wiki-link) / reject; suppress duplicates.
+- **Phase 4 — document link placement**: candidate-phrase detection, manual
+  apply, optional auto placement only with confirmation (never silent rewrite);
+  plus doc→graph ("Add to graph…" on selected text).
+- **Phase 5 — graph lenses**: knowledge (default), similarity, gaps, clusters,
+  orphans, path/connection finder, focus/expand/filter.
+- **Phase 6+ (optional/future)**: embeddings (optional, cacheable), explainable
+  AI suggestions, sketch-to-graph.
+
+Persistence: derived relationships live in a separate
+`.neonnotes-relationships.json`, rebuildable from the vault and deletable
+without corruption; rejected-suggestion state is not persisted for now.
+`KnowledgeIndex → RelationshipEngine → GraphModel → GraphView` is the
+canonical layering (`GraphView` stays renderer/controller only).
+
+Non-goals: not Mermaid, a generic diagram editor, UML, a whiteboard, or a
+mandatory vector database. Neon City (the eventual 3D skin) remains a later
+renderer option; 2D renderer improvements (edge-type distinction, confidence
+encoding, edge selection, cluster boundaries, minimap, focus mode) come first.
 
 ## Known bugs / risks
 

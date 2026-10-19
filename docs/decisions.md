@@ -48,6 +48,11 @@ revisited.
   SharePlugin/ShareIntake remain the only payload path; it is independent of
   the share-target toggle. →
   [`decisions/ADR-0012-android-open-with.md`](decisions/ADR-0012-android-open-with.md)
+- **ADR-0013 — Graph as a knowledge-base editor.** The graph is a visual editor
+  and analysis surface over the same Markdown knowledge model; relationships
+  carry provenance (explicit / inferred / suggested / rejected) and an
+  explainable signal engine feeds suggestions. →
+  [`decisions/ADR-0013-graph-knowledge-editor.md`](decisions/ADR-0013-graph-knowledge-editor.md)
 
 ## One-line decisions
 
@@ -67,6 +72,14 @@ revisited.
 - **Help is `res://docs/help.md`**, not an in-code constant.
 - **One user-facing doc per purpose** — README = features/setup; `docs/help.md` =
   in-app usage; `AGENTS.md` = agent workflow; this kit = agent context.
+- **Derived relationships persist in a separate `.neonnotes-relationships.json`**,
+  rebuildable from the vault and deletable without corruption; rejected
+  suggestions are not persisted for now.
+- **`KnowledgeIndex` → `RelationshipEngine` → `GraphModel` → `GraphView`** is
+  the canonical layering; `GraphView` is renderer/controller only (no file
+  scanning or semantic analysis).
+- **AI is a suggestion layer only** — previewable, reversible, never a silent
+  mutation, never required for graph navigation.
 
 ## Superseded
 

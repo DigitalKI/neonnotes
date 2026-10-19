@@ -29,17 +29,20 @@ settings live in `user://settings.cfg`; exports and embedded media live under
 - The vault phase calls `GameManager.scan_paths()`, renders the tree from
   filenames, applies layout, opens the start page deferred, and starts
   `GameManager.load_metadata_async()`.
-- Page routing uses `Main.page_mode` + `PAGE_*` constants. Every in-app page is
-  a scene inside `%Content` (`settings`, `sync`, `new_note`, `vault`, `media`,
-  `trash`, `capture`, `move`, `link_resolve`, `graph_links`).
-- Graph truth lives in `Main.graph_docked` / `graph_expanded`; `graph_view.visible`
-  only mirrors it. The single `GraphView` instance is docked or expanded.
+- Page routing lives in `PageRouter` (which owns `page_mode`, exposed to the
+  shell as `Main.page_mode`). Every in-app page is a scene inside `%Content`
+  (`settings`, `sync`, `new_note`, `vault`, `media`, `trash`, `capture`,
+  `move`, `link_resolve`, `graph_links`).
+- Graph truth lives in `GraphShellComponent.graph_docked` / `graph_expanded`
+  (exposed as read-only `Main.graph_docked` / `graph_expanded` aliases);
+  `graph_view.visible` only mirrors it. The single `GraphView` instance is
+  docked or expanded.
 
 ## 3. Module map
 
 | Path | Responsibility |
 |---|---|
-| `scripts/main.gd` | Shell wiring: boot phases, page router, graph dock/full state, thin handlers |
+| `scripts/main.gd` | Shell wiring: boot phases, thin handlers |
 | `scripts/common/GameManager.gd` | Autoload: vault state, paths, titles/tags/links, settings, palettes, UI scale, sync identity, metadata cache |
 | `scripts/common/note_metadata.gd` | Front-matter parse/escape helpers; title fallback |
 | `scripts/common/text_io.gd` | `read_text`/`read_json` file helpers |
@@ -72,6 +75,10 @@ settings live in `user://settings.cfg`; exports and embedded media live under
 | `scripts/components/backup_page.gd` | Backup page: worker zip, in-app desktop save, Android SAF save |
 | `scripts/components/import_page.gd` | Import/Restore page: auto-detect, replace vs new vault |
 | `scripts/components/graph_*.gd` | Graph nav bar, focus card, radial menu, links page |
+| `scripts/components/graph_shell_component.gd` | Graph dock/full-view state, map slide + edge swipe, focus-card/digest/links routing, nav mirror |
+| `scripts/components/page_router.gd` | Full-screen page routing: `page_mode`, open/close, note-column/graph hide-restore |
+| `scripts/components/link_resolve_controller.gd` | Wiki-link resolve flow: preview/wiki-link clicks, the resolve page (suggest + create) |
+| `scripts/components/move_controller.gd` | Note/folder move orchestration for the ⋮ menu and graph circle menu |
 | `scripts/components/*.gd` | Remaining shell components/pages: theme, layout, toolbar, selection, dialogs |
 | `scripts/dev/*.gd` | Benchmarks, probes, smoke driver; excluded from exports |
 | `scenes/main/Main.tscn` | Authored composition root |
@@ -148,9 +155,10 @@ focus card child/backlink, links page): it leaves the current scope for the
 target's parent scope (or overview) and turns to its page, so an off-scope note
 is never silently ignored. Opening the map — the toolbar ⊛ toggle or the phone
 right-edge swipe — follows the open note on both form factors through
-`Main._graph_follow_note()`; on a phone there is no dock, so the same follow
-runs on the full-screen map. `Main._set_graph_state()` owns dock/full-view
-state; `_apply_dock_split()`/`_set_dock_split()` own the remembered divider.
+`GraphShellComponent.graph_follow_note()`; on a phone there is no dock, so the
+same follow runs on the full-screen map. `GraphShellComponent.set_graph_state()`
+owns dock/full-view state; `_apply_dock_split()`/`_set_dock_split()` own the
+remembered divider.
 
 ### Export
 `ExportComponent` → `Exporter` (PNG 2×), `GifWriter` (worker), `HtmlExporter`;
@@ -207,11 +215,12 @@ common wrapper stripped, bare note gets `title`/`created`); sync pauses/resumes.
 - **Add a sync message:** `SyncService._handle_message()` on the receiver,
   sender/worker path in `_sync_worker()`; extend `TestSyncDeleteMove` or add a
   loopback test. Never read note bodies in the hot path.
-- **Add a page:** add `PAGE_*` + scene inside `%Content`, register in
-  `Main._pages()`, open/close through `_open_page()`/`_close_page()`, wire the
-  page's close signal.
+- **Add a page:** add `PAGE_*` + scene inside `%Content`, register it in
+  `PageRouter.pages` (set in `Main._phase_theme_layout`), open/close through
+  `PageRouter.open_page()`/`close_page()`, wire the page's close signal.
 - **Add a graph action:** add it to `GraphRadialMenu.show_for()` and handle the
-  callback in `GraphView`/`Main`; keep dock tap behavior (action) separate from
+  callback in `GraphView`/`GraphShellComponent`; keep dock tap behavior (action)
+  separate from
   full-view tap (selection).
 - **Tune graph labels/layout:** edit the `LABEL_*` / `LAYOUT_*` constants at the
   top of `GraphView`; there is no settings UI by design. Labels are a pure
