@@ -86,6 +86,11 @@ settings live in `user://settings.cfg`; exports and embedded media live under
 | `tests/*` | Headless tests + `run_tests.sh` |
 | `tools/repo_map.py`, `tools/context_audit.py` | Context-kit generation/audit |
 
+_Planned (ADR-0013):_ a `KnowledgeIndex` (owned cache) → `RelationshipEngine`
+(pure read/inference) → `GraphModel` (data shape) → `GraphView` layering is
+designed but not yet implemented; see
+[`architecture/relationship-engine.md`](architecture/relationship-engine.md).
+
 ## 4. Data flows
 
 ### Boot

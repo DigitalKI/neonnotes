@@ -72,6 +72,9 @@ by an explainable signal engine. Phased, in `Next` (not `Now`):
 - **Phase 1 — explicit graph editing (first milestone)**: select two nodes,
   create/remove an explicit relationship that writes a canonical `[[wiki-link]]`
   into Markdown; backlinks reflect it; no graph-only state; no inference yet.
+  Multi-select bulk move: move N nodes into a target node; moving into a leaf
+  auto-converts it into a folder + companion note (unify with the tree's
+  drag/drop, which already does this — the current Move dialog does not).
 - **Phase 2 — relationship engine**: deterministic signals (tags, lexical
   overlap, shared neighbours, structural proximity) with structured evidence,
   explainable scores and configurable weights; no auto-mutation.
@@ -80,10 +83,27 @@ by an explainable signal engine. Phased, in `Next` (not `Now`):
 - **Phase 4 — document link placement**: candidate-phrase detection, manual
   apply, optional auto placement only with confirmation (never silent rewrite);
   plus doc→graph ("Add to graph…" on selected text).
-- **Phase 5 — graph lenses**: knowledge (default), similarity, gaps, clusters,
-  orphans, path/connection finder, focus/expand/filter.
+- **Phase 5 — graph lenses & layouts**: knowledge (default), similarity, gaps,
+  clusters, orphans, path/connection finder, focus/expand/filter, and
+  alternative layouts with animated transitions.
 - **Phase 6+ (optional/future)**: embeddings (optional, cacheable), explainable
   AI suggestions, sketch-to-graph.
+
+**Layouts, facets, filtering.** Every view is a *projection* of the same
+`KnowledgeIndex`/`RelationshipEngine` — a pure `note → position` layout strategy
+plus a per-layout edge style — so switching views tweens positions keyed by the
+stable note path instead of rebuilding. Views: **radial** (current, folder
+spine), **column** (nodes bucketed into vertical columns by a facet — tag, date,
+length/size; links are straight paths across columns), **area/island** (related
+nodes grouped into contiguous regions by a selectable facet — explicit
+cluster/suggestion, shared tag, or date), **circle** (nodes on one circle, links
+drawn as chords). Facet grouping is single- or multi-valued by parameter: tag is
+multi-valued (one primary node plus dimmed ghost replicas in its other tag
+columns); date/size are single-valued. Live filtering is a `note → keep(bool)`
+predicate fed by the tag index + search worker, with two modes: dim non-matches
+(render-only) or hide + re-layout the subset. Editing (bulk move, link
+create/remove) works in every layout through the same commands; mobile uses
+long-press + action-sheet triggers instead of desktop drag.
 
 Persistence: derived relationships live in a separate
 `.neonnotes-relationships.json`, rebuildable from the vault and deletable
