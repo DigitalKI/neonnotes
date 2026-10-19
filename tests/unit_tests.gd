@@ -6,6 +6,8 @@ const GameManagerScript := preload("res://scripts/common/GameManager.gd")
 const TagMatchScript := preload("res://scripts/common/tag_match.gd")
 const TextMatchScript := preload("res://scripts/common/text_match.gd")
 const TextSearchScript := preload("res://scripts/common/text_search.gd")
+const KnowledgeIndexScript := preload("res://scripts/common/knowledge_index.gd")
+const RelationshipEngineScript := preload("res://scripts/common/relationship_engine.gd")
 
 var failures := 0
 
@@ -18,6 +20,8 @@ func _init() -> void:
 	_check_html_exporter()
 	_check_move_path_remap()
 	_check_graph_model()
+	_check_knowledge_index()
+	_check_explicit_relationships()
 	_check_inbox_path()
 	_check_media_import()
 	_check_dev_session_detection()
@@ -298,7 +302,7 @@ func _check_graph_model() -> void:
 		"Root/Notes.md": ["Island/Deep.md"],
 	}
 	var titles := {"Root/Gamedev/Design/Levels.md": "Level Design"}
-	var m := GraphModel.build("Root/Gamedev/Design/Levels.md", 2, notes, links, titles)
+	var m := RelationshipEngineScript.build_neighbourhood("Root/Gamedev/Design/Levels.md", 2, notes, links, titles)
 	_check(m.level_of.get("Root/Gamedev/Design/Levels.md") == 0, "graph centre is level 0")
 	_check(m.level_of.get("Root/Gamedev/Design.md") == 1, "graph parent is level 1")
 	_check(m.level_of.get("Root/Gamedev/Design/Drafts.md") == 1,
@@ -325,6 +329,48 @@ func _check_graph_model() -> void:
 	_check(m.node_label("Root/Gamedev/Design/Levels.md") == "Level Design",
 		"labels use the front-matter title")
 	_check(m.node_label("Root/JW.md") == "JW", "labels fall back to the file name")
+
+## KnowledgeIndex: the folder-as-note spine + resolve maps are derivations of
+## the note list — not extra state that can drift from the vault.
+func _check_knowledge_index() -> void:
+	var notes: Array[String] = [
+		"Root.md", "Root/Gamedev.md", "Root/Gamedev/Design.md",
+		"Root/Gamedev/Design/Levels.md", "Root/Gamedev/Design/Levels/Boss.md",
+	]
+	var idx := KnowledgeIndexScript.new()
+	idx.notes = notes
+	idx.links = {"Root/Gamedev/Design/Levels.md": ["Boss", "Root/Gamedev"]}
+	idx.build()
+	_check(String(idx.parent_of.get("Root/Gamedev/Design/Levels.md")) == "Root/Gamedev/Design.md",
+		"a note's parent is its folder's companion note")
+	_check(String(idx.parent_of.get("Root/Gamedev/Design.md")) == "Root/Gamedev.md",
+		"companion notes nest through the folder spine")
+	_check(idx.children_of.get("Root/Gamedev/Design.md", []).has("Root/Gamedev/Design/Levels.md"),
+		"the companion lists its children")
+	_check(not idx.parent_of.has("Root.md"), "the vault root has no parent")
+	_check(String(idx.resolve_full.get("root/gamedev/design/levels")) == "Root/Gamedev/Design/Levels.md",
+		"full-path resolution is lowercase")
+	_check(String(idx.resolve_base.get("boss")) == "Root/Gamedev/Design/Levels/Boss.md",
+		"basename resolution picks the first match")
+	var resolved: Dictionary = idx.resolved_links()
+	_check(String(resolved["Root/Gamedev/Design/Levels.md"][0]) == "Root/Gamedev/Design/Levels/Boss.md",
+		"raw [[Boss]] resolves to the concrete path")
+
+## explicit_relationships: wiki-links become typed relationships (explicit),
+## resolved + deduplicated; self-links and dangling targets are dropped.
+func _check_explicit_relationships() -> void:
+	var notes: Array[String] = ["A.md", "B.md", "Folder/C.md"]
+	var links := {"A.md": ["B", "b.md", "A", "missing"], "Folder/C.md": ["A"]}
+	var maps := RelationshipEngineScript.resolve_maps(notes)
+	var rels := RelationshipEngineScript.explicit_relationships(notes, links, maps)
+	_check(rels.size() == 2, "two explicit relationships survive (A->B, C->A)")
+	var r0 = rels[0]
+	_check(String(r0["source"]) == "A.md" and String(r0["target"]) == "B.md",
+		"relationship source/target are concrete resolved paths")
+	_check(String(r0["provenance"]) == "explicit" and String(r0["kind"]) == "wiki_link",
+		"relationships are typed by provenance and kind")
+	_check(r0["evidence"].is_empty() and r0["source_locations"].is_empty(),
+		"explicit relationships carry no evidence until Phase 2")
 
 func _check_tag_suggest() -> void:
 	_check(TagMatchScript.score("jw", "jw") == 0, "exact tag match ranks first")

@@ -200,14 +200,6 @@ var _label_cache_size := Vector2.ZERO
 var _label_metrics := {}
 ## Eight precomputed outward-first anchor orders, keyed by direction sector.
 var _label_mode_orders := {}
-# Resolve maps (full-path + basename) built once per open(). Reused by the
-# level and route passes — resolving each link via WikiLinks.resolve() rebuilt
-# them per call, which was O(links × notes): ~7 s at docs-vault scale.
-var _resolve_maps: Array = []
-## Resolved-link index cache shared by the level and route passes; invalidated
-## whenever `_resolve_maps` is rebuilt.
-var _resolved := {}
-var _resolved_valid := false
 var _root_home := ""            # homepage note path when it exists (root hub)
 ## Phone-shaped overview default (see MOBILE_FIT_FLOOR). A var, not a constant
 ## check, so headless probes can exercise both behaviours.
@@ -856,37 +848,25 @@ func _build_levels() -> void:
 		notes.append(n)
 	# Reuse the resolved link index the route pass also needs: resolving every
 	# link twice was a large slice of the graph open/build time at vault scale.
-	var m := GraphModel.build(_center_note, GameManager.graph_levels,
+	var m := RelationshipEngine.build_neighbourhood(_center_note, GameManager.graph_levels,
 		notes, _resolved_links(), GameManager.titles, 100000)
 	_levels = m.level_of
 	_mark_map_dirty()
 
 # ---------------------------------------------------------------- link routes
 
-## Rebuild the note→path resolve maps and drop the resolved-link cache that is
-## derived from them. The single entry point for both, so the cache can never go
-## stale against a fresh map (callers used to assign `_resolve_maps` directly).
+## The note→path resolve maps and the resolved-link index now live in
+## `GameManager.index` (KnowledgeIndex), rebuilt by GameManager on scan/write/
+## move. Refresh it here so the level and route passes re-derive from the
+## current vault — the per-view resolve cache is gone (ADR-0013).
 func _rebuild_resolve_maps() -> void:
-	_resolve_maps = WikiLinks.resolve_maps()
-	_resolved_valid = false
+	GameManager.refresh_index()
 
 ## Resolved outbound links per note (raw index values are targets, not paths).
-## Cached until `_resolve_maps` is rebuilt — both the level pass and the route
-## pass consume it, and resolving every link is what dominated their build time.
+## Served from the shared KnowledgeIndex; both the level pass and the route
+## pass consume it.
 func _resolved_links() -> Dictionary:
-	if _resolved_valid:
-		return _resolved
-	_resolved = {}
-	for src in GameManager.links.keys():
-		var lst: Array[String] = []
-		for dst in GameManager.links[src]:
-			var r := WikiLinks.resolve_with(String(dst), _resolve_maps)
-			if r != "" and not lst.has(r):
-				lst.append(r)
-		if not lst.is_empty():
-			_resolved[src] = lst
-	_resolved_valid = true
-	return _resolved
+	return GameManager.index.resolved_links()
 
 ## Route a link from its source up to the lowest common ancestor and back down,
 ## then resample so the travelling light needs no per-frame search.

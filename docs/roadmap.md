@@ -48,7 +48,7 @@ phone ↔ PC over the local network.
   hitch the first overview build at ~2,000 visible nodes. If adaptive radial
   spacing is still not enough, a one-time force relaxation after the radial pass
   (worker, then freeze) is the next option; no runtime physics.
-- **Graph scale** — `GraphModel.MAX_NODES` (400) is a stop-gap; aggregation is
+- **Graph scale** — `RelationshipEngine.MAX_NODES` (400) is a stop-gap; aggregation is
   deferred. MultiMesh markers are already in place; the remaining work is
   deciding how oversized clusters are summarized.
 - **MP4/social-video export** — no MP4 MovieWriter in this build; the AVI path
@@ -73,8 +73,8 @@ Markdown knowledge model — never a second source of truth. Relationships are
 typed by provenance (explicit / inferred / suggested / rejected) and discovered
 by an explainable signal engine. Phased, in `Next` (not `Now`):
 
-- **Phase 0 — architecture prep**: define the relationship/provenance model
-  without changing visible behavior; add tests for identity and provenance.
+- **Phase 0 — architecture prep** _(done)_: define the relationship/provenance
+  model without changing visible behavior; add tests for identity and provenance.
 - **Phase 1 — explicit graph editing (first milestone)**: select two nodes,
   create/remove an explicit relationship that writes a canonical `[[wiki-link]]`
   into Markdown; backlinks reflect it; no graph-only state; no inference yet.

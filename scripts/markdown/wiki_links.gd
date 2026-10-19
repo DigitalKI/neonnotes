@@ -20,20 +20,19 @@ static func backlinks(target: String) -> Array[String]:
 	return RelationshipEngine.backlinks(target, GameManager.notes, GameManager.links)
 
 static func graph() -> Dictionary:
-	var nodes: Array[String] = []; var edges: Array[Dictionary] = []; var seen: Dictionary = {}
+	var nodes: Array[String] = []
 	for filename in GameManager.notes: nodes.append(filename)
+	var edges: Array[Dictionary] = []
+	# Explicit wiki-links come from the engine's typed relationship model
+	# (resolved + deduplicated); no per-note file reads when opening the graph.
 	var maps := resolve_maps()  # built once; resolving per link was O(notes)
-	for source in GameManager.notes:
-		# Cached link index: no per-note file reads when opening the graph.
-		for target in GameManager.links.get(source, []):
-			var resolved := resolve_with(target, maps)
-			if resolved == "" or resolved == source: continue
-			var key := "direct|" + source + "|" + resolved
-			if not seen.has(key): seen[key] = true; edges.append({"from":source, "to":resolved, "kind":"direct"})
-	# A folder companion note is the visible tree parent of its children.
+	for rel in RelationshipEngine.explicit_relationships(GameManager.notes, GameManager.links, maps):
+		edges.append({"from": rel.source, "to": rel.target, "kind": "direct"})
+	# A folder companion note is the visible tree parent of its children
+	# (folder-as-note spine, from KnowledgeIndex).
+	var parent_of: Dictionary = KnowledgeIndex.hierarchy(GameManager.notes)[0]
 	for child in GameManager.notes:
-		var parent := child.get_base_dir()
-		var parent_note := parent + ".md"
-		if parent != "." and GameManager.notes.has(parent_note):
-			edges.append({"from":parent_note, "to":child, "kind":"tree"})
+		var parent := String(parent_of.get(child, ""))
+		if parent != "":
+			edges.append({"from": parent, "to": child, "kind": "tree"})
 	return {"nodes":nodes, "links":edges}

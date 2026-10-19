@@ -199,6 +199,7 @@ static func gen_device_code() -> String:
 
 
 func _ready() -> void:
+	index = KnowledgeIndex.new()
 	_load_settings()
 	# An explicitly-marked agent/test session (MCP `play_scene` sets
 	# NEONNOTES_DEV=1, or NEONNOTES_VAULT is set) must run against a disposable
@@ -575,6 +576,11 @@ var titles := {}  # relative path -> front-matter title ("" = use filename)
 var tags := {}    # relative path -> Array[String] from front-matter "tags:"
 var links := {}   # relative path -> Array[String] outbound [[wiki-link]] targets
 var links_ready := false  # true once scan_notes() has indexed the whole vault
+## Derived read model shared by the graph, backlinks and (later) the graph
+## editor (ADR-0013). GameManager owns it and rebuilds it on scan/write/move so
+## the folder-as-note spine, resolve maps and resolved links are computed once,
+## not re-derived per query by every consumer.
+var index: KnowledgeIndex
 # custom sort order per folder: {"folder/sub": ["note.md", …]} persisted in
 # vault/.neonnotes.json (synced like a note, tiny and human-readable)
 const ORDER_FILE := ".neonnotes.json"
@@ -639,6 +645,7 @@ func _index_note_metadata() -> void:
 	for n in notes:
 		_apply_note_meta(n, _meta_for(n))
 	_save_meta_cache()
+	refresh_index()
 
 
 ## Batched, frame-yielding metadata pass used after the shell and tree are up.
@@ -680,6 +687,7 @@ func load_metadata_async() -> void:
 	links_ready = true
 	_meta_scanning = false
 	_save_meta_cache()
+	refresh_index()
 	metadata_ready.emit()
 
 
@@ -687,6 +695,18 @@ func _apply_note_meta(name: String, meta: Dictionary) -> void:
 	titles[name] = meta["title"]
 	tags[name] = meta["tags"]
 	links[name] = meta["links"]
+
+## Rebuild the derived `index` snapshot from the current raw fields. Called after
+## every scan/write/move that changes notes/titles/tags/links, so consumers read
+## a fresh derivation without re-deriving it themselves (ADR-0013).
+func refresh_index() -> void:
+	if index == null:
+		index = KnowledgeIndex.new()
+	index.notes = notes
+	index.titles = titles
+	index.tags = tags
+	index.links = links
+	index.build()
 
 
 func _read_note_meta_abs(path: String) -> Dictionary:
@@ -830,6 +850,7 @@ func remap_moved(old_prefix: String, new_prefix: String) -> void:
 			lst.append(PathRemap.moved(String(r), old_prefix, new_prefix))
 		moved_order[PathRemap.moved(String(dir), old_prefix, new_prefix)] = lst
 	order = moved_order
+	refresh_index()
 
 ## Every folder that shows in the tree is also a note: if `folder.md` doesn't
 ## exist, create it (fixes vaults made before folder+note merging).
@@ -1046,6 +1067,7 @@ func write_note(fname: String, text: String) -> bool:
 	tags[fname] = meta["tags"]
 	links[fname] = meta["links"]
 	_remember_meta(fname, int(FileAccess.get_modified_time(abs)), file_size(abs), meta)
+	refresh_index()
 	return true
 
 func read_note(fname: String) -> String:
