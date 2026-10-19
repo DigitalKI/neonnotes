@@ -36,6 +36,7 @@ func _ready() -> void:
 	await _case_suggest(main)
 	await _case_create(main)
 	await _case_tag(main)
+	await _case_link()
 
 	print("LINK RESOLVE RESULT: %s (%d fails)" % ["FAIL" if _fails > 0 else "OK", _fails])
 	get_tree().quit(1 if _fails > 0 else 0)
@@ -80,6 +81,24 @@ func _case_tag(main: Node) -> void:
 	_ok(not FileAccess.file_exists(GameManager.vault_abs() + "/#urgent.md"),
 		"a #tag link never creates a file")
 	_ok(main.vault_tree.search.text == "#urgent", "a #tag link filters the tree")
+
+
+## Explicit graph link/unlink (Phase 1): link_notes writes a canonical
+## [[wiki-link]] and refreshes the index; re-linking is a no-op; unlink removes
+## it again. Exercises the GameManager I/O wrapper around the pure LinkCommand.
+func _case_link() -> void:
+	_ok(GameManager.link_notes("Notes.md", "Meeting notes.md"),
+		"linking two notes writes the source note")
+	var src := GameManager.read_note("Notes.md")
+	_ok(src.contains("[[Meeting notes]]"), "the link target is the canonical bare name")
+	_ok(GameManager.links.get("Notes.md", []).has("Meeting notes"),
+		"the link index reflects the new link")
+	_ok(not GameManager.link_notes("Notes.md", "Meeting notes.md"),
+		"linking again is a no-op")
+	_ok(GameManager.unlink_notes("Notes.md", "Meeting notes.md"),
+		"unlink rewrites the source note")
+	_ok(not GameManager.read_note("Notes.md").contains("[[Meeting notes]]"),
+		"unlink removes the link")
 
 
 func _wait(main: Node, frames: int) -> void:

@@ -30,6 +30,9 @@ func show_for(ctx: Dictionary) -> void:
 	# path to move, so they keep the plain Open/Delete pair.
 	if not bool(ctx.get("cluster", false)):
 		list.insert(1, "Move")
+	# "Link" writes a [[wiki-link]] from a real note to the next tapped note.
+	if bool(ctx.get("note", false)):
+		list.append("Link")
 	var kids := int(ctx.get("children", 0))
 	if kids > 0:
 		list.append("Group %d" % kids if bool(ctx.get("oversized", false)) else "Enter")

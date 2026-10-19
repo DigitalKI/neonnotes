@@ -19,6 +19,8 @@ var blur_cb := Callable()       # focus dropped (tap outside): Main hides the ca
 ## action — open the note beside the map, or enter the folder — while the full
 ## view leaves the callback alone (its tap stays a pure selection).
 var tap_cb := Callable()
+var link_cb := Callable()       # Link mode: (source_rel, target_rel) -> write a [[wiki-link]]
+var status_cb := Callable()     # transient status hint (Link mode, etc.)
 ## Emitted whenever page/scope state changes: the nav-bar component (a scene
 ## child of this view) mirrors it — navigation visuals live in
 ## scenes/components/graph_nav_bar.tscn, editable like any other UI.
@@ -124,6 +126,7 @@ var _mouse_action_consumed := false
 var _touch_action_consumed := false
 var _touch_press := Vector2.ZERO
 var _selected := ""             # focused node (tree key)
+var _pending_link := ""         # source note awaiting a link target (Link mode)
 var _scope := ""                # current entered group; empty = whole vault root
 var _scope_active := false       # distinguishes explicit root entry from overview       # distinguishes entered root from Overview
 var _page := 0                   # child page within current scope
@@ -1991,6 +1994,7 @@ func _drop_focus() -> void:
 ## still be dismissible by clicking the map.
 func _close_menu() -> void:
 	var had_menu := _menu.open
+	_pending_link = ""  # an outside press cancels a pending Link mode too
 	_drop_focus()
 	if had_menu:
 		_mark_map_dirty()
@@ -2000,6 +2004,13 @@ func _close_menu() -> void:
 ## menu, focus callback), then tell the host. Only the desktop dock acts on that
 ## — the full view keeps its tap = pure selection behaviour.
 func _tap_node(key: String) -> void:
+	if _pending_link != "":
+		# Link mode: this tap is the target, not a fresh selection.
+		var target := node_rel(key)
+		if target != "" and target != _pending_link and link_cb.is_valid():
+			link_cb.call(_pending_link, target)
+		_pending_link = ""
+		return
 	_select(key)
 	if tap_cb.is_valid():
 		tap_cb.call(key, node_rel(key))
@@ -2125,6 +2136,7 @@ func _select(key: String, fly: bool = true) -> void:
 		"oversized": child_count > max(1, GameManager.graph_max_separate),
 		"ancestor": _scope != "" and _is_scope_ancestor(key),
 		"cluster": _cluster_nodes.has(key),
+		"note": node_is_note(key),
 	})
 	# The card first: its mobile inset is part of the camera fit, so the
 	# neighbourhood is framed in the space actually left on screen.
@@ -2185,6 +2197,11 @@ func _activate_menu(action: String) -> void:
 		open_cb.call(note)
 	elif action == "Delete" and delete_cb.is_valid() and note != "":
 		delete_cb.call(note)
+	elif action == "Link" and note != "":
+		# Enter Link mode: the next tapped note becomes the link target.
+		_pending_link = note
+		if status_cb.is_valid():
+			status_cb.call("Link from " + GameManager.note_title(note) + " — tap the target note")
 	_mark_map_dirty()
 	queue_redraw()
 
