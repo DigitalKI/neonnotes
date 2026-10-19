@@ -13,6 +13,11 @@ extends RefCounted
 
 const MEDIA_DIR := "media"
 const MAX_TITLE := 60
+## Extensions Android file managers use for Markdown documents. The open-with
+## bridge also accepts Markdown MIME types, so an opaque provider name still
+## imports as a note.
+const MARKDOWN_EXTS := ["md", "markdown", "mdown", "mkd"]
+const MARKDOWN_MIMES := ["text/markdown", "text/x-markdown", "application/markdown", "text/md"]
 
 
 ## Capture FREE TEXT. `opts`: title (optional), source (optional URL/attribution).
@@ -64,6 +69,52 @@ static func capture_image(src: String, opts: Dictionary = {}) -> String:
 	return _write_capture("![%s](%s/%s)" % [title, MEDIA_DIR, file_name], o)
 
 
+## Import an existing Markdown FILE into the Inbox as a note. The bytes are
+## copied (never moved or rewritten), so front matter, wiki-links and body
+## formatting survive. [param src] may be an absolute path or an Android
+## content:// URI (Godot's FileAccess resolves those). [param opts]: [code]name[/code]
+## (destination stem, defaults to the source file name) and [code]title[/code]
+## (fallback when no name is available). Returns the vault-relative path, or
+## "" when the file cannot be read or is binary.
+static func import_markdown(src: String, opts: Dictionary = {}) -> String:
+	if src == "":
+		return ""
+	var f := FileAccess.open(src, FileAccess.READ)
+	if f == null:
+		return ""
+	var bytes := f.get_buffer(f.get_length())
+	f.close()
+	# A Markdown file is text; a NUL byte means we were handed something else.
+	if bytes.has(0):
+		return ""
+	var text := bytes.get_string_from_utf8()
+	# A UTF-8 BOM would hide the opening --- from the front-matter parser.
+	if text.begins_with(String.chr(0xFEFF)):
+		text = text.substr(1)
+	var source_name := str(opts.get("name", src.get_file()))
+	var stem := _note_stem(source_name)
+	if stem == "":
+		stem = _slug(str(opts.get("title", "")))
+	if stem == "":
+		stem = "Imported"
+	GameManager.ensure_inbox()
+	var rel := _unique_named_inbox_path(stem)
+	if not GameManager.write_note(rel, text):
+		return ""
+	if not GameManager.notes.has(rel):
+		GameManager.notes.append(rel)
+		GameManager.notes.sort()
+	return rel
+
+
+## True when [param path] is (or [param mime_type] reports) Markdown. Used by
+## share/open intake so a provider that reports an opaque name still imports.
+static func is_markdown(path: String, mime_type: String = "") -> bool:
+	if path.get_extension().to_lower() in MARKDOWN_EXTS:
+		return true
+	return mime_type.to_lower() in MARKDOWN_MIMES
+
+
 # ---------------------------------------------------------------- internals
 
 static func _write_capture(body: String, opts: Dictionary) -> String:
@@ -98,6 +149,33 @@ static func _render(title: String, body: String, source: String, now: String) ->
 		head.append('source: "%s"' % _quoted(source))
 	head.append("---")
 	return "\n".join(head) + "\n\n# " + title + "\n\n" + body + "\n"
+
+
+## A safe note-file stem for an imported file. Path separators and Windows
+## reserved characters are replaced rather than dropped, so two different
+## sources do not collapse into the same name.
+static func _note_stem(value: String) -> String:
+	var stem := value.get_basename() if value.get_extension() != "" else value
+	stem = stem.replace(":", "-").replace("/", "-").replace("\\", "-").replace("?", "-")
+	stem = stem.replace("*", "-").replace("\"", "-").replace("<", "-").replace(">", "-")
+	stem = stem.replace("|", "-").replace("\n", " ").replace("\r", " ").replace("\t", " ")
+	while stem.begins_with("."):
+		stem = stem.substr(1)
+	stem = stem.strip_edges()
+	if stem.length() > 80:
+		stem = stem.substr(0, 80).strip_edges()
+	return stem
+
+
+## "Inbox/<stem>.md", suffixed on collision. Unlike captures, an imported file
+## keeps its own name so the vault mirrors the document the user opened.
+static func _unique_named_inbox_path(stem: String) -> String:
+	var rel := "%s/%s.md" % [GameManager.INBOX_DIR, stem]
+	var i := 2
+	while FileAccess.file_exists(GameManager.vault_abs().path_join(rel)):
+		rel = "%s/%s-%d.md" % [GameManager.INBOX_DIR, stem, i]
+		i += 1
+	return rel
 
 
 static func _quoted(value: String) -> String:

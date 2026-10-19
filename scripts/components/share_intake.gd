@@ -1,12 +1,15 @@
 class_name ShareIntake
 extends Node
-## Receives data shared INTO NeonNotes from the OS share sheet and files it in
-## the Inbox through Capture — the same entry point the in-app Capture page uses.
+## Receives data shared INTO NeonNotes from the OS share sheet, or opened from
+## Android's "Open with" picker, and files it in the Inbox through Capture — the
+## same entry point the in-app Capture page uses.
 ##
 ## The share-target itself comes from addons/SharePlugin, whose `Share` node is
 ## created only where its singleton actually exists (an exported Android/iOS
-## build). On desktop nothing is instantiated, so a normal run, the smoke test
-## and the unit suite stay plugin-free and log no error.
+## build). The "Open with" bridge (addons/MarkdownOpen) rewrites ACTION_VIEW as
+## ACTION_SEND, so Markdown files arrive through this same path. On desktop
+## nothing is instantiated, so a normal run, the smoke test and the unit suite
+## stay plugin-free and log no error.
 ##
 ## `handle_payload()` is deliberately plugin-independent (untyped duck typing on
 ## the plugin's ReceivedSharedData), so the routing can be exercised hermetically
@@ -61,13 +64,19 @@ func _on_share_received(data) -> void:
 ## capture ("" when nothing usable arrived); `received` carries every note made.
 func handle_payload(data) -> String:
 	var made: Array[String] = []
+	var markdown_count := 0
+	var mime_type := str(data.get_mime_type()) if data.has_method("get_mime_type") else ""
 	# Files first: a link share carries the page title as subject, and an image
 	# share often carries no text at all.
 	if data.has_files():
 		for path in data.get_file_paths():
-			var rel_file := _capture_file(String(path))
+			var file_path := String(path)
+			var is_md := Capture.is_markdown(file_path, mime_type)
+			var rel_file := _capture_file(file_path, mime_type)
 			if rel_file != "":
 				made.append(rel_file)
+				if is_md:
+					markdown_count += 1
 	if data.has_text():
 		var rel_text := _capture_text(str(data.get_text()), str(data.get_subject()))
 		if rel_text != "":
@@ -79,7 +88,12 @@ func handle_payload(data) -> String:
 			intake_message.emit("✗ Nothing to capture from the share")
 		return ""
 	received.emit(made)
-	intake_message.emit("📥 Shared into Inbox (%d)" % made.size() if made.size() > 1 else "📥 Shared into Inbox")
+	if markdown_count > 0 and markdown_count == made.size():
+		intake_message.emit("📥 Imported into Inbox (%d)" % made.size() if made.size() > 1 else "📥 Imported into Inbox")
+	elif markdown_count > 0:
+		intake_message.emit("📥 Added to Inbox (%d)" % made.size())
+	else:
+		intake_message.emit("📥 Shared into Inbox (%d)" % made.size() if made.size() > 1 else "📥 Shared into Inbox")
 	return made[made.size() - 1]
 
 
@@ -106,15 +120,23 @@ func _capture_text(text: String, subject: String) -> String:
 ## sender that forces one through.
 ## The received file name titles an image: Android's EXTRA_SUBJECT for a shared
 ## file is the same unreliable share-sheet label, so it is not trusted.
-func _capture_file(path: String) -> String:
+func _capture_file(path: String, mime_type: String = "") -> String:
 	if path == "":
 		return ""
-	var name := path.get_file()
-	var title := name.get_basename()
+	var file_name := path.get_file()
+	var title := file_name.get_basename()
+	# A Markdown document (shared or opened from Android's "Open with" picker)
+	# is copied into the Inbox unchanged: front matter, wiki-links and body
+	# formatting survive, and the original file is never moved.
+	if Capture.is_markdown(path, mime_type):
+		var rel := Capture.import_markdown(path, {"name": file_name})
+		if rel == "":
+			intake_message.emit("✗ Couldn't read %s" % file_name)
+		return rel
 	if path.get_extension().to_lower() in MediaImport.IMAGE_EXTS:
 		var rel := Capture.capture_image(path, {"title": title})
 		if rel == "":
-			intake_message.emit("✗ Couldn't read the image %s" % name)
+			intake_message.emit("✗ Couldn't read the image %s" % file_name)
 		return rel
-	intake_message.emit("✗ %s can't be stored — NeonNotes takes links, text and images" % name)
+	intake_message.emit("✗ %s can't be stored — NeonNotes takes links, text, images and Markdown" % file_name)
 	return ""

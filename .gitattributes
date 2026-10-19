@@ -37,3 +37,7 @@
 *.fbx binary
 *.mp4 binary
 *.ogv binary
+
+# Android plugin archives — no diff, no merge
+*.aar binary
+*.jar binary

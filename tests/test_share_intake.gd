@@ -1,5 +1,6 @@
 extends Node
-## Share-sheet intake: a received payload (link / image / other file / text) must
+## Share-sheet / open-with intake: a received payload (link / image / markdown /
+## other file / text) must
 ## land in the Inbox through the same Capture entry point the in-app page uses.
 ## The Android plugin layer is not needed — handle_payload() is plugin-free, and
 ## start() off-platform must be a harmless no-op. Disposable vault only.
@@ -90,6 +91,25 @@ func _ready() -> void:
 	_check("image embedded from media/", img_note.contains("](media/"))
 	_check("image bytes stored in media/", DirAccess.get_files_at(vault.path_join("media")).size() == 1)
 
+	# A Markdown document opened from Android's "Open with" picker arrives as a
+	# synthetic ACTION_SEND from addons/MarkdownOpen. It must be imported
+	# unchanged, under its original file name, into the Inbox.
+	var md_src := "user://neonnotes-share-import.md"
+	var md_body := "# Shared Doc\n\nBody with [[a link]].\n"
+	var mdf := FileAccess.open(md_src, FileAccess.WRITE)
+	mdf.store_string(md_body)
+	mdf.close()
+	var md_rel := intake.handle_payload(ReceivedScript.new({
+		"mime_type": "text/markdown", "text": "", "subject": "",
+		"file_paths": PackedStringArray([ProjectSettings.globalize_path(md_src)]),
+	}))
+	_check("markdown file lands in Inbox", md_rel.begins_with("Inbox/") and md_rel.ends_with(".md"))
+	_check("markdown keeps its source file name", md_rel.get_file() == "neonnotes-share-import.md")
+	_check("markdown bytes preserved",
+		FileAccess.open(vault.path_join(md_rel), FileAccess.READ).get_as_text() == md_body)
+	_check("markdown import reports Imported", not msgs.is_empty()
+		and String(msgs[msgs.size() - 1]).contains("Imported into Inbox"))
+
 	# A non-image file is REFUSED: only images can be embedded, and the plugin's
 	# copy lives in the app cache (never the vault), so a note naming it would be a
 	# phantom that looks saved but never syncs.
@@ -115,13 +135,14 @@ func _ready() -> void:
 	_check("empty share refused", empty_rel == "" and GameManager.inbox_notes().size() == before)
 	_check("empty share reports a message", not msgs.is_empty() and String(msgs[msgs.size() - 1]).begins_with("✗"))
 
-	_check("received fired once per usable payload", seen.size() == 4)
-	_check("badge counts every stored share", GameManager.inbox_notes().size() == 4)
+	_check("received fired once per usable payload", seen.size() == 5)
+	_check("badge counts every stored share", GameManager.inbox_notes().size() == 5)
 
 	intake.queue_free()
 	await get_tree().process_frame
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(img_src))
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(pdf_src))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(md_src))
 	_rm_dir(vault)
 	_finish(previous_vault, previous_notes, previous_save)
 

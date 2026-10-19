@@ -70,6 +70,24 @@ func _ready() -> void:
 	_check("image note embeds media/", img_note.contains("](media/") and img_note.contains(".png)"))
 	_check("bytes stored under vault/media", DirAccess.get_files_at(vault.path_join("media")).size() == 1)
 
+	# Imported Markdown keeps its bytes and file name; a second import gets a
+	# collision suffix instead of overwriting the first.
+	var md_src := "user://neonnotes-capture-import.md"
+	var md_text := "---\ntitle: \"Imported Doc\"\ntags: [research]\n---\n\n# Imported Doc\n\nKeep *this* body.\n"
+	var mdf := FileAccess.open(md_src, FileAccess.WRITE)
+	mdf.store_string(md_text)
+	mdf.close()
+	var md_a := CaptureScript.import_markdown(ProjectSettings.globalize_path(md_src))
+	var md_b := CaptureScript.import_markdown(ProjectSettings.globalize_path(md_src))
+	_check("markdown import returns an Inbox path", md_a.begins_with("Inbox/") and md_a.ends_with(".md"))
+	_check("markdown import keeps the file name", md_a.get_file() == "neonnotes-capture-import.md")
+	_check("markdown import copies bytes unchanged",
+		FileAccess.open(vault.path_join(md_a), FileAccess.READ).get_as_text() == md_text)
+	_check("second markdown import never overwrites",
+		md_b != md_a and FileAccess.file_exists(vault.path_join(md_b)))
+	_check("missing markdown source refused",
+		CaptureScript.import_markdown("user://neonnotes-capture-missing.md") == "")
+
 	# Same-second captures must not overwrite each other.
 	var a := CaptureScript.capture_text("dup", {"title": "Dup"})
 	var b := CaptureScript.capture_text("dup", {"title": "Dup"})
@@ -78,9 +96,9 @@ func _ready() -> void:
 	# The pinned, badged row leads the tree built by the real panel scene.
 	GameManager.scan_notes()
 	var count := GameManager.inbox_notes().size()
-	# t, l, lab, "just a thought", im, a, b — seven captures, none rejected but
-	# the blank one.
-	_check("all seven captures landed", count == 7)
+	# t, l, lab, "just a thought", im, a, b, plus two imported Markdown files —
+	# nine Inbox notes; only the blank capture was rejected.
+	_check("all nine captures landed", count == 9)
 	var panel: VaultTreeComponent = preload("res://scenes/components/side_panel.tscn").instantiate()
 	add_child(panel)
 	panel.build()
@@ -99,6 +117,7 @@ func _ready() -> void:
 	await get_tree().process_frame
 
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(src))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(md_src))
 	_rm_dir(vault)
 	_finish(previous_vault, previous_notes, previous_save)
 
