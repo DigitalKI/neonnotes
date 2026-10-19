@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://tests/test_backup_import.gd" id="1_backup"]
+
+[node name="TestBackupImport" type="Node"]
+script = ExtResource("1_backup")

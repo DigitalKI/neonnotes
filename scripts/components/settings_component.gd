@@ -15,6 +15,8 @@ signal close_requested
 @onready var ui_scale_hint: Label = %UiScaleHint
 @onready var vault_button: Button = %VaultButton
 @onready var sync_button: Button = %SyncButton
+@onready var backup_button: Button = %BackupButton
+@onready var import_button: Button = %ImportButton
 @onready var close_button: Button = %CloseButton
 @onready var crt_ui: CheckButton = %CrtUi
 @onready var crt_export: CheckButton = %CrtExport
@@ -23,10 +25,14 @@ signal close_requested
 
 var vault_cb: Callable
 var sync_cb: Callable
+var backup_cb: Callable
+var import_cb: Callable
 
 func _ready() -> void:
 	vault_button.pressed.connect(func(): vault_cb.call() if vault_cb.is_valid() else null)
 	sync_button.pressed.connect(func(): sync_cb.call() if sync_cb.is_valid() else null)
+	backup_button.pressed.connect(func(): backup_cb.call() if backup_cb.is_valid() else null)
+	import_button.pressed.connect(func(): import_cb.call() if import_cb.is_valid() else null)
 	close_button.pressed.connect(func(): close_requested.emit())
 	crt_ui.toggled.connect(_on_crt_ui_toggled)
 	crt_export.toggled.connect(_on_crt_export_toggled)

@@ -35,6 +35,8 @@ const MONO_FONT := preload("res://assets/fonts/ShareTechMono-Regular.ttf")
 @onready var graph_nav: GraphNavBar = %GraphNavBar
 @onready var links_page: GraphLinksPage = %GraphLinksPage
 @onready var sync_page: SyncPage = %SyncPage
+@onready var backup_page: BackupPage = %BackupPage
+@onready var import_page: ImportPage = %ImportPage
 @onready var code_edit : CodeEdit = %SourceEditor
 ## Which full-content page owns the screen: "" or one of PAGE_*.
 var page_mode := ""
@@ -69,6 +71,8 @@ const PAGE_CAPTURE := "capture"
 const PAGE_MOVE := "move"
 const PAGE_LINK_RESOLVE := "link_resolve"
 const PAGE_GRAPH_LINKS := "graph_links"
+const PAGE_BACKUP := "backup"
+const PAGE_IMPORT := "import"
 
 ## Digest worker + cache behind the graph focus card (off-thread note
 ## summaries). Created in code: it is a service node, not UI.
@@ -193,7 +197,18 @@ func _phase_theme_layout() -> void:
 	vault_tree.capture_requested.connect(_open_capture)
 	settings_component.vault_cb = _on_open_vault
 	settings_component.sync_cb = _on_sync
+	settings_component.backup_cb = _on_open_backup
+	settings_component.import_cb = _on_open_import
 	settings_component.close_requested.connect(_close_settings)
+	backup_page.close_requested.connect(_close_page)
+	import_page.close_requested.connect(_close_page)
+	backup_page.flush_cb = editor.flush
+	backup_page.flash_cb = _flash
+	import_page.flush_cb = editor.flush
+	import_page.flash_cb = _flash
+	import_page.pause_sync_cb = _pause_sync_for_operation
+	import_page.resume_sync_cb = _resume_sync_after_operation
+	import_page.vault_ready_cb = _on_backup_restore_done
 	graph_view.open_cb = _open_graph_note
 	graph_view.delete_cb = _delete_graph_note
 	graph_view.move_cb = _move_graph_note
@@ -727,7 +742,7 @@ func _show_settings() -> void:
 ## Every page is a scene instance inside %Content, so all of them are sized
 ## like an open note. Sharing one helper keeps the hide/show rules identical.
 func _pages() -> Array[Control]:
-	return [settings_page, sync_page, new_dialog, vault_picker, media_dialog, trash_page, link_dialog, links_page, capture_page, move_dialog]
+	return [settings_page, sync_page, new_dialog, vault_picker, media_dialog, trash_page, link_dialog, links_page, capture_page, move_dialog, backup_page, import_page]
 
 func _open_page(mode: String, page: Control) -> void:
 	editor.flush()
@@ -1002,6 +1017,8 @@ func _on_image_click(src: String) -> void:
 func _theme_dialogs() -> void:
 	media_dialog.apply_theme()
 	capture_page.apply_theme()
+	backup_page.apply_theme()
+	import_page.apply_theme()
 
 func _toggle_backlinks() -> void:
 	backlinks_card.toggle()
@@ -1289,6 +1306,63 @@ func _close_sync() -> void:
 func _on_sync_identity_changed() -> void:
 	if status_bar:
 		status_bar.set_sync_service(sync_service)
+
+# ------------------------------------------------------------ backup / import
+
+func _on_open_backup() -> void:
+	if page_mode == PAGE_BACKUP:
+		return
+	_open_page(PAGE_BACKUP, backup_page)
+	backup_page.open()
+
+
+func _on_open_import() -> void:
+	if page_mode == PAGE_IMPORT:
+		return
+	_open_page(PAGE_IMPORT, import_page)
+	import_page.open()
+
+
+## A restore/import committed. `replaced` means the current vault was overwritten
+## in place; otherwise a brand-new vault was built at `path` and must be adopted.
+func _on_backup_restore_done(path: String, replaced: bool) -> void:
+	editor.flush()
+	if replaced:
+		GameManager.current_rel = ""
+		GameManager.current_file = ""
+		GameManager.scan_notes()
+	else:
+		if not GameManager.set_vault_dir(path):
+			_flash("✗ Could not open the imported vault")
+			return
+	TrashStore.purge_expired()
+	_digest_store.clear()
+	_card_maps.clear()
+	_close_focus_card()
+	_clear_open_note()
+	if sync_service:
+		sync_service.on_vault_changed()
+		status_bar.set_sync_service(sync_service)
+	if page_mode == PAGE_SETTINGS:
+		settings_component.refresh()
+	_refresh_list()
+	_flash("✓ Vault restored" if replaced else "✓ Imported into a new vault")
+
+
+var _sync_resume := false
+
+func _pause_sync_for_operation() -> void:
+	if sync_service == null:
+		return
+	_sync_resume = sync_service.is_discovery_running()
+	sync_service.stop_discovery()
+
+
+func _resume_sync_after_operation() -> void:
+	if sync_service == null or not _sync_resume:
+		return
+	_sync_resume = false
+	sync_service.start_background_sync()
 
 # ------------------------------------------------------------ inbox / capture
 

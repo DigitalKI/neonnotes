@@ -1,0 +1,68 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/components/backup_page.gd" id="1"]
+
+[node name="BackupPage" type="MarginContainer"]
+unique_name_in_owner = true
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_bottom = 10
+script = ExtResource("1")
+
+[node name="Scroll" type="ScrollContainer" parent="."]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Root" type="VBoxContainer" parent="Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="TitleRow" type="HBoxContainer" parent="Scroll/Root"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="Scroll/Root/TitleRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 20
+text = "💾 BACKUP"
+
+[node name="CloseButton" type="Button" parent="Scroll/Root/TitleRow"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "✕ Close"
+
+[node name="InfoLabel" type="Label" parent="Scroll/Root"]
+layout_mode = 2
+autowrap_mode = 2
+text = "Copy the entire vault into a single .zip archive."
+
+[node name="IncludeExports" type="CheckButton" parent="Scroll/Root"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Include exported files (PNG/GIF/HTML)"
+
+[node name="BackupButton" type="Button" parent="Scroll/Root"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "💾 Back up vault…"
+
+[node name="ProgressBar" type="ProgressBar" parent="Scroll/Root"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+min_value = 0.0
+max_value = 1.0
+
+[node name="StatusLabel" type="Label" parent="Scroll/Root"]
+unique_name_in_owner = true
+layout_mode = 2
+autowrap_mode = 2
+
+[node name="CancelButton" type="Button" parent="Scroll/Root"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+text = "Cancel"

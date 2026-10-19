@@ -104,6 +104,13 @@ func stop_discovery() -> void:
 		peers.clear()
 		peers_changed.emit()
 
+
+## True while UDP discovery is broadcasting (drives whether a backup/import
+## should restart discovery after pausing it for the duration of the operation).
+func is_discovery_running() -> bool:
+	return _broadcasting
+
+
 ## The active vault changed: flush the outgoing vault's runtime state, drop
 ## peers, and re-key everything (sync_state, discovery broadcast) to the new
 ## vault identity. Call AFTER GameManager has switched vaults/identity.

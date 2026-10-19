@@ -21,6 +21,8 @@
 [ext_resource type="PackedScene" path="res://scenes/components/capture_page.tscn" id="21_capture"]
 [ext_resource type="PackedScene" uid="uid://b3mljc6qcvcef" path="res://scenes/components/move_dialog.tscn" id="22_move"]
 [ext_resource type="PackedScene" path="res://scenes/components/backlinks_card.tscn" id="23_backlinks"]
+[ext_resource type="PackedScene" path="res://scenes/components/backup_page.tscn" id="24_backup"]
+[ext_resource type="PackedScene" path="res://scenes/components/import_page.tscn" id="25_import"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMat_crt"]
 shader = ExtResource("3_crt")
@@ -288,6 +290,7 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 
 [node name="LinkResolveDialog" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=659708925 instance=ExtResource("17_link_resolve")]
+visible = false
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
@@ -298,6 +301,19 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 
 [node name="MoveDialog" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=1789480705 instance=ExtResource("22_move")]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="BackupPage" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=1015580621 instance=ExtResource("24_backup")]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="ImportPage" parent="Root/WorkspaceMargin/Workspace/Content" unique_id=1412370239 instance=ExtResource("25_import")]
+visible = false
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3

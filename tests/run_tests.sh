@@ -84,4 +84,7 @@ run_godot_test "SYNC DELETE/MOVE RESULT: OK" --headless --path . tests/TestSyncD
 # Sync identity is per vault (in-folder id + device-local phrase); switching
 # vaults swaps identity, unpair keeps the phrase, reset words forks.
 run_godot_test "PER-VAULT SYNC RESULT: OK" --headless --path . tests/TestPerVaultSync.tscn
+# Backup/import: zip round-trip, zip-slip rejection, clear-vault identity
+# preservation, and plain Markdown import (media excluded, title injected).
+NEONNOTES_DEV=1 run_godot_test "BACKUP IMPORT RESULT: OK" --headless --path . tests/TestBackupImport.tscn
 NEONNOTES_SMOKE=1 run_godot_test "SMOKE RESULT: OK" --headless --path .

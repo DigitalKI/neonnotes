@@ -63,6 +63,34 @@ custom_minimum_size = Vector2(80, 0)
 layout_mode = 2
 text = "⇄ Pair"
 
+[node name="BackupContainer" type="HBoxContainer" parent="MarginContanier/HBoxContainer/VerticalContainer"]
+layout_mode = 2
+
+[node name="BackupLabel" type="Label" parent="MarginContanier/HBoxContainer/VerticalContainer/BackupContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Backup vault"
+
+[node name="BackupButton" type="Button" parent="MarginContanier/HBoxContainer/VerticalContainer/BackupContainer"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(80, 0)
+layout_mode = 2
+text = "💾 Back up…"
+
+[node name="ImportContainer" type="HBoxContainer" parent="MarginContanier/HBoxContainer/VerticalContainer"]
+layout_mode = 2
+
+[node name="ImportLabel" type="Label" parent="MarginContanier/HBoxContainer/VerticalContainer/ImportContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Import / restore"
+
+[node name="ImportButton" type="Button" parent="MarginContanier/HBoxContainer/VerticalContainer/ImportContainer"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(80, 0)
+layout_mode = 2
+text = "📥 Import…"
+
 [node name="GraphLevelsContainer" type="HBoxContainer" parent="MarginContanier/HBoxContainer/VerticalContainer" unique_id=1291237835]
 layout_mode = 2
 
