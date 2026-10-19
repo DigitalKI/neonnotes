@@ -884,23 +884,11 @@ static func is_inbox_root(rel: String) -> bool:
 ## Notes under the Inbox folder (any depth), sorted. Drives the tree badge;
 ## "reviewed" simply means the user dragged the capture back out of Inbox.
 func inbox_notes() -> Array[String]:
-	var out: Array[String] = []
-	var prefix := INBOX_DIR + "/"
-	for n in notes:
-		if String(n).begins_with(prefix):
-			out.append(n)
-	out.sort()
-	return out
+	return RelationshipEngine.inbox_notes(notes, INBOX_DIR)
 
 ## Collect tags from front-matter across all notes (deduplicated, sorted).
 func all_tags() -> Array[String]:
-	var out: Array[String] = []
-	for t in tags.values():
-		for x in t:
-			if not out.has(x):
-				out.append(x)
-	out.sort()
-	return out
+	return RelationshipEngine.all_tags(tags)
 
 
 ## Human-facing title for a note path: its indexed front-matter title when
@@ -908,7 +896,7 @@ func all_tags() -> Array[String]:
 ## the "title-or-filename" fallback used by the tree, graph, cards, editor and
 ## dialogs — see NoteMetadata.title_or_stem.
 func note_title(rel: String) -> String:
-	return NoteMetadata.title_or_stem(String(titles.get(rel, "")), rel)
+	return RelationshipEngine.note_title(rel, titles)
 
 
 ## One pass over a note producing its front-matter title and tags plus every
@@ -996,13 +984,7 @@ static func _is_escaped(text: String, at: int) -> bool:
 ## target, its bare file name, or a "dir/…" prefix). Post-move rewriting visits
 ## only these instead of reading every note in the vault.
 func notes_linking_to(old_prefix: String) -> Array[String]:
-	var out: Array[String] = []
-	for n in notes:
-		for t in links.get(n, []):
-			if PathRemap.link_target_matches(String(t), old_prefix):
-				out.append(n)
-				break
-	return out
+	return RelationshipEngine.notes_linking_to(old_prefix, notes, links)
 ## Recursive walk; notes store vault-relative paths ("folder/sub/note.md")
 func _scan_dir(rel: String) -> void:
 	var d := DirAccess.open(vault_dir + ("/" + rel if rel != "" else ""))
