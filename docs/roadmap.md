@@ -61,8 +61,6 @@ phone ↔ PC over the local network.
   switching away and back keeps peers. Identity stays on `GameManager` for now;
   a first-class `VaultRegistry` service is planned (see
   `architecture/gamemanager-split.md`).
-- **APK hygiene** — `include_filter="*.md"` currently ships `README.md`,
-  `AGENTS.md`, and this context kit; only `docs/help.md` is needed at runtime.
 
 ### Graph as a knowledge-base editor
 

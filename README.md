@@ -189,6 +189,10 @@ rewrite the file and can drop CLI edits. Change presets in the editor UI. Note
 that the **release preset currently has `permissions/internet=false`**, so a
 release build will fail at LAN sync — set it to `true` there as well.
 
+The presets ship **only `docs/help.md`** as a non-resource file. `tests/*`,
+`scripts/dev/*`, `addons/godot-mcp/*` and (on Android) `ios/*` are excluded from
+the PCK, so test scenes, harness scripts and the MCP bridge never reach an APK.
+
 Both Android presets use the **Gradle build** because `addons/SharePlugin`
 (incoming share sheet) and `addons/MarkdownOpen` (Open with) are Android
 plugins, and Godot only compiles a plugin's AAR into the APK through Gradle. Install the build template once from the editor

@@ -365,9 +365,14 @@ story. If a rule changes, change the code/test and this line together.
 - **INV-089 — Generated docs-vault folder names must not equal class names.** A
   `node/` companion would win the basename lookup and steal `[[Node]]` links;
   use `nodes/`, `resources/`, etc. Guard: `tools/gen_godot_docs_vault.py`.
-- **INV-090 — `export_presets.cfg` `include_filter="*.md"` ships all Markdown**
-  (README, AGENTS, this kit, help). The app only needs `docs/help.md`; narrow the
-  filter if internal docs should not be packaged. Guard: `export_presets.cfg`.
+- **INV-090 — Export ships only `docs/help.md`, never dev files or other Markdown.**
+  `all_resources` covers imported resources only; non-resource files need
+  `include_filter`, which is `docs/help.md` in every preset. Keep `tests/*`,
+  `scripts/dev/*`, `addons/godot-mcp/*` and (Android) `ios/*` in
+  `exclude_filter` so test scenes, harness scripts and the MCP bridge never
+  enter the PCK. Never exclude `docs/*`: the exclude filter is applied on top of
+  the include filter and would drop the help page (GOT-017).
+  Guard: `export_presets.cfg`.
 - **INV-091 — Graph radial layout is deterministic and adaptively spaced.**
   `_assign_sectors()` receives an explicit `base_edge`; `_child_edge()` derives
   each parent's child-ring radius from fan-out and usable angular slot (clamped

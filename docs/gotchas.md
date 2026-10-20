@@ -54,3 +54,8 @@ change must respect live in [`invariants.md`](invariants.md).
   merger.** Writing `android:pathPattern=".*\.md"` in a plugin's manifest
   addition exports as `.*.md` (the backslash is lost). Use a character class:
   `android:pathPattern=".*[.]md"`.
+- **GOT-017 — `all_resources` does not ship non-resource files.** Markdown,
+  JSON and text need an `include_filter` entry; `exclude_filter` is applied on
+  top, so excluding a parent folder (`docs/*`) drops an explicitly included
+  child (`docs/help.md`). Whitelist the help file and exclude only resource
+  dirs (`tests/*`, `scripts/dev/*`, `addons/godot-mcp/*`).
