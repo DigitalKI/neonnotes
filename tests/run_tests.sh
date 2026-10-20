@@ -42,6 +42,10 @@ run_godot_test "CAPTURE RESULT: OK" --headless --path . tests/TestCapture.tscn
 run_godot_test "SHARE INTAKE RESULT: OK" --headless --path . tests/TestShareIntake.tscn
 # Trash: recoverable deletes, dot-hidden, sync-excluded, collision restore, purge.
 run_godot_test "TRASH RESULT: OK" --headless --path . tests/TestTrash.tscn
+# Delete → shell sync: every delete affordance (right-click, ⋮ menu, graph
+# circle menu) rebuilds tree AND graph and opens the nearest note;
+# the deleted row never lingers under an active search/tag filter.
+run_godot_test "DELETE NOTE RESULT: OK" --headless --path . tests/TestDeleteNote.tscn
 # Move page: relocate a note from the ⋮ menu (stays open) and the graph circle
 # menu (returns + re-focuses), rewriting wiki-links and guarding self-nesting.
 run_godot_test "MOVE RESULT: OK" --headless --path . tests/TestMoveDialog.tscn

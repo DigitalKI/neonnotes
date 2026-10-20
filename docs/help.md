@@ -70,8 +70,10 @@ Typing in the search field or in the editor's tag input opens tag autocomplete,
 which ranks prefix matches first, then substrings, then near-matches — useful
 for catching near-duplicate tags (`jw` vs `j-w`, `coding` vs `code`).
 
-The tree also has a **🗑 Delete Node** button and a right-click **Delete…** menu
-for the selected row.
+The tree's right-click **Delete…** menu (or ⋮ **Delete Note…** on a device without
+a secondary click) deletes the selected row. Deleting removes the row from the
+tree and the node from the graph immediately, and opens the nearest remaining
+note in that folder (or the nearest one elsewhere when the folder is empty).
 
 ## 4. Basic formatting
 

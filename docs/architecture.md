@@ -130,10 +130,18 @@ carried it. `VaultMove` repoints `current_rel` for the note itself, notes inside
 a moved folder, and a folder's companion note.
 
 ### Delete, trash, restore
-`VaultTreeComponent.delete_node()` → `TrashStore.move_to_trash()` (note or whole
-folder subtree + companion + media) → `.trash/index.json`; peers receive
-tombstones. Restore re-creates files, rescans, and fires `note_restored()` for
-every restored path. Purge/empty are explicit; 30-day retention.
+Every delete affordance — the tree's right-click **Delete…**, the ⋮ **Delete
+Note…**, and the graph circle-menu **Delete** — calls
+`VaultTreeComponent.delete_node()`, so they share one confirmed flow:
+`_perform_delete()` → `TrashStore.move_to_trash()` (note or whole folder subtree
++ companion + media) → `.trash/index.json`; peers receive tombstones. The shell
+refresh afterwards is not optional: `_refresh_after_change()` → Main's
+`_refresh_list()` rebuilds tree **and** graph, and when the open note was deleted
+`_open_nearest_after_delete()` opens the nearest survivor (same folder first,
+then anywhere) even if an active search/tag filter hides its row. Active search
+results drop the deleted paths and re-run the query. Restore re-creates files,
+rescans, and fires `note_restored()` for every restored path. Purge/empty are
+explicit; 30-day retention.
 
 ### Sync
 UDP 47770 discovery → pairing proof (phrase never sent) → `probe` fingerprint →
@@ -195,12 +203,14 @@ common wrapper stripped, bare note gets `title`/`created`); sync pauses/resumes.
 | `tests/TestCapture.tscn` | Inbox capture (text/link/image), pinned/badged row |
 | `tests/TestShareIntake.tscn` | Plugin-free share payload routing into Inbox |
 | `tests/TestTrash.tscn` | Trash move/restore/purge, hidden/unsynced |
+| `tests/TestDeleteNote.tscn` | Every delete path rebuilds tree + graph, opens nearest note |
 | `tests/TestMoveDialog.tscn` | Move page + graph Move, self-nesting guards, Inbox rules |
 | `tests/TestDevIsolation.tscn` | Dev/MCP vault isolation, no settings persistence |
 | `tests/TestMetaCache.tscn` | Metadata index cache warm/cold, moves invalidate |
 | `tests/TestUndoRedo.tscn` | ⋮ Undo/Redo visibility, history availability, note-switch clear |
 | `tests/TestTreeReveal.tscn` | Reveal tree row after external selection |
 | `tests/TestPreviewFit.tscn` | Phone-width overflow (missing image placeholder) |
+| `tests/TestPreviewTasks.tscn` | Interactive task checkboxes save their tick; thematic breaks render |
 | `tests/TestLinkResolve.tscn` | Unresolved wiki-link page/suggestions/create |
 | `tests/ReproTreeTap.tscn` | Mobile tree tap/long-press + drawer/card dismissal |
 | `tests/TestSelectionOverlay.tscn` | Android selection bar, loupe, edge auto-scroll |

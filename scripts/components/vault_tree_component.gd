@@ -11,7 +11,6 @@ signal delete_requested
 signal capture_requested
 
 @onready var side_tree: Tree = %SideTree
-@onready var tree_delete_btn: Button = %TreeDeleteBtn
 @onready var capture_btn: Button = %CaptureBtn
 @onready var config_btn: Button = %ConfigBtn
 @onready var help_btn: Button = %HelpBtn
@@ -59,7 +58,7 @@ var _parsed_tags: Array[String] = []
 var _tag_suggest: TagSuggest
 
 ## Wire behavior once the scene nodes are ready. The host connects
-## palette_btn/vault_btn/sync_btn/tree_delete_btn signals itself.
+## palette_btn/vault_btn/sync_btn signals itself.
 
 func build() -> void:
 	_search_timer.one_shot = true
@@ -638,12 +637,28 @@ func _add_note_leaf(parent: TreeItem, n: String) -> void:
 	leaf.set_tooltip_text(0, base)
 	leaf.set_metadata(0, n)
 
-## Notes inside `dir`, custom order first, then alphabetical.
+## Notes inside `dir`, custom order first, then alphabetical. Filtered by the
+## active search/tag query (this is the tree's visual order).
 func ordered_notes(dir: String) -> Array[String]:
 	var lst: Array[String] = []
 	for n in GameManager.notes:
 		if n.get_base_dir() == dir and note_visible(n):
 			lst.append(n)
+	return _sort_notes(lst, dir)
+
+## Every note inside `dir` in the same order, ignoring the active filter. The
+## post-delete nearest-note hand-off needs this: the nearest surviving note may
+## be one the tree is hiding (`#tag`/search), and picking only visible notes
+## would leave the editor blank.
+func _ordered_notes_all(dir: String) -> Array[String]:
+	var lst: Array[String] = []
+	for n in GameManager.notes:
+		if n.get_base_dir() == dir:
+			lst.append(n)
+	return _sort_notes(lst, dir)
+
+## Order `lst` by the vault's custom order for `dir`, then alphabetically.
+func _sort_notes(lst: Array[String], dir: String) -> Array[String]:
 	var want: Array = GameManager.order.get(dir, [])
 	lst.sort_custom(func(a: String, b: String) -> bool:
 		var ia := want.find(a)
@@ -974,7 +989,11 @@ func _inbox_label() -> String:
 	return "📥 Inbox" if n == 0 else "📥 Inbox (%d)" % n
 
 
-func select_note(fname: String, open_note := true) -> void:
+## Select a note's row and (optionally) open it. Returns false when the note has
+## no row in the current tree — an active search/tag filter, or a batched result
+## render still in flight. Callers that must open the note anyway (the
+## post-delete nearest-note hand-off) fall back to `note_requested`.
+func select_note(fname: String, open_note := true) -> bool:
 	# The homepage has no leaf row — it is opened through the Vault root item
 	# (see _refresh_list). Matching on metadata alone would miss it, so a graph
 	# node (or wiki-link) pointing at the homepage would do nothing.
@@ -984,16 +1003,17 @@ func select_note(fname: String, open_note := true) -> void:
 		side_tree.set_selected(root, 0)
 		if open_note:
 			_open_tree_item(root)
-		return
+		return true
 	# find matching leaf in the tree
 	var stack: Array[TreeItem] = [side_tree.get_root()]
 	while not stack.is_empty():
 		var it: TreeItem = stack.pop_back()
 		if it.get_metadata(0) == fname:
 			_reveal_tree_item(it, open_note)
-			return
+			return true
 		for c in it.get_children():
 			stack.append(c)
+	return false
 
 
 ## Select a row and actually bring it into view. `scroll_to_item` alone is not
@@ -1172,19 +1192,25 @@ func _perform_delete(rel: String, keep_children: bool = false) -> void:
 			DirAccess.remove_absolute(abs_folder)
 
 		var comp_note := folder_rel + ".md"
+		var deleted_note := ""
 		if FileAccess.file_exists(vault.path_join(comp_note)):
 			# The folder node itself (companion note) is deleted; its children
 			# were moved up above. Recoverable, so it goes to the Trash too.
 			TrashStore.move_to_trash(comp_note, [comp_note])
 			NoteCrud.erase_note_meta(comp_note)
 			if GameManager.current_rel == comp_note:
+				deleted_note = comp_note
 				clear_note_cb.call()
 
 		NoteCrud.scrub_order(moved)
 		VaultMove.prune_empty_dirs()
 		GameManager.scan_notes()
+		if not moved.is_empty():
+			_forget_deleted_from_search(moved)  # stale paths: re-run the query
 		_refresh_after_change()
-		if GameManager.current_rel != "":
+		if deleted_note != "":
+			_open_nearest_after_delete(deleted_note, [comp_note])
+		elif GameManager.current_rel != "":
 			select_note(GameManager.current_rel)
 		flash_cb.call("Deleted %s — children moved to %s" % [folder_rel.get_file(), parent_dir if parent_dir != "" else "vault root"])
 		return
@@ -1208,25 +1234,55 @@ func _perform_delete(rel: String, keep_children: bool = false) -> void:
 		sync_note_deleted_cb.call(deleted_path)
 	VaultMove.prune_empty_dirs()
 	GameManager.scan_notes()
+	_forget_deleted_from_search(affected)
 	_refresh_after_change()
 
 	if deleted_current:
-		var dir := deleted_note.get_base_dir() if deleted_note.contains("/") else ""
-		var candidates := ordered_notes(dir)
-		if candidates.is_empty():
-			for d in GameManager.order.keys():
-				candidates = ordered_notes(str(d))
-				if not candidates.is_empty():
-					break
-		if candidates.is_empty():
-			candidates = visible_notes()
-		var next_note := ""
-		for n in candidates:
-			if not affected.has(n):
-				next_note = n
-				if n > deleted_note:
-					break
-		if next_note != "" and GameManager.notes.has(next_note):
-			select_note(next_note)
+		_open_nearest_after_delete(deleted_note, affected)
 
 	flash_cb.call("🗑 Moved to Trash: " + rel)
+
+
+## Drop deleted paths from the live search results before the tree rebuild. A
+## result set is a snapshot of paths from before the delete, so without this the
+## filtered tree can keep a row for a note that is already gone. The query is
+## re-run (like a move does) because the nearest-note hand-off may point at a
+## note outside the current result set.
+func _forget_deleted_from_search(deleted: Array) -> void:
+	if not _search_showing_results:
+		return
+	var kept: Array = []
+	for n in _search_results:
+		if not deleted.has(n):
+			kept.append(n)
+	_search_results = kept
+	for n in deleted:
+		_search_snippets.erase(n)
+	_restart_search()
+
+
+## After a delete removed the open note: open the nearest surviving note in the
+## same folder (the next one in custom order, else the previous), falling back to
+## the first surviving note elsewhere so the editor is never left blank. The row
+## can be missing from the tree (active search/tag filter, batched result render),
+## so a miss still opens the note through `note_requested`.
+func _open_nearest_after_delete(deleted_note: String, affected: Array) -> void:
+	var dir := deleted_note.get_base_dir() if deleted_note.contains("/") else ""
+	var candidates := _ordered_notes_all(dir)
+	if candidates.is_empty():
+		for d in GameManager.order.keys():
+			candidates = _ordered_notes_all(str(d))
+			if not candidates.is_empty():
+				break
+	if candidates.is_empty():
+		candidates = GameManager.notes.duplicate()
+	var next_note := ""
+	for n in candidates:
+		if not affected.has(n):
+			next_note = n
+			if n > deleted_note:
+				break
+	if next_note == "" or not GameManager.notes.has(next_note):
+		return
+	if not select_note(next_note):
+		note_requested.emit(next_note)

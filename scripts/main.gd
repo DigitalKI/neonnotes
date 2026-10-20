@@ -419,6 +419,10 @@ func _refresh_list() -> void:
 	vault_tree.refresh()
 	if selected != "":
 		vault_tree.select_note(selected, false)
+	# A delete/move may have removed the open note: keep the ⋮ Delete row honest
+	# for whatever the rebuilt tree now has selected (and grey the sidebar
+	# button, which the tree syncs from the same selection).
+	_update_delete_controls()
 	# Tree rebuilds must not change the mobile workspace the user was viewing.
 	if layout_component.is_mobile_layout and layout_component.drawer_open != mobile_drawer_was_open:
 		layout_component.drawer_open = mobile_drawer_was_open
@@ -659,8 +663,8 @@ func _sync_more_edit_actions() -> void:
 		toolbar.more_menu.set_edit_actions_enabled(editor.can_undo(), editor.can_redo())
 
 
-## The tree owns its delete button and the whole deletion orchestration; Main
-## only keeps the ⋮ menu's Delete entry in sync with the tree selection.
+## The tree owns the whole deletion orchestration (right-click **Delete…**);
+## Main only keeps the ⋮ menu's Delete entry in sync with the tree selection.
 func _update_delete_controls(_column: int = 0) -> void:
 	var it := vault_tree.side_tree.get_selected()
 	var root_selected := it == null or it == vault_tree.side_tree.get_root()

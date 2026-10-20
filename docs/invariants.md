@@ -391,6 +391,17 @@ story. If a rule changes, change the code/test and this line together.
   depend on `GameManager.share_target_enabled`. Guard: `addons/MarkdownOpen`,
   `scripts/components/share_intake.gd`, `tests/TestShareIntake.tscn`,
   `tests/TestCapture.tscn`.
+- **INV-094 — Every delete rebuilds tree + graph and opens the nearest note.**
+  All delete entry points (tree right-click, ⋮ menu, graph circle menu) funnel
+  through `VaultTreeComponent.delete_node()`, which must call
+  `_refresh_after_change()` (Main's `_refresh_list`, not the tree's `refresh()`)
+  and, when the open note went away, `_open_nearest_after_delete()`. The
+  nearest-note pick reads every note in the folder, not just the filtered tree,
+  and a missing row still opens the note via `note_requested` — an active
+  search/tag filter must not leave the editor blank. The sidebar carries no
+  delete button; the tree's right-click **Delete…** is the tree-level affordance
+  and ⋮ **Delete Note…** covers devices without a secondary click.
+  Guard: `tests/TestDeleteNote.tscn`.
 
 ## Engine gotchas
 
