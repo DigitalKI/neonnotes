@@ -228,6 +228,8 @@ it literal.
 | `%%glitch%%` | Glitch FX (preview only) |
 | `++flicker++` | Flicker FX (preview only) |
 | `- item` / `1. item` | Bullet / numbered lists |
+| `- [ ] task` / `- [x] task` | Interactive checklist (preview clicks save the tick) |
+| `---` (3+ dashes) | Horizontal separator |
 | `> quote` | Blockquote |
 | `[!tip] Title` | Obsidian-style callout (`note`, `info`, `tip`, `warning`, `danger`, `success`, `quote`) |
 | `\| a \| b \|` | Table |

@@ -244,12 +244,37 @@ func _check_markdown_blocks() -> void:
 	var pq := MarkdownParser.parse("> just a quote")
 	_check(pq["blocks"][0]["type"] == "quote", "plain quote stays a quote")
 
+	# thematic breaks: CommonMark allows 3+ markers. `----` (the common way to
+	# write a separator) used to fall through as paragraph text.
+	var hr_doc := MarkdownParser.parse("before\n----\nafter\n---\n___\n***")
+	var hrs: Array = hr_doc["blocks"].filter(func(b): return b.get("type", "") == "hr")
+	_check(hrs.size() == 4, "thematic breaks accept 3+ dash/star/underscore markers")
+
+	# task lists: state, source line and marker column travel with the item so
+	# the preview can write a tick back to the exact source position.
+	var tasks := MarkdownParser.parse("- [ ] open\n- [x] done\n- plain")
+	var task_block: Dictionary = tasks["blocks"][0]
+	_check(task_block["items"] == ["open", "done", "plain"], "task marker stripped from item text")
+	_check(task_block["task_states"] == [0, 1, -1], "task states carried per item")
+	_check(task_block["task_lines"] == [0, 1, 2], "task source lines carried per item")
+	_check(task_block["task_cols"] == [2, 2, -1], "task marker columns carried per item")
+	var ordered_task := MarkdownParser.parse("1. [ ] first")
+	var ot: Dictionary = ordered_task["blocks"][0]
+	_check(ot["task_states"] == [0] and ot["task_cols"] == [3],
+		"ordered task list keeps its marker column")
+	var indented_task := MarkdownParser.parse("  - [x] indented")
+	var ib: Dictionary = indented_task["blocks"][0]
+	_check(ib["task_cols"] == [4], "indented task marker keeps its source column")
+
 func _check_html_exporter() -> void:
 	var doc := MarkdownParser.parse("---\ntitle: HTML\n---\n\nfirst\nsecond")
 	var html := HtmlExporter.to_html(doc)
 	_check(html.begins_with("<!DOCTYPE html>"), "HTML document wrapper")
 	_check(html.contains("<title>HTML</title>"), "HTML title")
 	_check(html.contains("first<br>second"), "HTML paragraph newline")
+	var task_html := HtmlExporter.to_html(MarkdownParser.parse("- [ ] open\n- [x] done"))
+	_check(task_html.contains("type=\"checkbox\" disabled> open"), "HTML keeps an open task unchecked")
+	_check(task_html.contains("type=\"checkbox\" disabled checked> done"), "HTML keeps a completed task checked")
 
 ## Post-move path remap: a move changes paths only, so the in-memory index is
 ## remapped exactly instead of rescanning the whole vault (drag/drop hot path).
@@ -499,6 +524,20 @@ func _check_markdown_line_model() -> void:
 		and not rev_lists[0]["numbers"].has(0),
 		"a bullet list after a numbered list is its own unordered list")
 
+	# thematic break: the whole line is a marker (the highlighter tints it)
+	var hr := MarkdownParser.parse("before\n----")
+	_check(hr["lines"][1]["kind"] == BL.HR, "thematic break classified")
+	_check(_mark_of(MarkdownParser.line_markers(BL.HR, "----"), BM.HR) != null,
+		"thematic break emits a whole-line marker")
+
+	# task checkbox: the `[ ]`/`[x]` span carries its state and source column
+	var tk: Variant = _mark_of(MarkdownParser.line_markers(BL.LIST, "- [x] done"), BM.TASK_CHECK)
+	_check(tk != null and tk["start"] == 2 and tk["length"] == 3 and tk["checked"] == true,
+		"task marker spans [x] at its source column")
+	var open_tk: Variant = _mark_of(MarkdownParser.line_markers(BL.LIST, "  - [ ] open"), BM.TASK_CHECK)
+	_check(open_tk != null and open_tk["start"] == 4 and open_tk["checked"] == false,
+		"indented task marker keeps its source column")
+
 
 ## The highlighter emits column-keyed colour runs; CodeEdit paints each key's
 ## colour until the NEXT key, so a tint must never outlive its construct. These
@@ -525,6 +564,13 @@ func _check_highlighter_ranges() -> void:
 	# table delimiter row is a single grey run (all of it, not just its indent)
 	var r4 := _hl_ranges("| a | b |\n|---|---|\n| 1 | 2 |", 1)
 	_check(r4.has(0) and not r4.has(1), "the table delimiter row is one grey run")
+	# task marker: bullet + `[ ]` tinted, then the item body starts plain
+	var r5 := _hl_ranges("- [ ] item")
+	_check(r5.has(0) and r5.has(2) and not r5.has(3),
+		"highlighter tints the task marker separately from the item text")
+	# thematic break: one colour for the whole line, like a heading
+	var r6 := _hl_ranges("before\n----", 1)
+	_check(r6.has(0) and not r6.has(1), "thematic break is one run")
 
 	# heading colour == the preview's accent ramp (accent..accent4) for every
 	# level, so "#".."####" read identically in edit and preview modes.

@@ -116,6 +116,8 @@ func _mark_color(mtype: int) -> Color:
 		MarkdownParser.BlockMark.QUOTE_TEXT: return _c("text", Color("d9e1ff"))
 		MarkdownParser.BlockMark.HEADING_MARK: return _c("heading", Color("ff2ea6"))
 		MarkdownParser.BlockMark.LIST_MARK: return _c("accent2", Color("00e5ff"))
+		MarkdownParser.BlockMark.TASK_CHECK: return _c("accent", Color("ff2ea6"))
+		MarkdownParser.BlockMark.HR: return _c("accent2", Color("00e5ff"))
 	return Color.WHITE
 
 
@@ -180,6 +182,9 @@ func _get_line_syntax_highlighting(line: int) -> Dictionary:
 		if mt == BM.HEADING_MARK and m.has("level"):
 			# Whole-line heading colour, matching the preview's accent ramp.
 			c = [accent, accent2, accent3, accent4][clampi(int(m["level"]) - 1, 0, 3)]
+		elif mt == BM.TASK_CHECK and bool(m.get("checked", false)):
+			# A completed task's marker is de-emphasized, like the preview.
+			c = dim
 		if c != Color.WHITE:
 			_paint_span(buf, int(m["start"]), int(m["start"]) + int(m["length"]), c)
 

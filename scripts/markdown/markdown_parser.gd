@@ -25,7 +25,7 @@ enum BlockLine { PLAIN, FRONT_MATTER, FENCE, CODE, CHART, TABLE_DELIM, TABLE_ROW
 ## Block-marker span kinds emitted by line_markers(); the highlighter maps each
 ## to a palette colour. Offsets are into the *raw* source line.
 enum BlockMark { FENCE, CODE_TEXT, CHART_KEY, TABLE_PIPE, TABLE_DELIM, QUOTE_MARK,
-	QUOTE_TEXT, HEADING_MARK, LIST_MARK }
+	QUOTE_TEXT, HEADING_MARK, LIST_MARK, TASK_CHECK, HR }
 
 ## Break a single source line into non-overlapping inline spans, in source
 ## order. Semantic spans carry: { type, start, length, content_start,
@@ -282,6 +282,34 @@ static func _image_re() -> RegEx:
 		_re_image = RegEx.create_from_string("^!\\[([^\\]]*)\\]\\(([^)]*)\\)\\s*$")
 	return _re_image
 
+## Task-list marker at the start of a list item's text: `[ ]`, `[x]`, `[X]`.
+## The trailing whitespace belongs to the marker so the item text starts clean.
+static var _re_task: RegEx = null
+
+static func _task_re() -> RegEx:
+	if _re_task == null:
+		_re_task = RegEx.create_from_string("^\\[([ xX])\\](?:\\s+|$)")
+	return _re_task
+
+## CommonMark thematic break: three or more of the same `-`, `*` or `_`,
+## optionally separated by spaces/tabs. `---` on line 0 is front matter; parse()
+## consumes that before a line can reach this check.
+static func _is_hr(line: String) -> bool:
+	var s := line.strip_edges()
+	if s.length() < 3:
+		return false
+	var ch := ""
+	var count := 0
+	for c in s:
+		if c == " " or c == "\t":
+			continue
+		if ch == "":
+			ch = c
+		if c != ch or not "*-_".contains(c):
+			return false
+		count += 1
+	return count >= 3
+
 ## Block-level marker spans for one source line, given its BlockLine kind from
 ## parse()["lines"]. The highlighter colours these directly, so marker geometry
 ## lives with the block rules instead of being re-derived in the editor.
@@ -333,14 +361,23 @@ static func line_markers(kind: int, text: String) -> Array[Dictionary]:
 			# colour (inline spans still override on top where present).
 			spans.append({"type": BlockMark.HEADING_MARK, "start": 0,
 				"length": text.length(), "level": hs})
+		BlockLine.HR:
+			# The whole `---`/`***`/`___` run is formatting syntax.
+			spans.append({"type": BlockMark.HR, "start": 0, "length": text.length()})
 		BlockLine.LIST:
 			var m := _list_re().search(text.strip_edges())
 			if m != null:
-				var off := text.length() - text.lstrip(" ").length()
+				var off := text.length() - text.lstrip(" \t").length()
 				# Marker runs to the item text; the parser's regex captures the
 				# rest in group 2, so subtract it to get the "- " / "1. " prefix.
 				var prefix_len := m.get_string().length() - m.get_string(2).length()
 				spans.append({"type": BlockMark.LIST_MARK, "start": off, "length": prefix_len})
+				# Task-list checkbox: tint `[ ]` / `[x]` separately from the bullet.
+				var tm := _task_re().search(m.get_string(2))
+				if tm != null:
+					spans.append({"type": BlockMark.TASK_CHECK,
+						"start": off + prefix_len, "length": 3,
+						"checked": tm.get_string(1).to_lower() == "x"})
 	return spans
 
 static func _scan_code_span(text: String, p: int) -> Dictionary:
@@ -426,7 +463,7 @@ static func parse(text: String) -> Dictionary:
 			if n <= 4 and n < t.length() and t[n] == " ":
 				flush.call(); blocks.append({"type":"heading", "level":n, "text":t.substr(n).strip_edges()})
 				set_line.call(i, BlockLine.HEADING, ""); i += 1; continue
-		if t == "---" or t == "***" or t == "___":
+		if _is_hr(t):
 			flush.call(); blocks.append({"type":"hr"}); set_line.call(i, BlockLine.HR, ""); i += 1; continue
 		# image embed: ![alt](vault-relative path) on its own line; empty src = placeholder
 		var im := _image_re().search(t)
@@ -480,16 +517,36 @@ static func parse(text: String) -> Dictionary:
 		var m := list_match.search(t)
 		if m:
 			flush.call(); var ordered := m.get_string(1) != ""; var items: Array[String] = []; var numbers: Array[int] = []
+			# Parallel task metadata: -1 = ordinary item; otherwise state 0/1 plus
+			# the source line and the column of the `[ ]`/`[x]` marker. The preview
+			# uses line/col to write a tick straight back to the file.
+			var task_states: Array[int] = []; var task_lines: Array[int] = []; var task_cols: Array[int] = []
 			while i < lines.size():
-				var mm := list_match.search(lines[i].strip_edges()); if mm == null: break
+				var raw_line := lines[i]
+				var mm := list_match.search(raw_line.strip_edges()); if mm == null: break
 				# A switch between ordered (`1.`) and unordered (`-`) markers closes
 				# the list and starts a new one; absorbing it would render the
 				# numbered items as bullets (and vice versa) and leave a `0.` bullet.
 				if (mm.get_string(1) != "") != ordered: break
 				set_line.call(i, BlockLine.LIST, "")
-				items.append(mm.get_string(2)); i += 1
+				var item_text := mm.get_string(2)
+				var state := -1
+				var col := -1
+				var tm := _task_re().search(item_text)
+				if tm != null:
+					state = 1 if tm.get_string(1).to_lower() == "x" else 0
+					var leading := raw_line.length() - raw_line.lstrip(" \t").length()
+					var prefix_len := mm.get_string().length() - mm.get_string(2).length()
+					col = leading + prefix_len
+					item_text = item_text.substr(tm.get_end()).strip_edges()
+				items.append(item_text)
+				task_states.append(state)
+				task_lines.append(i)
+				task_cols.append(col)
+				i += 1
 				if ordered: numbers.append(int(mm.get_string(1)))
-			blocks.append({"type":"list", "ordered":ordered, "items":items, "numbers":numbers}); continue
+			blocks.append({"type":"list", "ordered":ordered, "items":items, "numbers":numbers,
+				"task_states":task_states, "task_lines":task_lines, "task_cols":task_cols}); continue
 		para.append(t); i += 1
 	flush.call()
 	return {"meta":meta, "blocks":blocks, "lines":lines_info}

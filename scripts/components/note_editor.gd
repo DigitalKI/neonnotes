@@ -62,6 +62,11 @@ var _saved_title := ""
 var _saved_tags: Array[String] = []
 var _note_tags: Array[String] = []
 
+## Lines `NoteMetadata.preview()` prepends to the body (the title H1 and its
+## blank separator). Preview line numbers are mapped back through this when a
+## task checkbox writes a tick into `code_edit.text`.
+var _preview_line_offset := 0
+
 ## In-document find (edit mode): every match is painted by the highlighter,
 ## the arrows step through `_search_matches` and the current one is selected.
 var _search_query := ""
@@ -678,16 +683,70 @@ func render_preview(preserve_scroll := false) -> void:
 	title_panel.visible = false
 	%ContentHost.visible = true
 	var prev_scroll: float = %ContentHost.scroll_vertical if preserve_scroll else 0.0
-	var doc := MarkdownParser.parse(NoteMetadata.preview(code_edit.text, _note_title))
+	var body_text := code_edit.text
+	var preview_text := NoteMetadata.preview(body_text, _note_title)
+	_preview_line_offset = _preview_text_offset(preview_text, body_text)
+	var doc := MarkdownParser.parse(preview_text)
 	# per-note theme: front-matter  theme: <Palette>
 	PreviewBuilder.pal_override = GameManager.PALETTES.get(str(doc.get("meta", {}).get("theme", "")), {})
 	# Progressive build: a large note streams in over several frames instead of
 	# blocking this one (~1.9 s for a 2k-line note on a phone before).
-	await PreviewBuilder.build_async(self, doc, content_body)
+	await PreviewBuilder.build_async(self, doc, content_body, _on_preview_task)
 	# Fresh renders (mode switch/new note) drop to the top; a sync re-render keeps
 	# the reader's scroll offset instead of jumping them.
 	if is_instance_valid(%ContentHost):
 		%ContentHost.scroll_vertical = prev_scroll
+
+
+## Lines prepended by NoteMetadata.preview(): 0 when the body already starts
+## with the title's H1, otherwise the title H1 plus its blank separator.
+func _preview_text_offset(preview_text: String, body_text: String) -> int:
+	if preview_text == body_text or not preview_text.ends_with(body_text):
+		return 0
+	var prefix := preview_text.substr(0, preview_text.length() - body_text.length())
+	return maxi(0, prefix.split("\n", true).size() - 1)
+
+
+## A preview task checkbox was clicked. The preview is built from
+## NoteMetadata.preview(), which may prepend the title H1, so map its line back
+## to the body and rewrite only that marker. Preview hides the editor, where
+## flush() early-returns, so the change is written immediately instead.
+func _on_preview_task(preview_line: int, marker_col: int, checked: bool) -> void:
+	if help_mode or source_mode or GameManager.current_rel == "":
+		return
+	var line := preview_line - _preview_line_offset
+	if line < 0 or line >= code_edit.get_line_count():
+		return
+	var raw := code_edit.get_line(line)
+	var col := marker_col
+	if col < 0 or col + 3 > raw.length() or not _is_task_marker(raw.substr(col, 3)):
+		col = _find_task_marker(raw)
+	if col < 0:
+		return
+	var replacement := "[x]" if checked else "[ ]"
+	if raw.substr(col, 3) == replacement:
+		return
+	autosave_timer.stop()
+	code_edit.set_line(line, raw.substr(0, col) + replacement + raw.substr(col + 3))
+	save_source(GameManager.current_rel, compose_note_source())
+	var svc: Variant = sync_service()
+	if svc != null:
+		svc.note_saved(GameManager.current_rel)
+	flash_cb.call("✓ Saved " + GameManager.current_rel)
+
+
+func _is_task_marker(marker: String) -> bool:
+	return marker == "[ ]" or marker.to_lower() == "[x]"
+
+
+## Fallback for a stale preview (the source changed before it was rebuilt): find
+## the first task marker on the line.
+func _find_task_marker(line: String) -> int:
+	for marker in ["[ ]", "[x]", "[X]"]:
+		var at := line.find(marker)
+		if at >= 0:
+			return at
+	return -1
 
 
 ## Auto-refresh the open note after a sync pulled a newer copy. In VIEW

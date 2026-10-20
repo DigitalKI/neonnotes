@@ -15,10 +15,10 @@ static func _col(key: String) -> Color:
 		return pal_override[key]
 	return GameManager.color(key)
 
-static func build(doc: Dictionary, into: VBoxContainer) -> void:
+static func build(doc: Dictionary, into: VBoxContainer, task_cb := Callable()) -> void:
 	_prepare(doc, into)
 	for block in doc.get("blocks", []):
-		_add_block(block, into)
+		_add_block(block, into, task_cb)
 	into.add_child(Control.new())
 
 
@@ -34,7 +34,7 @@ static var _generation := 0
 ## build() but yields a frame every BUILD_BATCH blocks, so a large note streams
 ## in instead of freezing the UI for seconds (measured ~1.9 s for a 2k-line note
 ## on a phone). Exporters keep the synchronous build().
-static func build_async(host: Control, doc: Dictionary, into: VBoxContainer) -> void:
+static func build_async(host: Control, doc: Dictionary, into: VBoxContainer, task_cb := Callable()) -> void:
 	_generation += 1
 	var gen := _generation
 	var tree := host.get_tree()
@@ -43,7 +43,7 @@ static func build_async(host: Control, doc: Dictionary, into: VBoxContainer) -> 
 	for block in doc.get("blocks", []):
 		if gen != _generation or not is_instance_valid(into):
 			return
-		_add_block(block, into)
+		_add_block(block, into, task_cb)
 		n += 1
 		if tree != null and n % BUILD_BATCH == 0:
 			await tree.process_frame
@@ -68,7 +68,7 @@ static func _prepare(doc: Dictionary, into: VBoxContainer) -> void:
 
 ## Add a single parsed block. Colours/sizes are re-derived here (dictionary
 ## lookups) so both build paths stay in lock-step without a shared context.
-static func _add_block(block: Dictionary, into: VBoxContainer) -> void:
+static func _add_block(block: Dictionary, into: VBoxContainer, task_cb := Callable()) -> void:
 	var accent := _col("accent")
 	var accent2 := _col("accent2")
 	var text_c := _col("text")
@@ -95,7 +95,7 @@ static func _add_block(block: Dictionary, into: VBoxContainer) -> void:
 		"hr":
 			into.add_child(_rule(accent2))
 		"list":
-			into.add_child(_list_block(block, accent, text_c))
+			into.add_child(_list_block(block, accent, text_c, task_cb))
 		"code":
 			into.add_child(_code_block(str(block["text"]), accent2, text_c))
 		"table":
@@ -402,7 +402,7 @@ static func _callout_block(block: Dictionary, text_c: Color) -> Control:
 			vb.add_child(_rich(_inline(escape(line)), text_c))
 	return panel
 
-static func _list_block(block: Dictionary, accent: Color, text_c: Color) -> Control:
+static func _list_block(block: Dictionary, accent: Color, text_c: Color, task_cb := Callable()) -> Control:
 	# Each item gets its own RichTextLabel so wrapped continuation lines hang
 	# under the item text (not under the bullet). The bullet sits in a fixed-width
 	# label; the item expands to fill the remainder, keeping text aligned.
@@ -412,22 +412,64 @@ static func _list_block(block: Dictionary, accent: Color, text_c: Color) -> Cont
 	var ordered: bool = block.get("ordered", false)
 	var items: Array = block.get("items", [])
 	var numbers: Array = block.get("numbers", [])
+	var states: Array = block.get("task_states", [])
+	var task_lines: Array = block.get("task_lines", [])
+	var task_cols: Array = block.get("task_cols", [])
+	var accent2 := _col("accent2")
+	var dim := Color(text_c.r, text_c.g, text_c.b, 0.55)
 	for idx in items.size():
 		var item := str(items[idx])
-		var num := int(numbers[idx]) if ordered and idx < numbers.size() else idx + 1
-		var bullet := ("%d." % num) if ordered else "▸"
+		var state := int(states[idx]) if idx < states.size() else -1
 		var row := HBoxContainer.new()
 		row.name = "ListItem"
 		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		var be := _rich("[color=#%s]%s[/color]" % [_hex(accent), bullet], text_c)
-		be.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-		be.custom_minimum_size = Vector2(28 if ordered else 22, 0)
-		be.fit_content = true
-		row.add_child(be)
-		var it := _rich(_inline(escape(item)), text_c)
-		it.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		it.fit_content = true
-		row.add_child(it)
+		if state >= 0:
+			# Task item: a real checkbox replaces the bullet. It is interactive only
+			# when the host passed a callback (the note preview); exports and graph
+			# cards get the same control with clicks ignored.
+			var marker_col := dim if state == 1 else accent
+			var check := CheckBox.new()
+			check.name = "TaskCheck"
+			check.button_pressed = state == 1
+			check.focus_mode = Control.FOCUS_NONE
+			check.custom_minimum_size = Vector2(26, 0)
+			check.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+			# CheckBox icons are white in the default theme; modulate tints the
+			# outline/check with the active palette instead of leaving it grey.
+			check.modulate = marker_col
+			if task_cb.is_valid() and idx < task_lines.size() and idx < task_cols.size():
+				var line := int(task_lines[idx])
+				var col := int(task_cols[idx])
+				check.tooltip_text = "Toggle checkbox"
+				check.mouse_entered.connect(func() -> void:
+					check.modulate = accent2)
+				check.mouse_exited.connect(func() -> void:
+					check.modulate = dim if check.button_pressed else accent)
+				check.toggled.connect(func(pressed: bool) -> void:
+					check.modulate = dim if pressed else accent
+					task_cb.call(line, col, pressed))
+			else:
+				check.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			row.add_child(check)
+			var content := _inline(escape(item))
+			if state == 1:
+				content = "[color=#%s][s]%s[/s][/color]" % [_hex(dim), content]
+			var it := _rich(content, text_c)
+			it.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			it.fit_content = true
+			row.add_child(it)
+		else:
+			var num := int(numbers[idx]) if ordered and idx < numbers.size() else idx + 1
+			var bullet := ("%d." % num) if ordered else "▸"
+			var be := _rich("[color=#%s]%s[/color]" % [_hex(accent), bullet], text_c)
+			be.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+			be.custom_minimum_size = Vector2(28 if ordered else 22, 0)
+			be.fit_content = true
+			row.add_child(be)
+			var it := _rich(_inline(escape(item)), text_c)
+			it.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			it.fit_content = true
+			row.add_child(it)
 		box.add_child(row)
 	return box
 

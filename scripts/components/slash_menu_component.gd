@@ -18,6 +18,7 @@ const FORMAT_ITEMS := [
 	["*Italic*", "*text*"],
 	["==Highlight==", "==text=="],
 	["• Bullet list", "- "],
+	["[ ] Checkbox", "- [ ] "],
 	["1. Numbered list", "1. "],
 	["❝ Quote", "> "],
 	["</> Code block", "```\n\n```"],
@@ -28,6 +29,7 @@ const EFFECT_ITEMS := [
 ]
 const INSERT_ITEMS := [
 	["▦ Table", "| Col 1 | Col 2 |\n| --- | --- |\n| a | b |"],
+	["--- Separator", "\n---\n"],
 	["📊 Chart", "```chart\ntype: bar\ntitle: Demo\nlabels: A, B, C\nvalues: 10, 25, 18\n```"],
 	["🖼 Image", "![]( )"],
 ]

@@ -104,10 +104,22 @@ Bullet lists:
 - List me
 - One or more times
 
+Task lists put a checkbox after the bullet. Checkboxes in the preview are
+clickable: toggling one rewrites the `[ ]` or `[x]` marker in the Markdown file
+and saves immediately.
+
+- [ ] Open task
+- [x] Finished task
+
 Numbered lists preserve the numbers you write:
 
 1. As you wish
 2. No more time wasted
+
+Separate sections with a thematic break: three or more `-`, `*`, or `_`
+characters on a line of their own. The preview draws a neon rule:
+
+----
 
 A multiline quote uses `>` on every source line. The preview gives it a subtle
 background and displays one opening quote mark:

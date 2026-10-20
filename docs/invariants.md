@@ -315,6 +315,10 @@ story. If a rule changes, change the code/test and this line together.
   symbols are separate `SystemFont` entries; load the colour emoji font via
   `OS.get_system_font_path()` first).
   Guard: `GameManager.font()`, `PreviewBuilder._font_variants_for_ui`, `unit_tests.gd`.
+- **INV-070 — Preview checkboxes edit the Markdown source, not a copy.**
+  Parser supplies `task_states/task_lines/task_cols`; `NoteEditor` maps preview
+  lines through the title offset, rewrites the marker and saves immediately.
+  Exports/cards are static. Guard: `TestPreviewTasks.tscn`, `unit_tests.gd`.
 
 ## Build, export, platform
 

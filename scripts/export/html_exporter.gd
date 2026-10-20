@@ -221,9 +221,15 @@ static func _list_html(block: Dictionary) -> String:
 	if not (items is Array) or items.is_empty():
 		return ""
 	var tag := "ul" if not bool(block.get("ordered", false)) else "ol"
+	var states = block.get("task_states", [])
 	var out := "<%s>\n" % tag
-	for item in items:
-		out += "\t<li>%s</li>\n" % _inline(str(item))
+	for idx in items.size():
+		# Task items keep their check state in HTML as a disabled checkbox; the
+		# parser has already stripped `[ ]`/`[x]` from the item text.
+		var box := ""
+		if states is Array and idx < states.size() and int(states[idx]) >= 0:
+			box = "<input type=\"checkbox\" disabled%s> " % (" checked" if int(states[idx]) == 1 else "")
+		out += "\t<li>%s%s</li>\n" % [box, _inline(str(items[idx]))]
 	out += "</%s>\n" % tag
 	return out
 

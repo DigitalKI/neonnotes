@@ -58,6 +58,9 @@ run_godot_test "REVEAL RESULT: OK" --headless --path . tests/TestTreeReveal.tscn
 # Preview horizontal fit: an open note must not widen the shell past the screen
 # margins (a missing image embed's long file name used to do exactly that).
 run_godot_test "PREVIEW FIT RESULT: OK" --headless --path . tests/TestPreviewFit.tscn
+# Interactive preview blocks: task checkboxes write their tick to the Markdown
+# file immediately (through the preview title-line offset), and separators draw.
+run_godot_test "PREVIEW TASKS RESULT: OK" --headless --path . tests/TestPreviewTasks.tscn
 # Unresolved wikilinks open the resolve page (suggestions + explicit create)
 # instead of silently creating a note; #tag links filter without creating.
 run_godot_test "LINK RESOLVE RESULT: OK" --headless --path . tests/TestLinkResolve.tscn
