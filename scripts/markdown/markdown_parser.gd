@@ -292,20 +292,22 @@ static func _task_re() -> RegEx:
 	return _re_task
 
 ## CommonMark thematic break: three or more of the same `-`, `*` or `_`,
-## optionally separated by spaces/tabs. `---` on line 0 is front matter; parse()
-## consumes that before a line can reach this check.
+## optionally separated by spaces/tabs. `line` is already stripped by parse(),
+## and this runs for every source line, so reject by first character and scan
+## with unicode_at() — no per-character String allocations, no regex.
 static func _is_hr(line: String) -> bool:
-	var s := line.strip_edges()
-	if s.length() < 3:
+	var n := line.length()
+	if n < 3:
 		return false
-	var ch := ""
+	var mark := line.unicode_at(0)
+	if mark != 45 and mark != 42 and mark != 95:  # - * _
+		return false
 	var count := 0
-	for c in s:
-		if c == " " or c == "\t":
+	for k in n:
+		var c := line.unicode_at(k)
+		if c == 32 or c == 9:  # space / tab
 			continue
-		if ch == "":
-			ch = c
-		if c != ch or not "*-_".contains(c):
+		if c != mark:
 			return false
 		count += 1
 	return count >= 3
@@ -373,11 +375,12 @@ static func line_markers(kind: int, text: String) -> Array[Dictionary]:
 				var prefix_len := m.get_string().length() - m.get_string(2).length()
 				spans.append({"type": BlockMark.LIST_MARK, "start": off, "length": prefix_len})
 				# Task-list checkbox: tint `[ ]` / `[x]` separately from the bullet.
-				var tm := _task_re().search(m.get_string(2))
-				if tm != null:
-					spans.append({"type": BlockMark.TASK_CHECK,
-						"start": off + prefix_len, "length": 3,
-						"checked": tm.get_string(1).to_lower() == "x"})
+				if m.get_string(2).begins_with("["):
+					var tm := _task_re().search(m.get_string(2))
+					if tm != null:
+						spans.append({"type": BlockMark.TASK_CHECK,
+							"start": off + prefix_len, "length": 3,
+							"checked": tm.get_string(1).to_lower() == "x"})
 	return spans
 
 static func _scan_code_span(text: String, p: int) -> Dictionary:
@@ -532,13 +535,14 @@ static func parse(text: String) -> Dictionary:
 				var item_text := mm.get_string(2)
 				var state := -1
 				var col := -1
-				var tm := _task_re().search(item_text)
-				if tm != null:
-					state = 1 if tm.get_string(1).to_lower() == "x" else 0
-					var leading := raw_line.length() - raw_line.lstrip(" \t").length()
-					var prefix_len := mm.get_string().length() - mm.get_string(2).length()
-					col = leading + prefix_len
-					item_text = item_text.substr(tm.get_end()).strip_edges()
+				if item_text.begins_with("["):
+					var tm := _task_re().search(item_text)
+					if tm != null:
+						state = 1 if tm.get_string(1).to_lower() == "x" else 0
+						var leading := raw_line.length() - raw_line.lstrip(" \t").length()
+						var prefix_len := mm.get_string().length() - mm.get_string(2).length()
+						col = leading + prefix_len
+						item_text = item_text.substr(tm.get_end()).strip_edges()
 				items.append(item_text)
 				task_states.append(state)
 				task_lines.append(i)

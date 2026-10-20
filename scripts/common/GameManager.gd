@@ -606,6 +606,8 @@ var collapsed_folders: Dictionary = {}
 ## While true, _save_settings() is a no-op. Used by the smoke harness so test
 ## state can never clobber the user's real settings.
 var suppress_settings_save := false
+## True while a deferred settings write is queued (see save_settings_deferred).
+var _settings_save_queued := false
 
 ## Remember the graph view so the next launch (with the graph as start page)
 ## opens on it. Written by Main after navigation settles, not per frame.
@@ -1162,6 +1164,20 @@ func _load_settings() -> void:
 			"paired_vault_id": String(cf.get_value("sync", "paired_vault_id", "")),
 		}
 		_legacy_vault_id = legacy_id
+
+## Coalesced settings persistence for hot paths. Opening a note used to write
+## the whole ConfigFile synchronously before the editor could show it; this
+## queues that write for the next idle frame instead (still before a normal
+## quit, and still blocked by suppress_settings_save).
+func save_settings_deferred() -> void:
+	if suppress_settings_save or _settings_save_queued:
+		return
+	_settings_save_queued = true
+	_flush_settings_deferred.call_deferred()
+
+func _flush_settings_deferred() -> void:
+	_settings_save_queued = false
+	_save_settings()
 
 func _save_settings() -> void:
 	# Smoke and ad-hoc harnesses must never overwrite the user's real settings

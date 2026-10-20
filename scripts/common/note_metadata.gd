@@ -60,15 +60,21 @@ static func title_or_stem(title: String, rel: String) -> String:
 
 
 static func preview(body_text: String, title: String) -> String:
-	if title.strip_edges() == "":
+	var t := title.strip_edges()
+	if t == "":
 		return body_text
-	for line in body_text.split("\n", true):
-		if line.strip_edges() == "":
-			continue
-		if line.strip_edges() == "# " + title.strip_edges():
-			return body_text
-		break
-	return "# " + title.strip_edges() + "\n\n" + body_text
+	# Walk to the first non-empty line without splitting the whole body: this
+	# runs on every preview render, including 2k-line notes.
+	var i := 0
+	while i < body_text.length():
+		var nl := body_text.find("\n", i)
+		if nl < 0:
+			nl = body_text.length()
+		var line := body_text.substr(i, nl - i).strip_edges()
+		if line != "":
+			return body_text if line == "# " + t else "# " + t + "\n\n" + body_text
+		i = nl + 1
+	return "# " + t + "\n\n" + body_text
 
 static func update(body_text: String, previous_source: String, title: String, tags: Array[String], now: String) -> String:
 	var lines := previous_source.split("\n", true)

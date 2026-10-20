@@ -640,7 +640,9 @@ func _load_note_into_editor(fname: String) -> void:
 	GameManager.current_file = GameManager.vault_abs() + "/" + fname
 	GameManager.current_rel = fname
 	GameManager.last_opened_rel = fname
-	GameManager._save_settings()
+	# Persist last-opened in the next idle frame, not between the tap and the
+	# first rendered note (the write used to sit on the note-open hot path).
+	GameManager.save_settings_deferred()
 	var source := GameManager.read_note(fname)
 	_boot_mark("note-read")
 	editor.load_note(fname, source)

@@ -144,8 +144,13 @@ func _notification(what: int) -> void:
 func load_note(rel: String, source: String) -> void:
 	clear_search()
 	_metadata_source = source
-	_note_tags = GameManager._parse_note_meta(source).get("tags", [])
-	_note_title = NoteMetadata.field(source, "title", rel.get_file().trim_suffix(".md"))
+	# One front-matter walk for title/tags. field() + body() each re-split the
+	# whole note; opening a 2k-line note paid for two full copies.
+	var meta := GameManager._parse_note_meta(source)
+	_note_tags = meta.get("tags", [])
+	_note_title = String(meta.get("title", ""))
+	if _note_title == "":
+		_note_title = rel.get_file().trim_suffix(".md")
 	set_title_form(_note_title)
 	code_edit.text = NoteMetadata.body(source)
 	code_edit.clear_undo_history()
@@ -704,7 +709,7 @@ func _preview_text_offset(preview_text: String, body_text: String) -> int:
 	if preview_text == body_text or not preview_text.ends_with(body_text):
 		return 0
 	var prefix := preview_text.substr(0, preview_text.length() - body_text.length())
-	return maxi(0, prefix.split("\n", true).size() - 1)
+	return maxi(0, prefix.count("\n"))
 
 
 ## A preview task checkbox was clicked. The preview is built from
@@ -759,9 +764,12 @@ func reload_current() -> void:
 	var latest := GameManager.read_note(GameManager.current_rel)
 	if latest == compose_note_source():
 		return
-	_note_tags = GameManager._parse_note_meta(latest).get("tags", [])
+	var meta := GameManager._parse_note_meta(latest)
+	_note_tags = meta.get("tags", [])
 	_metadata_source = latest
-	_note_title = NoteMetadata.field(latest, "title", GameManager.current_rel.get_file().trim_suffix(".md"))
+	_note_title = String(meta.get("title", ""))
+	if _note_title == "":
+		_note_title = GameManager.current_rel.get_file().trim_suffix(".md")
 	set_title_form(_note_title)
 	code_edit.text = NoteMetadata.body(latest)
 	code_edit.clear_undo_history()
