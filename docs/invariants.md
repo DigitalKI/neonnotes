@@ -35,8 +35,12 @@ story. If a rule changes, change the code/test and this line together.
   (the drop uses Main's `refresh_cb`, not the tree's `refresh()`), and
   `VaultMove` must repoint the open note when the move carries it (the note,
   a child of a moved folder, or the folder companion). Never use
-  `DirAccess.rename_absolute()` directly. Guard: `tests/TestMoveDialog.tscn`,
-  `tests/TestVaultTreeDrag.tscn`, `tests/TestGraphTreeDrag.tscn`.
+  `DirAccess.rename_absolute()` directly. A destination that names a **note**
+  means that note's companion folder: dropping onto a note row and picking a
+  note row (or typing its path) in the Move page both resolve to `stem/`, so
+  the note becomes a folder exactly like a drop. Guard:
+  `tests/TestMoveDialog.tscn`, `tests/TestVaultTreeDrag.tscn`,
+  `tests/TestGraphTreeDrag.tscn`.
 - **INV-007 — Trash stays hidden and unsynced.** `vault/.trash/` is invisible to
   `scan_notes()`, tree, search, graph, and `_valid_sync_path`. Restore fires
   `note_restored()` for **every** restored path; delete fires `note_deleted()`
@@ -55,7 +59,11 @@ story. If a rule changes, change the code/test and this line together.
   `tests/TestCapture.tscn`, `tests/TestMoveDialog.tscn`.
 - **INV-011 — Folder-as-note merge is preserved.** A companion `x.md` shares the
   `x/` row; never render the companion twice. After a folder move,
-  `scan_notes()` before rewriting folder links. Guard: `TestVaultTreeDrag`.
+  `scan_notes()` before rewriting folder links. Both trees in the app — the
+  sidebar and the Move page's destination tree — build rows through
+  `VaultTreeRows` (`▸` folder, `◈` merged/note, metadata = companion); do not
+  add a second row builder or a second set of glyph rules. Guard:
+  `TestVaultTreeDrag`, `TestMoveDialog`, `TestSearchWorker`.
 - **INV-012 — New notes are ordered directly below the selected row** (same
   folder after a note; first child of a folder; vault root when nothing is
   selected), via `VaultTreeComponent.order_new_note()`. Guard: smoke ordering
@@ -66,10 +74,13 @@ story. If a rule changes, change the code/test and this line together.
 - **INV-014 — Canonical helpers are single sources of truth.**
   `NoteMetadata.frontmatter()/unescape()/title_or_stem()`,
   `GameManager.note_title()/wiki_link_regex()`, `TextUtils.re_escape()`,
-  `TextIO.read_text()/read_json()`, `TrashStore`, and `VaultMove`. Do not
-  re-implement front-matter scans, title fallback, the wiki-link regex, or file
-  read/delete boilerplate locally.
-  Guard: `scripts/common/note_metadata.gd`, `text_io.gd`, `trash_store.gd`, `vault_move.gd`.
+  `TextIO.read_text()/read_json()`, `TrashStore`, `VaultMove`, `VaultSearch`
+  (query parse, tag filter, keyword hits), `VaultSearchRunner` (debounce +
+  worker) and `VaultTreeRows` (tree rows). Do not re-implement front-matter
+  scans, title fallback, the wiki-link regex, file read/delete boilerplate,
+  search matching, or tree-row construction locally.
+  Guard: `scripts/common/note_metadata.gd`, `text_io.gd`, `trash_store.gd`,
+  `vault_move.gd`, `vault_search.gd`, `vault_tree_rows.gd`, `tests/unit_tests.gd`.
 - **INV-015 — Use `Thread` for heavy work.** Encoding, large buffers, sync
   collection, and preview digests run on workers; the main thread yields frames
   and never blocks on `wait_to_finish()` synchronously.
@@ -407,6 +418,22 @@ story. If a rule changes, change the code/test and this line together.
   delete button; the tree's right-click **Delete…** is the tree-level affordance
   and ⋮ **Delete Note…** covers devices without a secondary click.
   Guard: `tests/TestDeleteNote.tscn`.
+- **INV-107 — App code must compile against a `disable_3d` engine.** The Android
+  AARs use `2D-V2` (`disable_3d`; `2D-V1` is the fallback), which removes 3D
+  nodes *and* 3D resource classes. Do not reference `Node3D`, 3D primitive
+  meshes (`QuadMesh`, `PlaneMesh`, …), or 3D-only modules from scripts/scenes;
+  a 2D `MultiMeshInstance2D` uses the `ArrayMesh` unit quad in
+  `GraphView._node_quad`. A missing class is a GDScript parse error at boot, not
+  an editor error, and the exported app then crashes on the GL thread
+  (GOT-021). Guard: `scripts/render/graph_view.gd`, `2D-V2`, device boot.
+- **INV-108 — The Android template is GL-only and keeps the runtime feature
+  modules.** `2D-V2` builds with `vulkan=no` and disables unused modules. Keep
+  `renderer/rendering_method` and its `.mobile` override on `gl_compatibility`;
+  Forward+/Mobile cannot initialize without the Vulkan driver. Keep `mbedtls`
+  (Crypto, SHA-256/MD5), `zip` (backup/import), `regex` (link rewriting),
+  `jpg`/`webp` (media import), and `text_server_adv` + freetype/harfbuzz/icu/
+  msdfgen (fonts). The editor still has these, so removing one only breaks the
+  exported app. Guard: `2D-V2`, `project.godot`, device boot.
 
 ## Engine gotchas
 

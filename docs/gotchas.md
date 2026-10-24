@@ -1,6 +1,6 @@
 # NeonNotes — Engine & Platform Gotchas
 
-_Last updated: 2026-10-18_
+_Last updated: 2026-10-20_
 
 Read this when debugging engine behavior, platform integration, or a weird
 layout/rendering result. It is intentionally on-demand: the rules that every
@@ -35,6 +35,12 @@ change must respect live in [`invariants.md`](invariants.md).
   that forgets this silently drops `.trash/`, `.neonnotes.json`, and
   `.neonnotes-id`. Set it explicitly: `true` for backup/restore, `false` for
   Markdown import (to skip `.obsidian/`, `.trash/`, `.git/`).
+- **GOT-012 — an OS window is clamped to the screen, so it can't be a render
+  target at an arbitrary size.** Asking for 1920x1080 on a 1920x1200 desktop
+  yields a 1853x1080 viewport, and a 9:16 phone frame is impossible. Render the
+  UI inside a `SubViewport` of the exact size and read
+  `get_texture().get_image()`; `DisplayServer.window_set_size` only sizes the
+  throwaway window. See `tools/social/capture_stage.gd`.
 - **GOT-011 — `ZIPReader.get_files()` includes directory entries.** They end in
   `/` (e.g. `vault/media/`). Skip `name.ends_with("/")` when extracting or you
   will try to write a file named like a directory.
@@ -59,3 +65,55 @@ change must respect live in [`invariants.md`](invariants.md).
   top, so excluding a parent folder (`docs/*`) drops an explicitly included
   child (`docs/help.md`). Whitelist the help file and exclude only resource
   dirs (`tests/*`, `scripts/dev/*`, `addons/godot-mcp/*`).
+- **GOT-018 — `Tree.create_item()` and `Tree.clear()` return/refuse during mouse
+  selection events.** Inside a real click (while `item_selected` is being
+  emitted) Godot logs "The tree cannot create items during mouse selection
+  events" and `create_item()` returns `null` — a `set_text()` on it crashes the
+  handler. A programmatic `set_selected()` does NOT set that state, so tests
+  miss it. Never rebuild a `Tree` from inside its own signal: defer the rebuild
+  (`_rebuild.call_deferred()`) and guard `create_item()` against null
+  (`VaultTreeRows.make_root`). Guard: `tests/TestMoveDialog.tscn` (a filtered
+  row pick asserts the rebuild waits for the click).
+- **GOT-019 — Android Gradle exports ignore `custom_template/*`.** With
+  `gradle_build/use_gradle_build=true`, the engine hides those options and
+  packages `android/build/libs/<type>/godot-lib.template_<type>.aar` instead.
+  A custom engine must replace that AAR (the template is machine-local and
+  gitignored). Guard: `tools/build_android_custom.sh`.
+- **GOT-020 — scons aborts without `pkg-config`, even for Android.** The
+  Android build links no system libraries, but `SConstruct` still requires a
+  working `pkg-config` on `PATH`. A distro-less install can use a locally
+  extracted `pkgconf`; do not debug the NDK when the failure is reported before
+  platform detection.
+
+- **GOT-021 — `disable_3d` removes 3D *resource* classes, not just 3D nodes.**
+  A `MultiMeshInstance2D` still needs a `Mesh`; `QuadMesh` is a 3D primitive and
+  is compiled out, so the script fails to parse (`Identifier "QuadMesh" not
+  declared`) and the exported app boots without its main scene, then crashes on
+  the GL thread. Build the unit quad as an `ArrayMesh` instead
+  (`GraphView._node_quad`). This only shows up in a `2D-V1`/`2D-V2` build,
+  never in the editor.
+- **GOT-022 — The exported `project.binary` still lists the `McpRuntime` autoload.**
+  `addons/godot-mcp/plugin.gd` registers it in the editor's in-memory
+  ProjectSettings, so an export writes it even when the addon is editor-only.
+  Excluding `addons/godot-mcp/*` therefore makes every boot log "Failed to
+  instantiate an autoload". Exclude the editor-side files by name instead
+  (`plugin.*`, `mcp_bridge.*`, `mcp_debugger.*`, `mcp_assets.*`, `mcp_wire.*`,
+  the collectors, icon, and docs) and keep `mcp_runtime.gd` + `mcp_log.gd`; the
+  runtime registers nothing unless `EngineDebugger.is_active()`. This is the
+  current `export_presets.cfg` filter.
+- **GOT-023 — `2D-V2` has no Vulkan driver.** The Android AAR is built with
+  `vulkan=no` to cut size; `project.godot` must stay on `gl_compatibility`
+  (including `renderer/rendering_method.mobile`). Switching to `forward_plus`
+  or `mobile` works in the editor and dies on device because there is no
+  RenderingDevice driver. Use `2D-V1` if Vulkan is ever required.
+
+- **GOT-024 — Godot's Linux exporter has no icon option.** The ELF gets the
+  window icon from `application/config/icon` inside the PCK, but a file manager,
+  dock, or app launcher reads the icon from a `.desktop` entry plus hicolor PNGs
+  (or an AppImage). Ship those alongside the binary; `packaging/linux/` and
+  `tools/package_desktop.sh` do.
+- **GOT-025 — The Windows preset's platform id is `Windows Desktop` in 4.7.**
+  A hand-written preset with `platform="Windows"` is silently skipped and the
+  CLI fails with `Invalid export preset name`. The preset *name* can still be
+  `Windows`. The Windows exporter accepts `.ico`, `.png`, `.webp`, or `.svg` for
+  `application/icon` and falls back to `application/config/icon`.

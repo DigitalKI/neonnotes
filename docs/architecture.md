@@ -1,6 +1,6 @@
 # NeonNotes — Architecture
 
-_Last updated: 2026-10-18 · Godot 4.7 · renderer: `gl_compatibility`_
+_Last updated: 2026-10-20 · Godot 4.7 · renderer: `gl_compatibility`_
 
 Read this after [`../AGENTS.md`](../AGENTS.md). It is the orientation map, not a
 changelog. Deep dives belong in `docs/architecture/*.md` and are read on demand.
@@ -54,6 +54,10 @@ settings live in `user://settings.cfg`; exports and embedded media live under
 | `scripts/common/media_import.gd` | Image import, SAF/content URIs, destination naming |
 | `scripts/common/capture.gd` | Inbox capture/import API (`capture_text/link/image`, `import_markdown`) |
 | `scripts/common/tag_match.gd`, `text_match.gd`, `text_search.gd` | Tag ranking, edit distance, find-in-document |
+| `scripts/common/vault_search.gd` | One query model (`#tags` + keywords) and its matching: tag filter + title-first keyword hits |
+| `scripts/common/vault_search_runner.gd` | Debounced, cancellable search worker shared by the sidebar and the Move page |
+| `scripts/common/vault_tree_rows.gd` | Shared tree rows: folders, folder-as-note merges, note leaves, browse/results shapes |
+| `scripts/common/list_continuation.gd` | Smart Enter for Markdown lists: marker/next-prefix analysis + fence guard (pure) |
 | `scripts/common/graph_digest.gd`, `graph_digest_store.gd` | Graph preview view-models + worker-thread cache |
 | `scripts/common/dev_session.gd` | Opt-in dev/MCP isolation policy |
 | `scripts/common/backup_service.gd` | Vault zip backup/restore, manifest, zip-slip, SAF URI copy |
@@ -68,7 +72,8 @@ settings live in `user://settings.cfg`; exports and embedded media live under
 | `scripts/sync/sync_page.gd` | Sync settings/status page |
 | `scripts/export/*.gd` | PNG/GIF/HTML exporters and outbound share |
 | `scripts/components/note_editor.gd` | Note view: editor + preview, autosave/flush, find, undo/redo, mobile selection, title/tags |
-| `scripts/components/vault_tree_component.gd` | Vault tree, drag/drop, move/delete orchestration, search/reveal |
+| `scripts/components/vault_tree_component.gd` | Vault tree: drag/drop, move/delete orchestration, search/reveal (rows from `VaultTreeRows`) |
+| `scripts/components/move_dialog.gd` | Move page: searchable destination tree (folders + notes), typed paths, note → folder |
 | `scripts/components/backlinks_card.gd` | Floating backlinks card over the note column; rows navigate through the tree |
 | `scripts/components/share_intake.gd` | OS share/open-with payload routing into `Capture`; plugin-free payload handling |
 | `scripts/components/slide_surface.gd` | Floating-panel slide/dock transitions for the drawer and graph |
@@ -86,6 +91,8 @@ settings live in `user://settings.cfg`; exports and embedded media live under
 | `scenes/components/*.tscn` | Component/page scenes |
 | `tests/*` | Headless tests + `run_tests.sh` |
 | `tools/repo_map.py`, `tools/context_audit.py` | Context-kit generation/audit |
+| `tools/social/*` | Marketing capture: stills + demo movie rendered from the real `Main.tscn` in a `SubViewport` against a disposable demo vault, then encoded/sized per platform |
+| `marketing/` | Generated social assets + copy (`.gdignore`d, never imported by the game) |
 
 _Planned (ADR-0013):_ a `KnowledgeIndex` (owned cache) → `RelationshipEngine`
 (pure read/inference) → `GraphModel` (data shape) → `GraphView` layering.
@@ -123,7 +130,15 @@ entries, then rewrite wiki-links) → `moved_cb` tombstones/restores → sync.
 Emptied-dir pruning is **not** inside `VaultMove.move_path()`: the drag path
 prunes inline in `VaultTreeComponent._perform_drop()`; the Move page/graph call
 `after_external_move()` (`VaultMove.prune_empty_ancestors()` + restart search).
-The ⋮ Move page and the graph Move both funnel through `move_path()`.
+The ⋮ Move page (also reachable from the tree's right-click **Move…**) and the
+graph Move both funnel through `move_path()`.
+The Move page's destination tree is the sidebar's vocabulary (`VaultTreeRows`):
+every folder plus every non-companion note, filtered by the same query model
+(`VaultSearch`: keywords and `#tags`, worker via `VaultSearchRunner`). Picking a
+**folder** row targets that folder; picking a **note** row targets
+`stem/`, so the note becomes a folder's companion — identical to dropping onto
+a note row in the sidebar. A typed path that names a note resolves the same way;
+a path that names nothing is created by `move_path()`.
 A drop refreshes through Main's shell callback (rebuilding both tree and
 graph), and `moved_cb` makes the graph dock follow the open note when the move
 carried it. `VaultMove` repoints `current_rel` for the note itself, notes inside
@@ -197,17 +212,18 @@ common wrapper stripped, bare note gets `title`/`created`); sync pauses/resumes.
 
 | Test | Guards |
 |---|---|
-| `tests/unit_tests.gd` | Pure helpers: tag/text match, paths, metadata, inbox, icon fallback |
-| `tests/TestSearchWorker.tscn` | Worker search + cancellation/publishing |
+| `tests/unit_tests.gd` | Pure helpers: tag/text match, list continuation, paths, metadata, inbox, icon fallback |
+| `tests/TestSearchWorker.tscn` | Shared runner: debounce, cancellation/publishing, batched rows |
 | `tests/TestVaultTreeDrag.tscn` | Tree drag/drop, folder merge, link rewrite, ordering |
 | `tests/TestCapture.tscn` | Inbox capture (text/link/image), pinned/badged row |
 | `tests/TestShareIntake.tscn` | Plugin-free share payload routing into Inbox |
 | `tests/TestTrash.tscn` | Trash move/restore/purge, hidden/unsynced |
 | `tests/TestDeleteNote.tscn` | Every delete path rebuilds tree + graph, opens nearest note |
-| `tests/TestMoveDialog.tscn` | Move page + graph Move, self-nesting guards, Inbox rules |
+| `tests/TestMoveDialog.tscn` | Move page + graph Move, destination search/rows, note → folder, self-nesting, Inbox rules |
 | `tests/TestDevIsolation.tscn` | Dev/MCP vault isolation, no settings persistence |
 | `tests/TestMetaCache.tscn` | Metadata index cache warm/cold, moves invalidate |
 | `tests/TestUndoRedo.tscn` | ⋮ Undo/Redo visibility, history availability, note-switch clear |
+| `tests/TestListEnter.tscn` | Smart list Enter: markers continue, empty item exits, fences keep native newlines |
 | `tests/TestTreeReveal.tscn` | Reveal tree row after external selection |
 | `tests/TestPreviewFit.tscn` | Phone-width overflow (missing image placeholder) |
 | `tests/TestPreviewTasks.tscn` | Interactive task checkboxes save their tick; thematic breaks render |
@@ -232,6 +248,10 @@ common wrapper stripped, bare note gets `title`/`created`); sync pauses/resumes.
   rule (and `line_markers()` for editor tinting); render in
   `PreviewBuilder`; the highlighter consumes the parser model, not its own
   block rules. Add a parser/preview test.
+- **Change tree rows or search:** `VaultTreeRows` (folder/merged/note rows, both
+  build shapes, `node_rel`/`destination`) and `VaultSearch` +
+  `VaultSearchRunner` (query model, tag filter, worker). The sidebar and the
+  Move page share them; never re-implement rows or matching in a component.
 - **Add a note operation:** go through `GameManager.write_note()` (link index,
   metadata, save) and fire `SyncService.note_saved/note_deleted/note_restored`;
   refresh via `Main._refresh_list()`.
@@ -251,8 +271,27 @@ common wrapper stripped, bare note gets `title`/`created`); sync pauses/resumes.
 - **Add a test:** `tests/TestX.tscn` + `tests/test_x.gd` printing
   `RESULT: OK`; add a `run_godot_test` line. Use `NEONNOTES_DEV=1`,
   `NEONNOTES_VAULT=<scratch>`, or the smoke vault — never the real vault.
+- **Rebuild the Android engine:** edit `2D-V2` (or the `2D-V1` fallback), then
+  run `./tools/build_android_custom.sh --export`. Gradle exports consume
+  `android/build/libs/<type>/godot-lib.template_<type>.aar`, not
+  `custom_template/*`; the script rebuilds both targets and installs the AARs.
+  See [`android-custom-build.md`](android-custom-build.md).
+- **Package a desktop release:** change the master art in
+  `packaging/icons/neonnotes-master.jpg`, run `python3 tools/make_icons.py`,
+  then `./tools/package_desktop.sh`. It exports the `Linux` and `Windows`
+  presets and stages `packaging/linux/` (desktop entry, AppStream metainfo,
+  hicolor icons, `install.sh`) into versioned archives. The Windows preset's
+  platform id is `Windows Desktop`.
 - **Add media/export:** import through `MediaImport` into `vault/media/`; render
   through `Exporter`/`GifWriter`/`HtmlExporter` into `vault/exports/`.
+- **Regenerate marketing assets:** `tools/social/CaptureStage.tscn` (11 stills)
+  and `tools/social/CaptureMovie.tscn` (PNG frame sequence, 16:9 or 9:16) drive
+  the real `Main.tscn` inside a `SubViewport` against `user://neonnotes-capture`;
+  the demo vault lives in `capture_stage.gd`. Encode with
+  `tools/social/encode_video.py` (MP4/GIF/WebP) and derive platform sizes with
+  `tools/social/platform_sizes.py`. Output lands in `marketing/`, which carries
+  a `.gdignore`. Run every capture with `NEONNOTES_VAULT` set — never at a real
+  vault.
 - **Add a backup/import option:** `BackupService` (zip + manifest + SAF copy);
   `MarkdownImporter` (plain `.md` only). Keep restore-always-asks and
   Markdown-always-new-vault; extend `tests/TestBackupImport.tscn`.

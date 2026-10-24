@@ -24,6 +24,12 @@ Useful commands:
 python3 tools/repo_map.py                      # fresh file/symbol inventory
 python3 tools/repo_map.py --check docs/architecture.md
 python3 tools/context_audit.py                 # broken links, duplicate IDs, coverage
+./tools/build_android_custom.sh --export       # 2D-only engine AARs + APKs
+./tools/package_desktop.sh                     # Linux/Windows archives + icons
+
+# Marketing stills + demo movie (real UI, disposable vault, output in marketing/)
+NEONNOTES_VAULT=user://neonnotes-capture NEONNOTES_CAPTURE_VAULT=user://neonnotes-capture \
+  godot --path . tools/social/CaptureStage.tscn
 ```
 
 ## Validation
@@ -78,6 +84,10 @@ run without one of those.
 - Keep exports under `vault/exports/` and embedded media under `vault/media/`
   (INV-018); do not edit `addons/godot-mcp/` unless the task is about the bridge
   (INV-017).
+- Marketing assets are **generated, not staged**: `tools/social/` renders the
+  real `Main.tscn` against the disposable demo vault, and `marketing/` is
+  `.gdignore`d so Godot never imports it. Do not hand-edit a capture or paste
+  screenshots from elsewhere into `marketing/`.
 - Use worker threads for heavy work (INV-015). Tabs for indentation; every
   GDScript file ends with a newline. A new `class_name` needs one
   `godot --headless --editor --quit` before smoke tests (INV-016).

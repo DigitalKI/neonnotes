@@ -43,6 +43,11 @@ you never edit front matter by hand.
 In edit mode, **⋮** also offers **Undo** and **Redo**; a row is greyed out when
 there is nothing to undo or redo, and the history belongs to the open note.
 
+Enter inside a list continues it: bullets keep their marker, numbered items
+count up, and task boxes start unchecked. Press Enter again on an empty item to
+leave the list and get a plain blank line. Shift+Enter always inserts a new line
+without continuing the list, and code fences are left alone.
+
 Type `/` by itself on a line to open the formatting menu. It inserts headings,
 emphasis, lists, quotes, tables, charts, and image snippets.
 
@@ -70,9 +75,10 @@ Typing in the search field or in the editor's tag input opens tag autocomplete,
 which ranks prefix matches first, then substrings, then near-matches — useful
 for catching near-duplicate tags (`jw` vs `j-w`, `coding` vs `code`).
 
-The tree's right-click **Delete…** menu (or ⋮ **Delete Note…** on a device without
-a secondary click) deletes the selected row. Deleting removes the row from the
-tree and the node from the graph immediately, and opens the nearest remaining
+The tree's right-click menu offers **📁 Move…** and **🗑 Delete…** (on a device
+without a secondary click, use ⋮ **Move…** / **Delete Note…**). Both act on the
+row under the cursor, which the menu selects first. Deleting removes the row from
+the tree and the node from the graph immediately, and opens the nearest remaining
 note in that folder (or the nearest one elsewhere when the folder is empty).
 
 ## 4. Basic formatting
@@ -290,15 +296,25 @@ Folders without a companion Markdown file receive a folder note automatically. A
 folder and a same-named note appear as one merged tree item. The tree supports
 moving, reordering, and deleting notes or folders.
 
-Besides dragging a row, **⋮ → 📁 Move…** relocates the **selected note or
-folder** through a dedicated page: type a destination folder (a missing path is
-created), or pick one from a folder tree shaped like the sidebar. Moving a folder
-takes its whole subtree — children, companion note and embedded media. The note
-you had open stays open where it lands, and the `[[wiki-links]]` that pointed
-at any moved note are rewritten automatically. From the graph, the focused
-node's radial menu offers the same **Move** action; there the map updates and
-re-focuses the moved node. The **Inbox** is never a destination — file it out of
-the Inbox, not back into it.
+Besides dragging a row, **⋮ → 📁 Move…** (or a right-click on a tree row →
+**📁 Move…**) relocates the **selected note or folder** through a dedicated page. Its tree is the vault in miniature — every
+folder plus every note that is not a folder note — so you can pick any
+destination:
+
+- **A folder row** moves the item inside that folder.
+- **A note row** turns that note into a folder (its companion folder note) and
+  moves the item inside it, exactly like dropping onto a note in the sidebar.
+- **The top field** is also the search: type keywords or `#tags` to filter the
+  tree, or type a folder path — a missing path is created when you press Move.
+  Picking a row fills the field with that destination. Clearing the search
+  returns the whole tree with the folders you had open still open.
+
+Moving a folder takes its whole subtree — children, companion note and embedded
+media. The note you had open stays open where it lands, and the `[[wiki-links]]`
+that pointed at any moved note are rewritten automatically. From the graph, the
+focused node's radial menu offers the same **Move** action; there the map
+updates and re-focuses the moved node. The **Inbox** is never a destination —
+file it out of the Inbox, not back into it.
 
 The vault root has a protected homepage note, `_homepage.md`. It has no leaf row
 of its own — open it by selecting the **Vault** root item. The homepage cannot be

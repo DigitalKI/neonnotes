@@ -108,13 +108,16 @@ front matter, and leaves the original file where it is. The Open-with entry is i
 
 
 ### 📁 Moving notes
-**⋮ → 📁 Move…** relocates the **selected note or folder** without leaving the
-page: type a destination folder (a missing path is created on the spot) or pick
-one from a folder tree. Moving a folder takes its whole subtree — children,
-companion note and embedded media. The note you had open stays open where it
-lands. In the **⊛ Graph**, a node's radial menu offers the same **Move** action;
-the map updates and re-focuses the moved node. Every moved note has the
-`[[wiki-links]]` that point at it rewritten automatically.
+**⋮ → 📁 Move…** (or right-click a tree row → **Move…**) relocates the
+**selected note or folder** without leaving the page. The destination tree lists every folder and every standalone note, and the
+top field doubles as its search (keywords and `#tags`) as well as a destination
+path — a missing path is created on the spot. Picking a note turns it into a
+folder and files the move inside it, just like dropping onto a note in the
+sidebar. Moving a folder takes its whole subtree — children, companion note and
+embedded media. The note you had open stays open where it lands. In the **⊛
+Graph**, a node's radial menu offers the same **Move** action; the map updates
+and re-focuses the moved node. Every moved note has the `[[wiki-links]]` that
+point at it rewritten automatically.
 
 ### 📡 LAN sync — local, per-vault, no cloud
 Pair two devices over your local network and they keep a vault in step:
@@ -190,8 +193,11 @@ that the **release preset currently has `permissions/internet=false`**, so a
 release build will fail at LAN sync — set it to `true` there as well.
 
 The presets ship **only `docs/help.md`** as a non-resource file. `tests/*`,
-`scripts/dev/*`, `addons/godot-mcp/*` and (on Android) `ios/*` are excluded from
-the PCK, so test scenes, harness scripts and the MCP bridge never reach an APK.
+`scripts/dev/*`, and the editor side of `addons/godot-mcp/*` (plugin, bridge,
+debugger, collectors, docs) are excluded from the PCK. The two game-side files
+(`mcp_runtime.gd`, `mcp_log.gd`) stay because `McpRuntime` is a project
+autoload; they register nothing unless a debugger is attached. On Android,
+`ios/*` is excluded too.
 
 Both Android presets use the **Gradle build** because `addons/SharePlugin`
 (incoming share sheet) and `addons/MarkdownOpen` (Open with) are Android
@@ -213,6 +219,75 @@ keystore's password is unknown), configured in the editor-owned, gitignored
 ```bash
 godot --headless --path . --export-release "Android (Release)" build/NeonNotes-release.apk
 ```
+
+#### Custom 2D-only engine
+
+Android exports package the AAR installed in
+`android/build/libs/<type>/`. The default 2D-only engine build (`2D-V2`) drops
+3D nodes/rendering, 3D and 2D physics/navigation, XR, Vulkan, and unused
+modules: the release APK shrinks from 78.3 MB to 48.6 MB and the debug APK
+from 84.3 MB to 52.5 MB. It is GL-only, which matches the app's
+`gl_compatibility` renderer; `2D-V1` is the conservative fallback. Rebuild and
+install it with:
+
+```bash
+./tools/build_android_custom.sh --export
+```
+
+It builds Godot 4.7.2 from a matching source checkout and replaces that AAR
+— Gradle exports read it, not `custom_template/*` — so the normal export
+commands above then produce the smaller build. See
+[`docs/android-custom-build.md`](docs/android-custom-build.md) for
+prerequisites, rollback, and ABI/version rules.
+
+### Build for desktop (Linux / Windows)
+
+Desktop releases are versioned, portable archives produced from the `Linux` and
+`Windows` presets. Both embed the PCK in the executable, so there is no loose
+`.pck` file to lose, and both carry the app icon and Windows version metadata.
+
+```bash
+python3 tools/make_icons.py       # only after changing the master artwork
+./tools/package_desktop.sh        # icons + export + stage + archive
+```
+
+The script writes:
+
+- `build/desktop/NeonNotes-<version>-linux-x86_64.tar.gz` — executable, license,
+  README, XDG desktop entry, AppStream metainfo, hicolor icons (16–512 px), and
+  `install.sh`.
+- `build/desktop/NeonNotes-<version>-windows-x86_64.zip` — executable, license,
+  README, and a short `RUNNING.txt`.
+- `build/desktop/SHA256SUMS` — checksums for both archives.
+
+```bash
+tar -xzf NeonNotes-2.0.0-linux-x86_64.tar.gz
+cd NeonNotes-2.0.0-linux-x86_64
+./install.sh              # app menu entry + `neonnotes` on PATH
+./install.sh --uninstall
+```
+
+`install.sh` defaults to `~/.local`; use `PREFIX=/usr sudo ./install.sh` for a
+system-wide install. The script accepts `--linux-only`, `--windows-only`,
+`--skip-export`, and `--appimage` (requires `appimagetool`). `GODOT_BIN` and
+`RELEASE_DATE` override the defaults; setting `SOURCE_DATE_EPOCH` makes the
+Linux tarball reproducible.
+
+The icon set is generated from `packaging/icons/neonnotes-master.jpg` into
+`assets/icons/` (committed, so exports do not need Pillow). Godot's Linux
+exporter has **no icon field**: the in-app window icon comes from
+`application/config/icon`, while the file-manager/dock icon comes from the
+installed `.desktop` file and hicolor PNGs. The Windows preset embeds the
+multi-size `neonnotes.ico` and the product/file version, description, and
+copyright fields.
+
+Windows builds are **not code-signed** yet, so SmartScreen shows an unknown
+publisher. Configure `codesign/*` in the Windows preset and supply a
+certificate before publishing a signed release.
+
+> `export_presets.cfg` and `project.godot` are **editor-owned** while the Godot
+> editor is open. Close and reopen the Export dialog (or restart the editor)
+> after changing presets on disk, or the editor can overwrite the changes.
 
 ---
 

@@ -31,3 +31,7 @@ export_presets.cfg.bak
 *.tmp
 .DS_Store
 Thumbs.db
+
+# Marketing captures are generated from the real UI (tools/social/, including
+# the _frames scratch dir); keep the copy and tooling in git, not multi-MB media.
+marketing/captures/
