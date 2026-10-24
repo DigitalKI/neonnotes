@@ -100,7 +100,10 @@ change must respect live in [`invariants.md`](invariants.md).
   (`plugin.*`, `mcp_bridge.*`, `mcp_debugger.*`, `mcp_assets.*`, `mcp_wire.*`,
   the collectors, icon, and docs) and keep `mcp_runtime.gd` + `mcp_log.gd`; the
   runtime registers nothing unless `EngineDebugger.is_active()`. This is the
-  current `export_presets.cfg` filter.
+  current `export_presets.cfg` filter. The plugin also clears and **saves** the
+  setting in `_exit_tree`, so the autoload is not a committed setting: a line
+  added to `project.godot` disappears on the next editor exit. `project.godot`
+  is committed without it on purpose.
 - **GOT-023 — `2D-V2` has no Vulkan driver.** The Android AAR is built with
   `vulkan=no` to cut size; `project.godot` must stay on `gl_compatibility`
   (including `renderer/rendering_method.mobile`). Switching to `forward_plus`

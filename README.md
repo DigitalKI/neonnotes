@@ -195,8 +195,9 @@ release build will fail at LAN sync — set it to `true` there as well.
 The presets ship **only `docs/help.md`** as a non-resource file. `tests/*`,
 `scripts/dev/*`, and the editor side of `addons/godot-mcp/*` (plugin, bridge,
 debugger, collectors, docs) are excluded from the PCK. The two game-side files
-(`mcp_runtime.gd`, `mcp_log.gd`) stay because `McpRuntime` is a project
-autoload; they register nothing unless a debugger is attached. On Android,
+(`mcp_runtime.gd`, `mcp_log.gd`) stay because the plugin registers `McpRuntime`
+as an autoload while the editor is open, so an export taken there writes it into
+the PCK; they register nothing unless a debugger is attached. On Android,
 `ios/*` is excluded too.
 
 Both Android presets use the **Gradle build** because `addons/SharePlugin`
