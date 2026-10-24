@@ -1,8 +1,18 @@
 class_name MoveDialog
 extends MarginContainer
 ## Move page: relocate a note or a folder to another vault folder — either by
-## typing a destination path or by exploring a folder tree shaped like the
-## sidebar. A scene instance inside %Content like every other page; the host
+## typing a destination path or by exploring the vault tree.
+##
+## The tree below the field is the vault in miniature, built from the same rows
+## as the sidebar (`VaultTreeRows`): every folder plus every note that is not a
+## folder companion. Picking a folder row targets that folder; picking a NOTE
+## row turns it into a folder and files the moved item inside — exactly what
+## dropping onto a note does in the sidebar tree.
+##
+## The top field is both a destination and a search: typing filters the rows
+## with the sidebar's query rules (`VaultSearch`: keywords and `#tags`), and the
+## same text is still a destination path, so a missing folder is created on
+## Move. A scene instance inside %Content like every other page; the host
 ## (main.gd) routes it and decides what happens afterwards (keep the open note,
 ## or return to the graph and re-focus the moved node).
 ##
@@ -11,6 +21,9 @@ extends MarginContainer
 
 signal close_requested
 signal moved(old_rel: String, new_rel: String)
+
+const HOMEPAGE := "_homepage.md"
+const DEFAULT_HINT := "Type to search folders and notes (#tags work too), or type a new folder path. Pick a row to use it — a note row becomes a folder."
 
 @onready var target_label: Label = %TargetLabel
 @onready var dest_field: LineEdit = %DestField
@@ -26,6 +39,17 @@ var flash_cb: Callable = func(_msg: String) -> void: pass
 
 ## The vault-relative path being moved (a note path or a folder path).
 var _target := ""
+## Query state of the field: parsed `#tags` + keywords, shared with the sidebar.
+var _search := VaultSearch.new()
+## Debounced worker search for the field, shared with the sidebar.
+var _runner: VaultSearchRunner
+## True while the dialog sets the selection itself: `Tree.set_selected()` emits
+## `item_selected`, which must not be mistaken for the user picking a row.
+var _syncing_selection := false
+## Folder rows currently open, by vault path. A filtered build reveals the hit
+## paths, and those stay open when the query is cleared — otherwise the rebuilt
+## tree collapses back to its root rows and looks half-built.
+var _expanded := {}
 
 
 func bind(p_tree: VaultTreeComponent, p_flash: Callable) -> void:
@@ -35,125 +59,213 @@ func bind(p_tree: VaultTreeComponent, p_flash: Callable) -> void:
 
 func _ready() -> void:
 	visible = false
+	_runner = VaultSearchRunner.new()
+	_runner.finished.connect(_on_search_results)
+	add_child(_runner)
 	move_btn.pressed.connect(_do_move)
 	close_btn.pressed.connect(func(): close_requested.emit())
 	dest_field.text_changed.connect(_on_dest_changed)
 	dest_field.text_submitted.connect(func(_t: String): _do_move())
-	folder_tree.item_selected.connect(_on_folder_selected)
+	folder_tree.item_selected.connect(_on_row_selected)
+	folder_tree.item_collapsed.connect(_on_folder_collapsed)
 
 
 ## Called by the host when the page is shown.
 func begin(target_rel: String) -> void:
 	_target = target_rel
 	target_label.text = "Moving  " + (target_rel if target_rel != "" else "(nothing)")
-	hint.text = "Type a folder path, or pick one below. Blank moves it to the vault root."
 	dest_field.text = ""
-	_build_folder_tree()
+	_search.set_query("")
+	_runner.invalidate()
+	_build_tree(false)
 	_update_preview()
+	_update_hint()
 	dest_field.grab_focus()
 
 
-# --------------------------------------------------------------- folder tree
+# ------------------------------------------------------------- destination tree
 
-## Build the destination tree from the vault's real folders (dot-folders such as
-## .trash stay hidden, exactly like the sidebar). The source folder and its
-## descendants are omitted — moving a folder into itself is not a move.
-func _build_folder_tree() -> void:
+## Rebuild the destination tree. Unfiltered it lists every folder (including
+## ones that hold no notes yet) and every standalone note; filtered it lists the
+## hits plus their ancestors and any folder whose name matches the query.
+func _build_tree(filtered: bool, matches: Array = []) -> void:
 	folder_tree.clear()
-	var root := folder_tree.create_item()
-	root.set_text(0, "🏠 Vault (root)")
-	root.set_tooltip_text(0, "vault root")
-	root.set_metadata(0, "")
-	root.set_selectable(0, true)
-	root.collapsed = false
-	_add_child_dirs(root, "")
+	var opts := _row_opts()
+	var notes: Array = GameManager.notes
+	if filtered:
+		opts["folders_first"] = false
+		opts["expand_all"] = true
+		opts["dir_matches"] = _matching_dirs()
+		notes = matches
+	else:
+		# Every folder is a destination, including ones that hold no notes yet.
+		opts["extra_dirs"] = VaultTreeRows.vault_dirs()
+	VaultTreeRows.build(folder_tree, notes, opts)
+	if filtered:
+		_remember_expanded()
 
 
-func _add_child_dirs(parent: TreeItem, dir: String) -> void:
-	var abs := GameManager.vault_abs() if dir == "" else GameManager.vault_abs().path_join(dir)
-	var d := DirAccess.open(abs)
-	if d == null:
-		return
-	d.include_hidden = true
-	var subdirs: Array[String] = []
-	for name in d.get_directories():
-		if String(name).begins_with("."):
-			continue
-		subdirs.append(name)
-	subdirs.sort()
-	for name in subdirs:
-		var rel := (dir + "/" if dir != "" else "") + name
-		if GameManager.is_inbox_path(rel):
-			continue  # the Inbox is a temporary landing pad, never a destination
-		if _blocks(rel):
-			continue
-		var it := folder_tree.create_item(parent)
-		it.set_text(0, "📁 " + name)
-		it.set_tooltip_text(0, rel)
-		it.set_metadata(0, rel)
-		it.set_selectable(0, true)
-		it.collapsed = true
-		_add_child_dirs(it, rel)
+## Row options for the destination tree. The source subtree, the Inbox and the
+## homepage are never offered; notes say what picking them will do.
+func _row_opts() -> Dictionary:
+	return {
+		"root_text": "🏠 Vault (root)",
+		"root_tooltip": "vault root",
+		"exclude": _excluded,
+		"collapsed": func(rel: String) -> bool: return not _expanded.has(rel),
+		"folder_tooltip": func(rel: String) -> String:
+			return rel + "  ·  move into this folder",
+		"leaf_tooltip": func(rel: String) -> String:
+			return rel + "  ·  moving here turns this note into a folder",
+	}
 
 
-## True when `dest` is not a valid destination: the Inbox (captures land there
-## on their own — filing INTO it is never the intent), the source folder itself,
-## a folder inside it, or (for a note) its own companion folder — the last three
-## would be a no-op or would nest the item inside itself.
-func _blocks(dest: String) -> bool:
-	# The Inbox is a temporary landing pad: block it whatever the source is, so
-	# a typed "Inbox" path cannot slip past the omitted tree row.
-	if GameManager.is_inbox_path(dest):
+## True for rows the move must not offer: the homepage, the Inbox (a capture
+## landing pad, never a filing target), and the source itself — its own row, its
+## companion folder and, for a folder, the whole subtree.
+func _excluded(rel: String) -> bool:
+	if rel == HOMEPAGE:
+		return true
+	if GameManager.is_inbox_path(rel):
 		return true
 	if _target == "":
 		return false
 	if _target.ends_with(".md"):
-		return dest == _target.trim_suffix(".md")
-	return dest == _target or dest.begins_with(_target + "/")
+		return rel == _target or rel == _target.trim_suffix(".md")
+	return rel == _target or rel == _target + ".md" or rel.begins_with(_target + "/")
 
 
-func _on_folder_selected() -> void:
-	var it := folder_tree.get_selected()
-	if it == null:
-		return
-	# A programmatic assignment emits no text_changed, so refresh explicitly.
-	dest_field.text = str(it.get_metadata(0))
-	_update_preview()
+## Folder names matching the query keywords, so a search can find a destination
+## that has no matching notes in it yet.
+func _matching_dirs() -> Array[String]:
+	var out: Array[String] = []
+	var words := _search.text.to_lower().split(" ", false)
+	if words.is_empty():
+		return out
+	for dir in VaultTreeRows.vault_dirs():
+		var name := dir.get_file().to_lower()
+		var all := true
+		for word in words:
+			if not name.contains(word):
+				all = false
+				break
+		if all:
+			out.append(dir)
+	return out
 
 
-func _on_dest_changed(_value: String) -> void:
-	# Keep the tree selection in step with a typed path when it names a folder.
-	var match := _find_row(_dest())
-	if match == null:
+## Keep the tree selection in step with a typed path when it names a row.
+func _select_matching_row() -> void:
+	var row := _find_row(_dest())
+	if row == null:
 		folder_tree.deselect_all()
-	else:
-		folder_tree.set_selected(match, 0)
-	_update_preview()
+		return
+	var p := row.get_parent()
+	while p != null:
+		p.collapsed = false
+		var rel := VaultTreeRows.node_rel(p)
+		if rel != "":
+			_expanded[rel] = true  # revealed paths stay open across rebuilds
+		p = p.get_parent()
+	_syncing_selection = true
+	folder_tree.set_selected(row, 0)
+	_syncing_selection = false
+	folder_tree.scroll_to_item(row, false)
 
 
 func _find_row(rel: String) -> TreeItem:
+	var row := VaultTreeRows.find(folder_tree, rel)
+	# "Folder" may name a merged row or a standalone note (`Folder.md`); either
+	# one is the row the user means.
+	if row == null and rel != "" and not rel.ends_with(".md"):
+		row = VaultTreeRows.find(folder_tree, rel + ".md")
+	return row
+
+
+func _on_row_selected() -> void:
+	if _syncing_selection:
+		return
+	var it := folder_tree.get_selected()
+	if it == null:
+		return
+	# A folder row targets its folder; a note row targets the folder that the
+	# note becomes. A programmatic assignment emits no text_changed, so refresh
+	# the preview explicitly.
+	var dest := VaultTreeRows.destination(it)
+	var was_filtered := _search.is_active()
+	if dest != _dest():
+		dest_field.text = dest
+	_update_preview()
+	# Picking commits a destination, so the field stops being a search and the
+	# whole tree comes back with that row selected. It MUST be deferred: this
+	# runs inside a mouse selection event, where Godot refuses to create
+	# TreeItems ("The tree cannot create items during mouse selection events"),
+	# which used to null-deref the root row.
+	if was_filtered:
+		_search.set_query("")
+		_show_all_rows.call_deferred()
+
+
+## Restore the unfiltered destination tree after a pick (deferred from the
+## selection event). The picked row is re-selected in the rebuilt tree.
+func _show_all_rows() -> void:
+	if not is_inside_tree() or _search.is_active():
+		return
+	_build_tree(false)
+	_select_matching_row()
+	_update_hint()
+
+
+## Track the folder rows the user opens/closes, so a rebuild (query change,
+## clearing the field, a pick) keeps the tree in the shape they left it.
+func _on_folder_collapsed(item: TreeItem) -> void:
+	var rel := VaultTreeRows.node_rel(item)
 	if rel == "":
-		return folder_tree.get_root()
-	var stack: Array[TreeItem] = [folder_tree.get_root()]
+		return
+	if item.collapsed:
+		_expanded.erase(rel)
+	else:
+		_expanded[rel] = true
+
+
+## Record every folder the filtered tree showed open (it expands hit paths), so
+## clearing the query leaves those paths open instead of collapsing to the top.
+func _remember_expanded() -> void:
+	var root := folder_tree.get_root()
+	if root == null:
+		return
+	var stack: Array[TreeItem] = [root]
 	while not stack.is_empty():
 		var it: TreeItem = stack.pop_back()
-		if str(it.get_metadata(0)) == rel:
-			return it
+		if it.get_child_count() > 0 and not it.collapsed:
+			var rel := VaultTreeRows.node_rel(it)
+			if rel != "":
+				_expanded[rel] = true
 		for c in it.get_children():
 			stack.append(c)
-	return null
 
 
 # --------------------------------------------------------------- preview / move
 
-## The normalised destination folder typed in the field ("" = vault root).
+## Normalised destination folder typed in the field ("" = vault root). A path
+## that ends in `.md` names a note, so it means that note's companion folder.
 func _dest() -> String:
 	var d := dest_field.text.strip_edges().replace("\\", "/")
 	while d.begins_with("/"):
 		d = d.substr(1)
 	while d.ends_with("/") and d != "":
 		d = d.substr(0, d.length() - 1)
+	if d.ends_with(".md"):
+		return d.trim_suffix(".md")
 	return d
+
+
+## True when the destination names a note that is not a folder yet: moving there
+## creates its companion folder, so the note becomes a folder (like a drop onto
+## a note row).
+func _folderifies(dest: String) -> bool:
+	return dest != "" and GameManager.notes.has(dest + ".md") \
+			and not VaultTreeRows.folder_exists(dest)
 
 
 func _update_preview() -> void:
@@ -164,8 +276,22 @@ func _update_preview() -> void:
 	if dest.contains(".."):
 		preview.text = "✗ invalid folder path"
 		return
-	var base := _target.get_file()
-	preview.text = "→ " + (dest + "/" if dest != "" else "") + base
+	var line := "→ " + (dest + "/" if dest != "" else "") + _target.get_file()
+	if _folderifies(dest):
+		line += "   ·   " + dest + ".md becomes a folder"
+	preview.text = line
+
+
+func _update_hint() -> void:
+	if not _search.is_active():
+		hint.text = DEFAULT_HINT
+		return
+	var root := folder_tree.get_root()
+	var matches := root != null and root.get_child_count() > 0
+	if matches:
+		hint.text = "Matching “%s” — clear the field for every destination." % _search.query
+	else:
+		hint.text = "No destination matches “%s”. A new path still creates the folder." % _search.query
 
 
 func _do_move() -> void:
@@ -193,3 +319,37 @@ func _do_move() -> void:
 		flash_cb.call("Already in that folder")
 		return
 	moved.emit(old, new_rel)
+
+
+## True when `dest` is not a valid destination: the Inbox (captures land there
+## on their own — filing INTO it is never the intent), the source folder itself,
+## a folder inside it, or (for a note) its own companion folder — the last three
+## would be a no-op or would nest the item inside itself.
+func _blocks(dest: String) -> bool:
+	# The Inbox is a temporary landing pad: block it whatever the source is, so
+	# a typed "Inbox" path cannot slip past the omitted tree row.
+	if GameManager.is_inbox_path(dest):
+		return true
+	if _target == "":
+		return false
+	if _target.ends_with(".md"):
+		return dest == _target.trim_suffix(".md") or dest == _target
+	return dest == _target or dest.begins_with(_target + "/")
+
+
+# ------------------------------------------------------------------ field / search
+
+## Typing does both jobs: it filters the tree with the sidebar's rules and stays
+## a literal destination path. The rebuild happens after the debounce.
+func _on_dest_changed(_value: String) -> void:
+	_search.set_query(dest_field.text)
+	_update_preview()
+	_runner.schedule(VaultSearch.tag_candidates(GameManager.notes, _search.tags, GameManager.tags),
+		GameManager.titles, GameManager.vault_abs(), _search.text)
+
+
+func _on_search_results(_generation: int, results: Array) -> void:
+	var filtered := _search.is_active()
+	_build_tree(filtered, results)
+	_select_matching_row()
+	_update_hint()

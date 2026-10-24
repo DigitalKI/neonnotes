@@ -28,7 +28,7 @@ func _ready() -> void:
 	# Typing and clearing never scan or rebuild synchronously.
 	panel._on_search_changed("need")
 	panel._on_search_changed("needletoken")
-	ok = ok and panel._search_thread == null and panel._search_results.is_empty()
+	ok = ok and panel._runner.thread == null and panel._search_results.is_empty()
 	ok = ok and panel.side_tree.get_root() == root_before_typing
 	ok = ok and await _wait_for_results(panel, ["a.md", "b.md"])
 	# A query change cancels the running worker (if any), and is debounced;
@@ -37,8 +37,8 @@ func _ready() -> void:
 	ok = ok and await _wait_for_results(panel, ["b.md", "c.md"])
 	# Replace an in-flight query before the worker can publish results.
 	panel._on_search_changed("needletoken")
-	panel._search_timer.stop()
-	panel._start_search()
+	panel._runner.timer.stop()
+	panel._runner._launch()
 	panel._on_search_changed("other")
 	ok = ok and await _wait_for_results(panel, ["b.md", "c.md"])
 	panel._on_search_changed("ab")
@@ -60,9 +60,9 @@ func _ready() -> void:
 	for i in 150:
 		many.append("result_%03d.md" % i)
 	panel._on_search_changed("result")
-	panel._search_timer.stop()
-	panel._search_pending = false
-	panel._apply_search_results(panel._search_generation, many)
+	panel._runner.timer.stop()
+	panel._runner.pending = false
+	panel._on_search_results(panel._runner.generation, many)
 	ok = ok and panel.side_tree.get_root().get_child_count() <= panel.SEARCH_ROWS_PER_FRAME
 	ok = ok and panel._search_render_queue.size() == many.size()
 	var batch_deadline := Time.get_ticks_msec() + 4000
@@ -76,6 +76,7 @@ func _ready() -> void:
 	ok = ok and search_root.get_child_count() == 1
 	var folder_row := search_root.get_first_child()
 	ok = ok and String(folder_row.get_metadata(0)) == "sub"
+	ok = ok and not folder_row.collapsed  # the hit must be revealed, not folded
 	ok = ok and folder_row.get_first_child().get_metadata(0) == "sub/inner.md"
 	# A move (drop) while searching must refresh the filtered tree: rename the
 	# note on disk and remap the index the way move_path does, then restart.
@@ -100,10 +101,10 @@ func _ready() -> void:
 	DirAccess.remove_absolute(vault.path_join("proj.md"))
 	# A stale result must not replace a newer query or re-create old rows.
 	panel._on_search_changed("different")
-	panel._apply_search_results(panel._search_generation - 1, many)
+	panel._on_search_results(panel._runner.generation - 1, many)
 	ok = ok and panel._search_results == ["inner.md"] and panel._search_render_queue.is_empty()
-	panel._search_timer.stop()
-	panel._search_pending = false
+	panel._runner.timer.stop()
+	panel._runner.pending = false
 	# Folder-as-note merge under filtering: `proj.md` + `proj/` must be ONE row
 	# (never a folder row plus a duplicate companion leaf).
 	DirAccess.make_dir_recursive_absolute(vault.path_join("proj"))
@@ -122,6 +123,7 @@ func _ready() -> void:
 	ok = ok and proj_root.get_child_count() == 1
 	var proj_row := proj_root.get_first_child()
 	ok = ok and String(proj_row.get_metadata(0)) == "proj.md"
+	ok = ok and not proj_row.collapsed  # merged folder row opens on its hit
 	ok = ok and proj_row.get_child_count() == 1
 	ok = ok and String(proj_row.get_first_child().get_metadata(0)) == "proj/task.md"
 	# --- #tag search: in-memory filter, AND semantics, no worker for tag-only ---
@@ -139,21 +141,21 @@ func _ready() -> void:
 	ok = ok and await _wait_for_results(panel, [])
 	# Parsing + active-filter chips remove a single tag from the field.
 	panel._on_search_changed("#work #urgent")
-	ok = ok and panel._parsed_tags.size() == 2 and panel._parsed_tags[0] == "work" \
-		and panel._parsed_tags[1] == "urgent" and panel._text_query == ""
+	ok = ok and panel._filter.tags.size() == 2 and panel._filter.tags[0] == "work" \
+		and panel._filter.tags[1] == "urgent" and panel._filter.text == ""
 	ok = ok and panel.active_tags.visible and panel.active_tags.get_child_count() == 2
 	panel._remove_tag_from_query("work")
-	ok = ok and panel._parsed_tags.size() == 1 and panel._parsed_tags[0] == "urgent"
+	ok = ok and panel._filter.tags.size() == 1 and panel._filter.tags[0] == "urgent"
 	ok = ok and panel.search.text == "#urgent"
 	panel._on_search_changed("")
-	panel._search_timer.stop()
-	panel._search_pending = false
+	panel._runner.timer.stop()
+	panel._runner.pending = false
 	_finish(panel, previous_vault, previous_notes, previous_titles, previous_tags, previous_save, vault, ok)
 
 func _wait_for_results(panel: VaultTreeComponent, expected: Array) -> bool:
 	var deadline := Time.get_ticks_msec() + 4000
 	while Time.get_ticks_msec() < deadline:
-		if panel._search_results == expected and not panel._search_pending and panel._search_thread == null:
+		if panel._search_results == expected and not panel._runner.pending and panel._runner.thread == null:
 			return true
 		await get_tree().process_frame
 	return false

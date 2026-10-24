@@ -56,7 +56,8 @@ theme_override_constants/separation = 8
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
-placeholder_text = "destination folder (blank = vault root)"
+placeholder_text = "search destinations, or type a folder path (blank = vault root)"
+clear_button_enabled = true
 
 [node name="MoveBtn" type="Button" parent="Root/DestRow" unique_id=884958342]
 unique_name_in_owner = true
@@ -66,7 +67,7 @@ text = "✓ Move"
 [node name="Hint" type="Label" parent="Root" unique_id=377800486]
 unique_name_in_owner = true
 layout_mode = 2
-text = "Type a folder path, or pick one below. Blank moves it to the vault root."
+text = "Type to search folders and notes (#tags work too), or type a new folder path. Pick a row to use it — a note row becomes a folder."
 autowrap_mode = 3
 
 [node name="FolderTree" type="Tree" parent="Root" unique_id=904281590]

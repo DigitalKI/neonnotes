@@ -154,6 +154,9 @@ func _phase_theme_layout() -> void:
 			graph_shell.graph_follow_note.call_deferred(GameManager.current_rel)
 	vault_tree.note_requested.connect(_on_note_selected)
 	vault_tree.delete_requested.connect(func(): vault_tree.delete_selected_node())
+	# The tree's right-click menu moves/deletes the row under the cursor (the
+	# menu selects it first), so it shares the ⋮ Move page.
+	vault_tree.move_requested.connect(_move_selected)
 	# Deletion orchestration lives in the tree; Main injects shell hooks.
 	vault_tree.sync_note_deleted_cb = func(rel: String): sync_service.note_deleted(rel)
 	vault_tree.refresh_cb = _refresh_list

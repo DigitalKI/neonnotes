@@ -1,9 +1,9 @@
 extends Node
 ## Move page probe: relocating a note through the page (⋮ menu path) keeps it
 ## open on its new path and rewrites wiki-links; the graph circle menu's Move
-## returns to the map and re-focuses the moved node. Also covers the two
-## destination inputs (typing a path vs. exploring the folder tree) and the
-## self-nesting guard.
+## returns to the map and re-focuses the moved node. Also covers the destination
+## tree (all folders + standalone notes, keyword/#tag search), the typed/clicked
+## note-as-folder conversion, and the self-nesting guard.
 ##
 ## Vault safety: assigns GameManager.vault_dir directly (never set_vault_dir —
 ## that persists) and suppresses settings writes for the whole run.
@@ -14,6 +14,17 @@ func _check(name: String, ok: bool) -> void:
 	print(("  ok  " if ok else "  FAIL ") + name)
 	if not ok:
 		_fails += 1
+
+
+## Wait until the Move page's debounced search settled and `rel` has a row.
+func _wait_for_tree(md: MoveDialog, rel: String) -> void:
+	var deadline := Time.get_ticks_msec() + 4000
+	while Time.get_ticks_msec() < deadline:
+		var settled: bool = not md._runner.pending and md._runner.thread == null \
+				and md._runner.timer.is_stopped()
+		if settled and md._find_row(rel) != null:
+			return
+		await get_tree().process_frame
 
 func _ready() -> void:
 	var original_vault := GameManager.vault_dir
@@ -48,7 +59,7 @@ func _ready() -> void:
 	var row: TreeItem = md._find_row("Folder")
 	_check("folder row exists in the dialog tree", row != null)
 	md.folder_tree.set_selected(row, 0)
-	md._on_folder_selected()
+	md._on_row_selected()
 	_check("picking a row sets the destination", md.dest_field.text == "Folder")
 	_check("preview shows the final path", md.preview.text == "→ Folder/A.md")
 
@@ -63,6 +74,22 @@ func _ready() -> void:
 	_check("tree selects the moved note",
 		sel != null and str(sel.get_metadata(0)) == "Folder/A.md")
 	_check("wiki-link rewritten", GameManager.read_note("Linker.md").contains("[[Folder/A]]"))
+
+	# ---- tree right-click menu: Move… acts on the row under the cursor ----
+	var menu: PopupMenu = main.vault_tree._tree_menu
+	_check("tree menu offers Move…", menu.get_item_index(main.vault_tree.MENU_MOVE) >= 0)
+	_check("tree menu keeps Delete…", menu.get_item_index(main.vault_tree.MENU_DELETE) >= 0)
+	main.vault_tree.select_note("Linker.md", false)
+	menu.id_pressed.emit(main.vault_tree.MENU_MOVE)
+	_check("tree menu Move opens the page for that row",
+		main.page_mode == main.PAGE_MOVE and md._target == "Linker.md")
+	main.vault_tree._prepare_tree_menu("Inbox")
+	_check("the Inbox move row is greyed out",
+		menu.is_item_disabled(menu.get_item_index(main.vault_tree.MENU_MOVE)))
+	main.vault_tree._prepare_tree_menu("Linker.md")
+	_check("a note stays movable from the menu",
+		not menu.is_item_disabled(menu.get_item_index(main.vault_tree.MENU_MOVE)))
+	main._close_page()
 
 	# ---- typing a path creates the destination folder --------------------
 	main._on_note_selected("Folder/B.md")
@@ -81,6 +108,89 @@ func _ready() -> void:
 	_check("folder cannot move into its own child", md._blocks("Folder/Deep"))
 	md.begin("Folder/A.md")
 	_check("note cannot move into its own companion folder", md._blocks("Folder/A"))
+
+	# ---- destination tree: folders + notes, search, note -> folder ---------
+	GameManager.write_note("Alpha.md", "---\ntitle: \"Alpha\"\ntags: alpha\n---\n\nalpha body\n")
+	GameManager.write_note("MoveMe.md", "---\ntitle: \"Move Me\"\n---\n\nmove me\n")
+	GameManager.write_note("Solo.md", "---\ntitle: \"Solo\"\n---\n\nsolo body\n")
+	GameManager.scan_notes()
+	main._refresh_list()
+	main._on_note_selected("MoveMe.md")
+	main.vault_tree.select_note("MoveMe.md", false)
+	main._move_selected()
+	_check("the destination tree lists folders", md._find_row("Folder") != null)
+	_check("the destination tree lists standalone notes", md._find_row("Linker.md") != null)
+	_check("the source note is not offered", md._find_row("MoveMe.md") == null)
+	# Picking a NOTE row files the move inside the folder that note becomes,
+	# exactly like dropping onto a note in the sidebar tree.
+	var note_row: TreeItem = md._find_row("Linker.md")
+	md.folder_tree.set_selected(note_row, 0)
+	md._on_row_selected()
+	_check("picking a note targets its companion folder", md.dest_field.text == "Linker")
+	_check("the preview explains the folder conversion",
+		md.preview.text.contains("Linker/MoveMe.md") and md.preview.text.contains("becomes a folder"))
+	md._do_move()
+	await get_tree().process_frame
+	_check("moving onto a note turned it into a folder",
+		GameManager.notes.has("Linker/MoveMe.md") and GameManager.notes.has("Linker.md"))
+
+	# A typed path that names a note does the same.
+	main._on_note_selected("Alpha.md")
+	main.vault_tree.select_note("Alpha.md", false)
+	main._move_selected()
+	md.dest_field.text = "Solo"
+	md._on_dest_changed("Solo")
+	_check("a typed note destination is announced",
+		md.preview.text.contains("Solo/Alpha.md") and md.preview.text.contains("becomes a folder"))
+	md._do_move()
+	await get_tree().process_frame
+	_check("typed note destination folderified",
+		GameManager.notes.has("Solo/Alpha.md") and GameManager.notes.has("Solo.md"))
+
+	# The field is the sidebar search: keywords, #tags and folder names.
+	main._on_note_selected("Linker/MoveMe.md")
+	main.vault_tree.select_note("Linker/MoveMe.md", false)
+	main._move_selected()
+	md.dest_field.text = "hello"
+	md._on_dest_changed("hello")
+	await _wait_for_tree(md, "Folder/A.md")
+	_check("keyword search filters the destination rows", md._find_row("Folder/A.md") != null)
+	_check("non-matching notes are hidden", md._find_row("Linker/MoveMe.md") == null)
+	_check("ancestors of a hit stay usable as targets", md._find_row("Folder") != null)
+	md.dest_field.text = "#alpha"
+	md._on_dest_changed("#alpha")
+	await _wait_for_tree(md, "Solo/Alpha.md")
+	_check("#tag search filters the destination rows", md._find_row("Solo/Alpha.md") != null)
+	_check("the tag filter hides unmatched notes", md._find_row("Folder/A.md") == null)
+	md.dest_field.text = "dee"
+	md._on_dest_changed("dee")
+	await _wait_for_tree(md, "Deep")
+	_check("a folder name matching the query stays a destination", md._find_row("Deep") != null)
+	# Picking a row while filtering commits it and shows the whole tree again,
+	# with the pick selected (no stale filtered set left behind).
+	md.folder_tree.set_selected(md._find_row("Deep"), 0)
+	_check("picking a row leaves the search", not md._search.is_active())
+	_check("the picked row fills the field", md.dest_field.text == "Deep")
+	# The rebuild is deferred: Godot refuses TreeItem creation inside a mouse
+	# selection event ("The tree cannot create items during mouse selection
+	# events"), which made the root row null when picking while filtered.
+	_check("the rebuild waits for the click to finish", md._find_row("Folder/A.md") == null)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_check("every destination is back after a pick", md._find_row("Folder/A.md") != null)
+	var picked: TreeItem = md.folder_tree.get_selected()
+	_check("the picked row stays selected",
+		picked != null and VaultTreeRows.destination(picked) == "Deep")
+	md.dest_field.text = ""
+	md._on_dest_changed("")
+	await _wait_for_tree(md, "Linker")
+	_check("clearing the field restores every destination", md._find_row("Linker") != null)
+	# The rebuilt tree keeps the path the filter revealed open: collapsing back
+	# to root rows made clearing a query look like a half-built tree.
+	var revealed: TreeItem = md._find_row("Folder")
+	_check("the path the filter revealed stays open",
+		revealed != null and not revealed.collapsed and md._find_row("Folder/A.md") != null)
+	main._close_page()
 
 	# ---- graph circle menu: move then re-focus ---------------------------
 	main._toggle_graph()

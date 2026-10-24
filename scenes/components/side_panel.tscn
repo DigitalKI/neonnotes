@@ -47,9 +47,11 @@ scroll_horizontal_enabled = false
 
 [node name="TreeMenu" type="PopupMenu" parent="SideVBox/SideTree"]
 unique_name_in_owner = true
-item_count = 1
-item_0/text = "🗑 Delete…"
-item_0/id = 1
+item_count = 2
+item_0/text = "📁 Move…"
+item_0/id = 2
+item_1/text = "🗑 Delete…"
+item_1/id = 1
 
 [node name="FooterBar" type="HBoxContainer" parent="SideVBox" unique_id=1365854842]
 layout_mode = 2
