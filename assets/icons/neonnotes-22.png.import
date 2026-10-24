@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dyqqv3ie0uucf"
-path="res://.godot/imported/NN_icon.jpeg-84351d1924f08cf9c53ab370859d52cf.ctex"
+uid="uid://bn1kofmohmw0v"
+path="res://.godot/imported/neonnotes-22.png-a5cd2d3e425ab94e6c29c9f09b4b4caf.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://NN_icon.jpeg"
-dest_files=["res://.godot/imported/NN_icon.jpeg-84351d1924f08cf9c53ab370859d52cf.ctex"]
+source_file="res://assets/icons/neonnotes-22.png"
+dest_files=["res://.godot/imported/neonnotes-22.png-a5cd2d3e425ab94e6c29c9f09b4b4caf.ctex"]
 
 [params]
 

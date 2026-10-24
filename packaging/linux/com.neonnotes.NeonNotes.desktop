@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=NeonNotes
+GenericName=Markdown Notes
+Comment=Local-first Markdown notes with a synthwave glow
+Exec=neonnotes
+Icon=neonnotes
+Terminal=false
+Categories=Utility;TextEditor;
+Keywords=notes;markdown;editor;vault;synthwave;
+StartupNotify=true
+StartupWMClass=NeonNotes

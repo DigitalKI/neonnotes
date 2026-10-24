@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+	<id>com.neonnotes.NeonNotes</id>
+	<metadata_license>CC0-1.0</metadata_license>
+	<project_license>AGPL-3.0-only</project_license>
+	<name>NeonNotes</name>
+	<summary>Local-first Markdown notes with a synthwave glow</summary>
+	<developer id="com.neonnotes">
+		<name>NeonNotes contributors</name>
+	</developer>
+	<description>
+		<p>
+			NeonNotes is a local-first, Markdown-first note-taking app. Notes are
+			plain .md files in a folder you own, with wiki-links, tags, backlinks,
+			a relationship graph, and a CRT-inspired interface.
+		</p>
+		<p>
+			There is no account, no database, and no lock-in. LAN sync keeps a
+			phone and a PC in step without a cloud service.
+		</p>
+	</description>
+	<launchable type="desktop-id">com.neonnotes.NeonNotes.desktop</launchable>
+	<url type="homepage">https://github.com/DigitalKI/neonnotes</url>
+	<url type="bugtracker">https://github.com/DigitalKI/neonnotes/issues</url>
+	<provides>
+		<binary>neonnotes</binary>
+	</provides>
+	<releases>
+		<release version="@VERSION@" date="@DATE@"/>
+	</releases>
+	<content_rating type="oars-1.1"/>
+	<categories>
+		<category>Utility</category>
+		<category>TextEditor</category>
+	</categories>
+	<keywords>
+		<keyword>notes</keyword>
+		<keyword>markdown</keyword>
+		<keyword>editor</keyword>
+		<keyword>vault</keyword>
+		<keyword>synthwave</keyword>
+	</keywords>
+</component>

@@ -11,14 +11,19 @@ config_version=5
 [application]
 
 config/name="NeonNotes"
+config/version="2.0.0"
 run/main_scene="res://scenes/main/Main.tscn"
 config/features=PackedStringArray("4.7")
 run/max_fps=60
-config/icon="uid://dyqqv3ie0uucf"
+boot_splash/bg_color=Color(0.0235294, 0.0470588, 0.141176, 1)
+boot_splash/stretch_mode=0
+boot_splash/image="res://assets/icons/neonnotes.png"
+config/icon="res://assets/icons/neonnotes.png"
 
 [autoload]
 
 GameManager="*res://scripts/common/GameManager.gd"
+McpRuntime="*res://addons/godot-mcp/mcp_runtime.gd"
 
 [display]
 

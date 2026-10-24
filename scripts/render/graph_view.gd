@@ -177,6 +177,7 @@ var _bg: Control
 var _mm_leaf: MultiMeshInstance2D
 var _mm_folder: MultiMeshInstance2D
 var _mm_ring: MultiMeshInstance2D
+var _node_quad_mesh: ArrayMesh
 var _overlay: Control
 ## Node-marker halos: each quad is sized to radius + halo so the shader can fade
 ## the glow out to the quad edge. Leaves get a tight halo, folders a broad one.
@@ -271,7 +272,29 @@ func _build_layers() -> void:
 	move_child(_mm_ring, 3)
 	move_child(_overlay, 4)
 
-## One node-marker layer: a MultiMeshInstance2D with a QuadMesh and this
+## The marker mesh is a unit quad (vertices -0.5..0.5, UV 0..1, z=0). A
+## `QuadMesh` would be the obvious choice, but `disable_3d` builds omit the 3D
+## primitive meshes; only vertex/UV/index are read by the canvas_item shader,
+## so the ArrayMesh keeps the 2D-only engine self-contained.
+func _node_quad() -> ArrayMesh:
+	if _node_quad_mesh != null:
+		return _node_quad_mesh
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = PackedVector3Array([
+		Vector3(-0.5, -0.5, 0.0), Vector3(0.5, -0.5, 0.0),
+		Vector3(0.5, 0.5, 0.0), Vector3(-0.5, 0.5, 0.0),
+	])
+	arrays[Mesh.ARRAY_TEX_UV] = PackedVector2Array([
+		Vector2(0.0, 0.0), Vector2(1.0, 0.0),
+		Vector2(1.0, 1.0), Vector2(0.0, 1.0),
+	])
+	arrays[Mesh.ARRAY_INDEX] = PackedInt32Array([0, 1, 2, 0, 2, 3])
+	_node_quad_mesh = ArrayMesh.new()
+	_node_quad_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return _node_quad_mesh
+
+## One node-marker layer: a MultiMeshInstance2D with a unit quad and this
 ## shader's material, its shape parameters baked into the uniforms.
 func _make_node_layer(layer_name: String, mode: int, radius_frac: float,
 		halo_alpha: float, ring_t: float) -> MultiMeshInstance2D:
@@ -287,7 +310,7 @@ func _make_node_layer(layer_name: String, mode: int, radius_frac: float,
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_2D
 	mm.use_colors = true
-	mm.mesh = QuadMesh.new()
+	mm.mesh = _node_quad()
 	n.multimesh = mm
 	add_child(n)
 	return n

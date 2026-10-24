@@ -1,6 +1,6 @@
 # NeonNotes — Decisions
 
-_Last updated: 2026-10-18_
+_Last updated: 2026-10-20_
 
 Settled decisions only; pending questions live in [`roadmap.md`](roadmap.md).
 Most decisions are one line. A decision gets an ADR file when the rationale is
@@ -53,6 +53,16 @@ revisited.
   carry provenance (explicit / inferred / suggested / rejected) and an
   explainable signal engine feeds suggestions. →
   [`decisions/ADR-0013-graph-knowledge-editor.md`](decisions/ADR-0013-graph-knowledge-editor.md)
+- **ADR-0014 — Custom 2D-only Godot Android engine.** Build the Gradle AAR from
+  a matching 4.7.2 source checkout with the `2D-V2` profile (V1 is the
+  conservative fallback); replace
+  `android/build/libs/<type>/godot-lib.template_<type>.aar` because Gradle
+  exports ignore `custom_template/*`. →
+  [`decisions/ADR-0014-custom-2d-android-engine.md`](decisions/ADR-0014-custom-2d-android-engine.md)
+- **ADR-0015 — Desktop releases are portable, versioned archives.** Embedded
+  PCK (one executable), `SHA256SUMS`, XDG desktop entry + AppStream metainfo +
+  hicolor icons on Linux, embedded ICO/VERSIONINFO on Windows. →
+  [`decisions/ADR-0015-desktop-packaging.md`](decisions/ADR-0015-desktop-packaging.md)
 
 ## One-line decisions
 
