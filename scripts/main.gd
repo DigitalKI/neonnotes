@@ -521,10 +521,10 @@ func _build_dynamic_ui() -> void:
 	GameManager.crt_ui_changed.connect(func(on: bool):
 		var ov := get_node_or_null("CrtOverlay")
 		if ov != null: ov.visible = on)
-	Exporter.crt_material_cb = (
-		func() -> Variant:
-			var ov := get_node_or_null("CrtOverlay")
-			return ov.material if ov != null else null)
+	# A bound method, not a lambda: this Callable lives in a static var of
+	# another script, and a lambda there is freed after its GDScript at
+	# shutdown (GOT-026).
+	Exporter.crt_material_cb = _crt_export_material
 	export_component.width_cb = func() -> float:
 		# The document preview lays out in the content pane; export at exactly
 		# that logical width so proportions match the on-screen preview, then
@@ -567,6 +567,14 @@ func _build_dynamic_ui() -> void:
 	trash_page.bind(_refresh_list,
 		func(rel: String): sync_service.note_restored(rel),
 		func(): sync_service.note_saved(), _flash)
+
+## The live CRT overlay material, shared with the Exporter so an export that
+## opts into CRT FX composites the same look as the UI. A method rather than a
+## lambda: `Exporter.crt_material_cb` is static, and a lambda stored there is
+## released after its GDScript at shutdown (GOT-026).
+func _crt_export_material() -> Variant:
+	var ov := get_node_or_null("CrtOverlay")
+	return ov.material if ov != null else null
 
 ## Push GameManager's density-derived scale onto the whole canvas (fonts,
 ## metrics and touch targets alike), then re-run the responsive layout.

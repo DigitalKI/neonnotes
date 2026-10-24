@@ -14,15 +14,6 @@ phone ↔ PC over the local network.
 
 ## Next
 
-- **Crash on exit** — the main scene prints its boot marks and then aborts with
-  `double free or corruption (!prev)` on quit (`NEONNOTES_DEV=1 godot
-  --headless --path . --quit-after 30`, exit 134/139; the exported Linux build
-  does the same; the smoke run prints `SMOKE RESULT: OK` and then aborts).
-  Bisection is heap-layout sensitive — removing almost any Toolbar `@onready`
-  binding hides it, and it reproduces with the stock 4.7.2 editor binary — so it
-  looks engine-level, not one app function. Reproduce under a debug/ASan engine
-  build next. The smoke harness only greps for its marker, so `run_tests.sh`
-  does not fail on it.
 - **Desktop Open-with** — add `MimeType=text/markdown;` and
   `Exec=neonnotes %F` once a file argument is handled at boot (copy into the
   Inbox like Android's Open-with); until then the entry launches the app only.

@@ -117,3 +117,19 @@ change must respect live in [`invariants.md`](invariants.md).
   CLI fails with `Invalid export preset name`. The preset *name* can still be
   `Windows`. The Windows exporter accepts `.ico`, `.png`, `.webp`, or `.svg` for
   `application/icon` and falls back to `application/config/icon`.
+- **GOT-026 — a lambda stored in a `static var` is freed after its own script
+  at shutdown.** A lambda is a `GDScriptLambdaSelfCallable` whose
+  `UpdatableFuncPtr` belongs to the GDScript that defined it. Statics are
+  released later, by `GDScript::clear()` from
+  `ScriptServer::finish_languages()`, and `GDScriptCache::clear()` may have
+  freed that script already. The result is a crash **after** the result line:
+  glibc reports `double free or corruption (!prev)` or `corrupted size vs.
+  prev_size while consolidating` (exit 134), with no script error, and it looks
+  heap-layout sensitive because unrelated allocations hide it. An ASan engine
+  build (`scons use_asan=yes dev_build=yes`) shows `heap-use-after-free` in
+  `GDScript::UpdatableFuncPtr::~UpdatableFuncPtr` via
+  `GDScriptLambdaSelfCallable`. Store a **bound method** instead — e.g.
+  `Exporter.crt_material_cb = _crt_export_material` — or reset the static in
+  `_exit_tree`. Callback fields on an instance are safe; only statics outlive
+  their script. Guard: every headless boot exits 0, and `run_tests.sh` fails a
+  test that dies with a signal after printing its marker.

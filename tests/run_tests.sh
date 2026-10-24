@@ -3,12 +3,11 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-# Run one Godot test and decide pass/fail from its own PASS marker rather than
-# its exit code. Godot 4.7 aborts during native teardown on this project
-# ("double free or corruption"), so a perfectly good test can exit 134 *after*
-# printing its result — a raw exit-code check would abort the whole suite and
-# silently skip every later test. A missing marker (a real crash before the
-# result line) still fails the suite.
+# Run one Godot test and decide pass/fail from its own PASS marker, plus the
+# exit status. A failed assertion can still exit 0, so the marker is required;
+# and a run killed by a signal (exit >= 124) must not pass just because it
+# printed its marker before dying — teardown corruption once did exactly that
+# (GOT-026).
 #
 # Usage: run_godot_test "<marker>" <godot args...>
 run_godot_test() {
@@ -22,13 +21,18 @@ run_godot_test() {
 	code=$?
 	set -e
 	cat "$log"
-	if grep -qF -- "$marker" "$log"; then
+	if ! grep -qF -- "$marker" "$log"; then
+		echo "TEST FAILED: '$marker' not found (godot exit $code)" >&2
 		rm -f "$log"
-		return 0
+		return 1
 	fi
-	echo "TEST FAILED: '$marker' not found (godot exit $code)" >&2
+	if [ "$code" -ge 124 ]; then
+		echo "TEST FAILED: '$marker' printed, then godot died with exit $code" >&2
+		rm -f "$log"
+		return 1
+	fi
 	rm -f "$log"
-	return 1
+	return 0
 }
 
 run_godot_test "UNIT RESULT: OK" --headless --path . --script tests/unit_tests.gd
