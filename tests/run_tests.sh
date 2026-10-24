@@ -58,6 +58,9 @@ run_godot_test "META CACHE RESULT: OK" --headless --path . tests/TestMetaCache.t
 # ⋮ Undo/Redo: rows are present only while editing, grey out when the history
 # cannot move, and the history is cleared on note switch (never cross notes).
 run_godot_test "UNDO REDO RESULT: OK" --headless --path . tests/TestUndoRedo.tscn
+# Smart Enter: list markers continue (numbers increment, tasks reset unchecked),
+# a second Enter exits the list, and code fences keep native newlines.
+run_godot_test "LIST ENTER RESULT: OK" --headless --path . tests/TestListEnter.tscn
 run_godot_test "REVEAL RESULT: OK" --headless --path . tests/TestTreeReveal.tscn
 # Preview horizontal fit: an open note must not widen the shell past the screen
 # margins (a missing image embed's long file name used to do exactly that).

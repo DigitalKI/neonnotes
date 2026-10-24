@@ -396,6 +396,50 @@ func clear_document() -> void:
 	code_edit.clear_undo_history()
 
 
+# ---------------------------------------------------------------- smart list Enter
+
+## Continue a Markdown list on Enter: bullets keep their marker, ordered
+## numbers increment, task boxes restart unchecked, and indentation is kept.
+## On an empty item Enter leaves the list instead of adding another marker, so
+## the second press produces a plain blank line. Fenced code and modified
+## Enter (Shift/Ctrl/Alt/Cmd) keep the native behaviour. The event is accepted
+## after editing so CodeEdit does not insert a second newline.
+func _handle_list_enter(event: InputEventKey) -> bool:
+	if not event.pressed:
+		return false
+	if event.keycode != KEY_ENTER and event.physical_keycode != KEY_ENTER \
+			and event.keycode != KEY_KP_ENTER and event.physical_keycode != KEY_KP_ENTER:
+		return false
+	if event.shift_pressed or event.ctrl_pressed or event.alt_pressed or event.meta_pressed:
+		return false
+	if code_edit.has_selection():
+		return false  # let native replace the selection with a newline
+	if code_edit.get_caret_count() > 1:
+		return false  # native Enter edits every caret; only the main one is handled here
+	if code_edit.has_ime_text():
+		return false  # Enter is committing an IME composition
+	var line_idx := code_edit.get_caret_line()
+	var info := ListContinuation.analyze(code_edit.get_line(line_idx))
+	if not info.get("is_list", false):
+		return false
+	if code_edit.get_caret_column() < int(info["prefix_length"]):
+		return false  # caret inside the marker: split the line natively
+	if ListContinuation.inside_fence(code_edit.text.split("\n"), line_idx):
+		return false
+	code_edit.begin_complex_operation()
+	if bool(info["empty"]):
+		# Leave the list: drop the bare marker, keep one blank line with the
+		# caret at its start.
+		code_edit.set_line(line_idx, "")
+		code_edit.set_caret_line(line_idx)
+		code_edit.set_caret_column(0)
+	else:
+		code_edit.insert_text_at_caret("\n" + String(info["next_prefix"]))
+	code_edit.end_complex_operation()
+	code_edit.accept_event()
+	return true
+
+
 # ------------------------------------------------------------ mobile selection handles
 
 ## Desktop uses Godot's native click-drag selection. On touch platforms we are
@@ -404,9 +448,12 @@ func clear_document() -> void:
 ## the native clicked-drag selection, so scrolling never selects and the
 ## selection is never accidentally moved.
 func _on_code_edit_gui_input(event: InputEvent) -> void:
+	if event is InputEventKey and _handle_list_enter(event as InputEventKey):
+		return
 	if OS.get_name() == "Linux" or OS.get_name() == "Windows":
 		return  # desktop: native selection/scrolling, untouched
-	# CRITICAL: gui_input fires BEFORE CodeEdit._gui_input — never set_input_as_handled.
+	# CRITICAL (mobile branch): gui_input fires BEFORE CodeEdit._gui_input — do not
+	# set the event handled here, or the native caret/scroll handling is lost.
 	# On Android, emulate_mouse_from_touch means Controls almost always see MouseButton,
 	# not ScreenTouch. Use MouseButton.double_click; defer so the caret is already placed.
 	if event is InputEventMouseButton:

@@ -9,6 +9,8 @@ const TextSearchScript := preload("res://scripts/common/text_search.gd")
 const KnowledgeIndexScript := preload("res://scripts/common/knowledge_index.gd")
 const RelationshipEngineScript := preload("res://scripts/common/relationship_engine.gd")
 const LinkCommandScript := preload("res://scripts/common/link_command.gd")
+const ListContinuationScript := preload("res://scripts/common/list_continuation.gd")
+const VaultSearchScript := preload("res://scripts/common/vault_search.gd")
 
 var failures := 0
 
@@ -24,6 +26,7 @@ func _init() -> void:
 	_check_knowledge_index()
 	_check_explicit_relationships()
 	_check_link_command()
+	_check_list_continuation()
 	_check_inbox_path()
 	_check_media_import()
 	_check_dev_session_detection()
@@ -32,6 +35,7 @@ func _init() -> void:
 	_check_tag_suggest()
 	_check_text_match()
 	_check_text_search()
+	_check_vault_search()
 	print("UNIT RESULT: %s (%d failures)" % ["FAIL" if failures > 0 else "OK", failures])
 	quit(failures)
 
@@ -416,6 +420,43 @@ func _check_link_command() -> void:
 	_check(LinkCommandScript.strip_link("literal \\[[B]] text", "B") == "literal \\[[B]] text",
 		"strip leaves an escaped link alone")
 
+func _check_list_continuation() -> void:
+	# Bullets keep their character; Enter on a non-empty item starts the next.
+	var bullet := ListContinuationScript.analyze("- item")
+	_check(bullet["is_list"] and not bullet["empty"], "a bullet item is a list line")
+	_check(bullet["prefix_length"] == 2, "prefix length covers bullet + space")
+	_check(bullet["next_prefix"] == "- ", "bullets continue with the same marker")
+	_check(ListContinuationScript.analyze("* star")["next_prefix"] == "* ", "star bullets stay stars")
+	_check(ListContinuationScript.analyze("+ plus")["next_prefix"] == "+ ", "plus bullets stay pluses")
+
+	# An empty item leaves the list instead of creating another marker.
+	_check(ListContinuationScript.analyze("- ")["empty"], "a bare bullet is an empty item")
+	_check(ListContinuationScript.analyze("1. ")["empty"], "a bare number is an empty item")
+
+	# Ordered markers increment and keep the delimiter style.
+	_check(ListContinuationScript.analyze("1. item")["next_prefix"] == "2. ", "numbered items increment")
+	_check(ListContinuationScript.analyze("9) item")["next_prefix"] == "10) ", "parenthesised numbers increment and keep `)`")
+
+	# Task boxes continue unchecked, with indentation preserved.
+	var task := ListContinuationScript.analyze("  - [x] done")
+	_check(task["next_prefix"] == "  - [ ] ", "task boxes restart unchecked and keep indentation")
+	_check(not task["empty"], "a task with text is not empty")
+	_check(ListContinuationScript.analyze("- [ ]")["empty"], "a bare unchecked box is an empty item")
+	_check(ListContinuationScript.analyze("- [x] ")["empty"], "a bare checked box is an empty item")
+	_check(ListContinuationScript.analyze("1. [ ] todo")["next_prefix"] == "2. [ ] ",
+		"ordered task boxes increment and restart unchecked")
+
+	# Not list lines: no marker, no space after marker, thematic breaks, quotes.
+	_check(not ListContinuationScript.analyze("plain text")["is_list"], "plain text is not a list")
+	_check(not ListContinuationScript.analyze("-no space")["is_list"], "a marker needs trailing space")
+	_check(not ListContinuationScript.analyze("---")["is_list"], "a thematic break is not a list")
+	_check(not ListContinuationScript.analyze("> - quoted")["is_list"], "a quoted bullet is not a list")
+
+	# Fenced code is left to CodeEdit's native newline.
+	var fenced := PackedStringArray(["```gdscript", "- item", "```", "- item"])
+	_check(ListContinuationScript.inside_fence(fenced, 1), "a line inside a language fence is fenced")
+	_check(not ListContinuationScript.inside_fence(fenced, 3), "a list after a closed fence is normal Markdown")
+
 func _check_tag_suggest() -> void:
 	_check(TagMatchScript.score("jw", "jw") == 0, "exact tag match ranks first")
 	_check(TagMatchScript.score("jw", "j") == 0, "prefix tag match")
@@ -458,6 +499,34 @@ func _check_text_search() -> void:
 	_check(TextSearchScript.find_all("aaaa", "aa").size() == 2, "find_all is non-overlapping")
 	_check(TextSearchScript.find_all("text", "").is_empty(), "empty query finds nothing")
 	_check(TextSearchScript.find_all("text", "zzz").is_empty(), "absent query finds nothing")
+
+## Search semantics shared by the sidebar tree and the Move page: one query
+## parser, AND-ed tag matching and the title-first keyword pass.
+func _check_vault_search() -> void:
+	var f = VaultSearchScript.new()
+	f.set_query("roadmap #Project #project #2026")
+	_check(f.tags == ["project", "2026"], "query splits tags, lower-cased and deduped")
+	_check(f.text == "roadmap", "query keeps keywords")
+	_check(f.is_active(), "a tag makes the query active")
+	f.set_query("ab")
+	_check(not f.is_active(), "short keywords are not a search yet")
+	f.set_query("abc")
+	_check(f.is_active(), "three characters start a keyword search")
+	f.set_query("#work")
+	_check(f.is_active() and f.text == "", "tag-only query has no keyword text")
+
+	var index := {"a.md": ["Work", "Urgent"], "b.md": ["work"], "c.md": ["home"]}
+	_check(VaultSearchScript.matches_tags("a.md", ["work"], index), "tags match case-insensitively")
+	_check(not VaultSearchScript.matches_tags("b.md", ["work", "urgent"], index), "tags are AND-ed")
+	_check(VaultSearchScript.matches_tags("b.md", [], index), "no tags matches everything")
+
+	var titles := {"a.md": "Alpha ROADMAP", "b.md": "Beta"}
+	var hits := VaultSearchScript.keyword_hits(["a.md", "b.md"], titles, "/nonexistent", "roadmap", Callable())
+	_check(hits == ["a.md"], "keyword hits are case-insensitive and title-first")
+	hits = VaultSearchScript.keyword_hits(["a.md", "b.md"], titles, "/nonexistent", "BETA", Callable())
+	_check(hits == ["b.md"], "uppercase queries match titles")
+	_check(VaultSearchScript.keyword_hits(["a.md"], titles, "/nonexistent", "roadmap",
+		func() -> bool: return true).is_empty(), "a cancelled search publishes nothing")
 
 ## Block-level line model: NeonHighlighter consumes parse()["lines"] +
 ## line_markers() instead of re-deriving block rules, so block classification is
