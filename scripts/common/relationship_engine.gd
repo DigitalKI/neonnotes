@@ -214,3 +214,161 @@ static func _add_edges(m: GraphModel, notes: Array[String], links: Dictionary) -
 				continue
 			seen[key] = true
 			m.edges.append({"from": n, "to": other, "kind": "direct"})
+
+# ------------------------------------------------------------- inference (Phase 2)
+
+## Default per-signal weights. `infer()` merges `options["weights"]` over these.
+const DEFAULT_WEIGHTS := {
+	"shared_tag": 0.35,
+	"shared_neighbour": 0.30,
+	"lexical": 0.20,
+	"structural": 0.15,
+}
+## Pairs scoring at or above this are emitted as inferred relationships.
+const DEFAULT_THRESHOLD := 0.15
+## Words too short or too generic to count as lexical evidence.
+const _STOPWORDS := {
+	"the": true, "and": true, "for": true, "with": true, "this": true,
+	"that": true, "from": true, "into": true, "over": true, "under": true,
+	"your": true, "you": true, "are": true, "was": true, "has": true,
+	"have": true, "not": true, "will": true, "can": true, "its": true,
+	"our": true, "note": true, "notes": true, "about": true, "some": true,
+}
+static var _word_re: RegEx
+
+## Deterministic inference over the vault (ADR-0013 Phase 2): typed "inferred"
+## relationships from tag overlap, shared link neighbours, lexical title overlap
+## and structural (same-folder) proximity. Pure and side-effect free — it never
+## mutates the vault or the link index; Phase 3 renders/accepts these. `options`
+## accepts `weights` (per-signal overrides), `threshold` and `max_results`
+## (0 = unlimited).
+static func infer(notes: Array[String], links: Dictionary, tags: Dictionary,
+		titles: Dictionary, options: Dictionary = {}) -> Array:
+	var weights: Dictionary = DEFAULT_WEIGHTS.duplicate()
+	if options.has("weights") and options["weights"] is Dictionary:
+		var overrides: Dictionary = options["weights"]
+		for k in overrides.keys():
+			if weights.has(k):
+				weights[k] = float(overrides[k])
+	var threshold := float(options.get("threshold", DEFAULT_THRESHOLD))
+	var max_results := int(options.get("max_results", 0))
+
+	var maps := resolve_maps(notes)
+	var neighbours := _neighbour_sets(notes, links, maps)
+	var title_words := {}
+	for n in notes:
+		var t := String(titles.get(n, ""))
+		if t == "":
+			t = n.get_file().trim_suffix(".md")
+		title_words[n] = _title_words(t)
+
+	var out: Array = []
+	for i in notes.size():
+		var a: String = notes[i]
+		for j in range(i + 1, notes.size()):
+			var b: String = notes[j]
+			var rel = _infer_pair(a, b, tags, neighbours, title_words, weights)
+			if rel == null or rel.score < threshold:
+				continue
+			out.append(rel)
+			if max_results > 0 and out.size() >= max_results:
+				return out
+	return out
+
+## Score one unordered pair. Returns null when no signal fires; otherwise a
+## filled KnowledgeRelationship with provenance "inferred".
+static func _infer_pair(a: String, b: String, tags: Dictionary,
+		neighbours: Dictionary, title_words: Dictionary, weights: Dictionary):
+	var evidence: Array[Dictionary] = []
+
+	var ta: Array = tags.get(a, [])
+	var tb: Array = tags.get(b, [])
+	var shared_tags := 0
+	var tb_set := {}
+	for t in tb:
+		tb_set[t] = true
+	for t in ta:
+		if tb_set.has(t):
+			shared_tags += 1
+			evidence.append({"kind": "shared_tag", "value": String(t),
+				"weight": float(weights["shared_tag"])})
+	var tag_sim := float(shared_tags) / float(maxi(1, mini(ta.size(), tb.size())))
+
+	var na: Dictionary = neighbours.get(a, {})
+	var nb: Dictionary = neighbours.get(b, {})
+	var shared_nb := 0
+	for c in na.keys():
+		if nb.has(c):
+			shared_nb += 1
+			evidence.append({"kind": "shared_neighbour", "value": String(c),
+				"weight": float(weights["shared_neighbour"])})
+	var neigh_sim := float(shared_nb) / float(maxi(1, mini(na.size(), nb.size())))
+
+	var wa: Dictionary = title_words.get(a, {})
+	var wb: Dictionary = title_words.get(b, {})
+	var shared_words := 0
+	for w in wa.keys():
+		if wb.has(w):
+			shared_words += 1
+			evidence.append({"kind": "lexical", "value": String(w),
+				"weight": float(weights["lexical"])})
+	var lex_sim := float(shared_words) / float(maxi(1, mini(wa.size(), wb.size())))
+
+	var structural := 0.0
+	var pa := a.get_base_dir()
+	if pa != "" and pa != "." and pa == b.get_base_dir():
+		structural = 1.0
+		evidence.append({"kind": "structural", "value": pa,
+			"weight": float(weights["structural"])})
+
+	if evidence.is_empty():
+		return null
+
+	var score := clampf(
+		float(weights["shared_tag"]) * tag_sim
+		+ float(weights["shared_neighbour"]) * neigh_sim
+		+ float(weights["lexical"]) * lex_sim
+		+ float(weights["structural"]) * structural,
+		0.0, 1.0)
+
+	var rel := _KnowledgeRelationship.new()
+	rel.source = a
+	rel.target = b
+	rel.kind = "inferred"
+	rel.provenance = "inferred"
+	rel.score = score
+	rel.evidence = evidence
+	return rel
+
+## Note -> set of resolved link neighbours (outbound and inbound).
+static func _neighbour_sets(notes: Array[String], links: Dictionary, maps: Array) -> Dictionary:
+	var resolved := {}
+	for src in links.keys():
+		var lst := []
+		for target in links[src]:
+			var r := resolve_with(String(target), maps)
+			if r != "" and r != src and not lst.has(r):
+				lst.append(r)
+		if not lst.is_empty():
+			resolved[src] = lst
+	var out := {}
+	for n in notes:
+		out[n] = {}
+	for src in resolved.keys():
+		for t in resolved[src]:
+			if out.has(src):
+				out[src][t] = true
+			if out.has(t):
+				out[t][src] = true
+	return out
+
+## Lowercased, stopword-free word set of a title (used for lexical overlap).
+static func _title_words(title: String) -> Dictionary:
+	if _word_re == null:
+		_word_re = RegEx.create_from_string("[a-z0-9]+")
+	var out := {}
+	for m in _word_re.search_all(title.to_lower()):
+		var w := m.get_string()
+		if w.length() >= 3 and not _STOPWORDS.has(w):
+			out[w] = true
+	return out

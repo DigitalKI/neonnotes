@@ -1,6 +1,6 @@
 # RelationshipEngine & KnowledgeIndex — design
 
-_Status: complete (Phase 0 of the graph-as-editor plan, ADR-0013)_
+_Status: complete (Phase 0 + Phase 2 of the graph-as-editor plan, ADR-0013)_
 
 Phase 0 is landed: the relationship/provenance model is defined and the layered
 read model is wired end-to-end with no visible behavior change — `GameManager`
@@ -109,16 +109,19 @@ static func note_title(rel: String, titles: Dictionary) -> String
 level walk (one level = one folder move or one link hop — the existing rule)
 and `explicit_relationships` for the link edges; it emits a filled `GraphModel`.
 
-### Inference (Phase 2, not Phase 0)
+### Inference (Phase 2, landed)
 
 ```gdscript
 static func infer(notes, links: Dictionary, tags: Dictionary, titles: Dictionary,
-		options: Dictionary = {}) -> Array[KnowledgeRelationship]
+		options: Dictionary = {}) -> Array
 ```
 
 Deterministic signals (tag overlap, lexical overlap, shared neighbours,
-structural proximity) with configurable weights and retained evidence; no
-auto-mutation. Semantic/embedding/behavioural signals are later and optional.
+structural proximity) with configurable weights (`options["weights"]`), a
+`threshold` and a `max_results` cap; each result carries `score` and structured
+`evidence` entries (`{"kind","value","weight"}`). No auto-mutation — Phase 3
+renders and accepts/rejects these. Semantic/embedding/behavioural signals are
+later and optional.
 
 ## Relationship data shapes
 

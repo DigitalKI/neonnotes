@@ -90,9 +90,9 @@ by an explainable signal engine. Phased, in `Next` (not `Now`):
   offered only when the note links out. Remaining: multi-select bulk move
   (move N nodes into a target; a leaf auto-converts to a folder + companion
   note, unifying with the tree's drag/drop — the Move dialog does not yet).
-- **Phase 2 — relationship engine**: deterministic signals (tags, lexical
-  overlap, shared neighbours, structural proximity) with structured evidence,
-  explainable scores and configurable weights; no auto-mutation.
+- **Phase 2 — relationship engine** _(done)_: deterministic signals (tags,
+  lexical overlap, shared neighbours, structural proximity) with structured
+  evidence, explainable scores and configurable weights; no auto-mutation.
 - **Phase 3 — suggestions & gaps**: render inferred edges differently; inspect
   evidence; accept (→ wiki-link) / reject; suppress duplicates.
 - **Phase 4 — document link placement**: candidate-phrase detection, manual

@@ -25,6 +25,7 @@ func _init() -> void:
 	_check_graph_model()
 	_check_knowledge_index()
 	_check_explicit_relationships()
+	_check_inference()
 	_check_link_command()
 	_check_list_continuation()
 	_check_inbox_path()
@@ -402,6 +403,50 @@ func _check_explicit_relationships() -> void:
 		"relationships are typed by provenance and kind")
 	_check(r0["evidence"].is_empty() and r0["source_locations"].is_empty(),
 		"explicit relationships carry no evidence until Phase 2")
+
+## infer (Phase 2): deterministic signals — tag overlap, shared link neighbours,
+## lexical title overlap and same-folder proximity — become typed "inferred"
+## relationships with evidence; nothing mutates the vault.
+func _check_inference() -> void:
+	var notes: Array[String] = ["A.md", "B.md", "C.md", "Folder/D.md", "Folder/E.md"]
+	var links := {"A.md": ["C"], "B.md": ["C"]}
+	var tags := {"A.md": ["physics"], "B.md": ["physics", "space"]}
+	var titles := {
+		"A.md": "Quantum physics notes",
+		"B.md": "Relativity and physics",
+		"C.md": "Shared hub",
+		"Folder/D.md": "One",
+		"Folder/E.md": "Two",
+	}
+	var rels := RelationshipEngineScript.infer(notes, links, tags, titles)
+	var ab = null
+	var de = null
+	for r in rels:
+		var s := String(r["source"])
+		var t := String(r["target"])
+		if (s == "A.md" and t == "B.md") or (s == "B.md" and t == "A.md"):
+			ab = r
+		if (s == "Folder/D.md" and t == "Folder/E.md") or (s == "Folder/E.md" and t == "Folder/D.md"):
+			de = r
+	_check(ab != null, "infer finds the shared-signal A-B pair")
+	_check(de != null, "infer finds the same-folder D-E pair")
+	if ab != null:
+		_check(String(ab["provenance"]) == "inferred" and String(ab["kind"]) == "inferred",
+			"inferred relationships are typed")
+		_check(float(ab["score"]) > 0.5, "the A-B pair scores strongly")
+		var kinds := {}
+		for e in ab["evidence"]:
+			kinds[String(e["kind"])] = true
+		_check(kinds.has("shared_tag") and kinds.has("shared_neighbour") and kinds.has("lexical"),
+			"A-B evidence covers tag, neighbour and lexical signals")
+	if de != null:
+		var kinds2 := {}
+		for e in de["evidence"]:
+			kinds2[String(e["kind"])] = true
+		_check(kinds2.has("structural") and kinds2.size() == 1,
+			"D-E evidence is structural only")
+	var capped := RelationshipEngineScript.infer(notes, links, tags, titles, {"max_results": 1})
+	_check(capped.size() == 1, "infer respects max_results")
 
 ## LinkCommand text transforms: canonical target form, append (idempotent) and
 ## strip (alias-aware, escape-safe) — the pure half of Phase 1's link editing.
