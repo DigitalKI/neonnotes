@@ -82,12 +82,12 @@ by an explainable signal engine. Phased, in `Next` (not `Now`):
 
 - **Phase 0 — architecture prep** _(done)_: define the relationship/provenance
   model without changing visible behavior; add tests for identity and provenance.
-- **Phase 1 — explicit graph editing (first milestone)** _(create-link done)_:
+- **Phase 1 — explicit graph editing (first milestone)** _(create-link + unlink done)_:
   select two nodes and link them — the graph "Link" menu enters a link mode
   whose next tap writes a canonical `[[wiki-link]]` into Markdown
   (`LinkCommand` + `GameManager.link_notes`); backlinks reflect it; no
-  graph-only state; no inference yet. Remaining: a graph UI for removing a link
-  (the `unlink_notes` command is already in place), and multi-select bulk move
+  graph-only state; no inference yet. "Unlink" reverses it on a linked pair,
+  offered only when the note links out. Remaining: multi-select bulk move
   (move N nodes into a target; a leaf auto-converts to a folder + companion
   note, unifying with the tree's drag/drop — the Move dialog does not yet).
 - **Phase 2 — relationship engine**: deterministic signals (tags, lexical

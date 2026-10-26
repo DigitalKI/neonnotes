@@ -72,6 +72,7 @@ func setup() -> void:
 	graph_view.delete_cb = _delete_graph_note
 	graph_view.move_cb = move_note
 	graph_view.link_cb = _link_graph_notes
+	graph_view.unlink_cb = _unlink_graph_notes
 	graph_view.status_cb = func(msg: String): status_bar.flash(msg)
 	graph_view.focus_cb = _focus_graph_node
 	# A tap in the dock is an action (open the note / enter the folder); in the
@@ -557,8 +558,20 @@ func _link_graph_notes(source: String, target: String) -> void:
 	if GameManager.link_notes(source, target):
 		status_bar.flash("Linked %s → %s" % [GameManager.note_title(source), GameManager.note_title(target)])
 		graph_view.refresh_graph()
+		graph_view.pulse_link(source, target)
 	else:
 		status_bar.flash("Already linked")
+
+
+## The circle menu's Unlink: remove the [[wiki-link]] from `source` to `target`
+## and re-derive the map. Flush first for the same reason as linking (INV-004).
+func _unlink_graph_notes(source: String, target: String) -> void:
+	editor.flush()
+	if GameManager.unlink_notes(source, target):
+		status_bar.flash("Unlinked %s ↛ %s" % [GameManager.note_title(source), GameManager.note_title(target)])
+		graph_view.refresh_graph()
+	else:
+		status_bar.flash("Not linked")
 
 
 ## Drop the per-vault caches that describe a previous graph/vault and close the

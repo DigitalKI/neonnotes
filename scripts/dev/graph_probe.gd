@@ -549,5 +549,99 @@ func _ready() -> void:
 	GameManager.links = saved_links4
 	GameManager.titles = saved_titles4
 
+	# 18. Link mode: the source highlights, the target tap offers only
+	#     "Link to"/"Cancel", and the [[wiki-link]] is written only on "Link to".
+	#     Regression: the outside-press close used to cancel the pending link
+	#     before the target tap could register.
+	var saved_notes5: Array[String] = GameManager.notes
+	var saved_links5: Dictionary = GameManager.links
+	var saved_titles5: Dictionary = GameManager.titles
+	GameManager.notes = ["src.md", "dst.md"]
+	GameManager.links = {}
+	GameManager.titles = {"src.md": "Source", "dst.md": "Target"}
+	gv._build_hierarchy()
+	gv._scope = ""
+	gv._scope_active = false
+	gv._rebuild_keys()
+	gv._layout_points()
+	gv._build_routes()
+	gv._fit_to_view()
+	var link_calls := []
+	gv.link_cb = func(s: String, t: String) -> void: link_calls.append([s, t])
+	gv._select("src.md")
+	check.call("source menu offers Link", gv._menu.actions.has("Link"))
+	gv._activate_menu("Link")
+	check.call("Link stores the source", gv._pending_source == "src.md")
+	check.call("Link sets edge mode", gv._link_mode == "link")
+	check.call("Link highlights the source node", gv._link_source == "src.md")
+	check.call("Link closes the action menu", not gv._menu.open)
+	gv._tap_node("dst.md")
+	check.call("target tap selects the target", gv._selected == "dst.md")
+	check.call("target menu is Link to / Cancel", gv._menu.actions == ["Link to", "Cancel"])
+	check.call("source stays highlighted while targeting", gv._link_source == "src.md")
+	check.call("no write before confirming", link_calls.is_empty())
+	gv._activate_menu("Link to")
+	check.call("Link to writes the link once", link_calls == [["src.md", "dst.md"]])
+	check.call("Link to clears link mode",
+		gv._link_mode == "" and gv._pending_source == "" and gv._link_source == "")
+	check.call("Link to drops the selection", gv._selected == "" and not gv._menu.open)
+	# Cancel restores the target's normal menu instead of writing.
+	link_calls.clear()
+	gv._select("src.md")
+	gv._activate_menu("Link")
+	gv._tap_node("dst.md")
+	gv._activate_menu("Cancel")
+	check.call("Cancel clears link mode",
+		gv._link_mode == "" and gv._pending_source == "" and gv._link_source == "")
+	check.call("Cancel writes nothing", link_calls.is_empty())
+	check.call("Cancel restores the normal menu", gv._selected == "dst.md"
+		and gv._menu.actions.has("Open") and gv._menu.actions.has("Delete"))
+	# An empty-space tap in link mode cancels it (the corner is never a node).
+	gv._select("src.md")
+	gv._activate_menu("Link")
+	var out_press := InputEventMouseButton.new()
+	out_press.button_index = MOUSE_BUTTON_LEFT
+	out_press.pressed = true
+	out_press.position = Vector2.ZERO
+	gv._gui_input(out_press)
+	var out_release := InputEventMouseButton.new()
+	out_release.button_index = MOUSE_BUTTON_LEFT
+	out_release.pressed = false
+	out_release.position = Vector2.ZERO
+	gv._gui_input(out_release)
+	check.call("empty-space tap cancels link mode", gv._pending_source == "")
+
+	# 19. Unlink mirrors link: it only appears when the note links out, offers
+	#     "Unlink from"/"Cancel" on a linked target, and writes only on confirm.
+	gv.unlink_cb = func(s: String, t: String) -> void: link_calls.append(["unlink", s, t])
+	# Raw wiki-link targets are bare names ("dst"), matching what link_notes writes.
+	GameManager.links = {"src.md": ["dst"]}
+	gv._rebuild_resolve_maps()
+	gv._select("src.md")
+	check.call("linked source menu offers Unlink", gv._menu.actions.has("Unlink"))
+	gv._activate_menu("Unlink")
+	check.call("Unlink sets edge mode", gv._link_mode == "unlink")
+	check.call("Unlink stores the source", gv._pending_source == "src.md")
+	check.call("Unlink highlights the source", gv._link_source == "src.md")
+	gv._tap_node("dst.md")
+	check.call("unlink target menu is Unlink from / Cancel", gv._menu.actions == ["Unlink from", "Cancel"])
+	link_calls.clear()
+	gv._activate_menu("Unlink from")
+	check.call("Unlink from calls unlink_cb", link_calls == [["unlink", "src.md", "dst.md"]])
+	check.call("Unlink from clears edge mode",
+		gv._link_mode == "" and gv._pending_source == "" and gv._link_source == "")
+	# A target the source does not link to is refused, leaving the mode active.
+	gv._select("src.md")
+	gv._activate_menu("Unlink")
+	GameManager.links = {"src.md": []}
+	gv._rebuild_resolve_maps()
+	gv._tap_node("dst.md")
+	check.call("unlinked target is refused", gv._link_mode == "unlink" and gv._selected == "src.md")
+	check.call("refused target keeps the menu closed", not gv._menu.open)
+	gv._cancel_edge_mode()
+	GameManager.notes = saved_notes5
+	GameManager.links = saved_links5
+	GameManager.titles = saved_titles5
+
 	print("PROBE RESULT: %s (%d fails)" % ["OK" if _fails == 0 else "FAIL", _fails])
 	get_tree().quit(_fails)

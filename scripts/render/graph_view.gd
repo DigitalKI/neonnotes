@@ -20,7 +20,8 @@ var blur_cb := Callable()       # focus dropped (tap outside): Main hides the ca
 ## view leaves the callback alone (its tap stays a pure selection).
 var tap_cb := Callable()
 var link_cb := Callable()       # Link mode: (source_rel, target_rel) -> write a [[wiki-link]]
-var status_cb := Callable()     # transient status hint (Link mode, etc.)
+var unlink_cb := Callable()     # Unlink mode: (source_rel, target_rel) -> remove a [[wiki-link]]
+var status_cb := Callable()     # transient status hint (Link/Unlink mode, etc.)
 ## Emitted whenever page/scope state changes: the nav-bar component (a scene
 ## child of this view) mirrors it — navigation visuals live in
 ## scenes/components/graph_nav_bar.tscn, editable like any other UI.
@@ -44,6 +45,8 @@ const SPEED_MIN := 0.34         # route fractions per second
 const SPEED_MAX := 0.66
 const TRAIL := 7                # samples in the travelling light's tail
 const ROUTE_SAMPLES := 48       # evenly spaced samples per route
+const PULSE_TRAVEL := 0.55      # seconds for the link "power-up" wave to cross the route
+const PULSE_FLASH := 0.55       # seconds the target stays lit after the wave lands
 const NODE_R := 4.5
 const FOLDER_R := 3.0
 const LABEL_ZOOM := 1.5         # only label leaves once zoomed in this far
@@ -126,7 +129,10 @@ var _mouse_action_consumed := false
 var _touch_action_consumed := false
 var _touch_press := Vector2.ZERO
 var _selected := ""             # focused node (tree key)
-var _pending_link := ""         # source note awaiting a link target (Link mode)
+var _link_mode := ""            # "" | "link" | "unlink" — which edge the menu is editing
+var _pending_source := ""        # source note (rel path) awaiting an edge target
+var _link_source := ""          # source node key, highlighted while picking a target
+var _pulse := {}                # one-shot link "power-up" wave over the new route
 var _scope := ""                # current entered group; empty = whole vault root
 var _scope_active := false       # distinguishes explicit root entry from overview       # distinguishes entered root from Overview
 var _page := 0                   # child page within current scope
@@ -356,6 +362,10 @@ func open(center_note: String = "") -> void:
 	if _suspended_state.is_empty() and _pending_restore.is_empty():
 		_reset_nav(center_note)
 	_drop_focus()
+	_link_mode = ""
+	_pending_source = ""
+	_link_source = ""
+	_pulse = {}
 	_press_moved = false
 	_pinch_used = false
 	_map_ready = false
@@ -398,6 +408,10 @@ func open_restored(state: Dictionary) -> void:
 func _reset_nav(center_note: String) -> void:
 	_center_note = center_note
 	_selected = ""
+	_link_mode = ""
+	_pending_source = ""
+	_link_source = ""
+	_pulse = {}
 	_hover = ""
 	_hover_active = false
 	_scope = ""
@@ -1199,7 +1213,8 @@ func _process(delta: float) -> void:
 		_bg.queue_redraw()
 		_sync_nodes()
 		_overlay.queue_redraw()
-	# Only the travelling lights animate, so the per-frame repaint is just them.
+	# Advance the one-shot link pulse, then repaint the animated light.
+	_advance_pulse(delta)
 	queue_redraw()
 
 # ---------------------------------------------------------------- drawing
@@ -1218,6 +1233,8 @@ func _draw() -> void:
 	var inv := 1.0 / maxf(_map_scale, 0.001)
 	draw_set_transform(_map_offset, 0.0, Vector2(_map_scale, _map_scale))
 	_draw_flows(self, inv)
+	_draw_link_source(self, inv)
+	_draw_pulse(self, inv)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 ## Background layer (`_bg`, painted behind `_draw`): the hierarchy spine and the
@@ -1365,6 +1382,87 @@ func _flow_color(col: Color, v: float, head_idx: int, scale := 1.0) -> Color:
 	var a: float = (0.05 + 0.80 * pow(maxf(0.0, 1.0 - back), 2.0)) * scale
 	return Color(col.r, col.g, col.b, a)
 
+## A pulsing ring around the Link-mode source so its origin is obvious while the
+## user picks a target. Drawn in the per-frame `_draw` pass (map space).
+func _draw_link_source(ci: CanvasItem, inv: float) -> void:
+	if _link_source == "" or not _pos.has(_link_source):
+		return
+	var p := Vector2(_pos[_link_source])
+	var pulse := 0.5 + 0.5 * sin(_time * 6.0)
+	var r := (8.0 + pulse * 3.0) * inv
+	# Unlink pulses a warm "removing" tint so the mode is distinct at a glance.
+	var col := Color("#ff6b6b") if _link_mode == "unlink" else _accent
+	ci.draw_arc(p, r, 0.0, TAU, 40,
+		Color(col.lightened(0.5), 0.45 + pulse * 0.45), 2.0 * inv, true)
+
+## Advance the one-shot link "power-up" wave: travel src → dst, then flash the
+## target until the animation is done.
+func _advance_pulse(delta: float) -> void:
+	if _pulse.is_empty():
+		return
+	if float(_pulse.get("flash", 0.0)) > 0.0:
+		_pulse["flash"] = float(_pulse["flash"]) - delta
+		if float(_pulse["flash"]) <= 0.0:
+			_pulse = {}
+	else:
+		_pulse["t"] = float(_pulse["t"]) + delta / PULSE_TRAVEL
+		if float(_pulse["t"]) >= 1.0:
+			_pulse["t"] = 1.0
+			_pulse["flash"] = PULSE_FLASH
+	queue_redraw()
+
+## Draw the one-shot link pulse. While travelling, a bright head moves src → dst
+## and an expanding ring leaves the source; once it lands, the target
+## illuminates briefly and fades.
+func _draw_pulse(ci: CanvasItem, inv: float) -> void:
+	if _pulse.is_empty():
+		return
+	var samples: PackedVector2Array = _pulse.get("samples", PackedVector2Array())
+	if samples.size() < 2:
+		return
+	var t := clampf(float(_pulse.get("t", 0.0)), 0.0, 1.0)
+	var flash := float(_pulse.get("flash", 0.0))
+	var src := Vector2(_pulse.get("src", Vector2.ZERO))
+	var dst := Vector2(_pulse.get("dst", Vector2.ZERO))
+	var col := _accent
+	if flash <= 0.0:
+		var idx := clampi(int(round(t * float(samples.size() - 1))), 0, samples.size() - 1)
+		var head := Vector2(samples[idx])
+		ci.draw_circle(head, 6.0 * inv, Color(col.lightened(0.6), 0.95))
+		ci.draw_circle(head, 11.0 * inv, Color(col, 0.35))
+		var dist := src.distance_to(dst)
+		if dist > 0.0:
+			var ring_r := 6.0 * inv + t * dist
+			ci.draw_arc(src, ring_r, 0.0, TAU, 48,
+				Color(col.lightened(0.4), (1.0 - t) * 0.8), 2.0 * inv, true)
+	else:
+		var a := clampf(flash / PULSE_FLASH, 0.0, 1.0)
+		var grow := (1.0 - a) * 8.0
+		ci.draw_circle(dst, (6.0 + grow) * inv, Color(col.lightened(0.7), a))
+		ci.draw_circle(dst, (14.0 + grow * 2.0) * inv, Color(col, a * 0.35))
+
+## Start the one-shot "power-up" wave along the route just written by Link mode.
+## Called after `refresh_graph()` so the new route and its samples exist.
+func pulse_link(source: String, target: String) -> void:
+	if source == "" or target == "" or source == target:
+		return
+	var ak := _key_for_note(source)
+	var bk := _key_for_note(target)
+	if ak == "" or bk == "" or ak == bk:
+		return
+	var a := _norm(ak)
+	var b := _norm(bk)
+	if not _pos.has(a) or not _pos.has(b):
+		return
+	_pulse = {
+		"samples": _route_samples(a, b),
+		"src": Vector2(_pos[a]),
+		"dst": Vector2(_pos[b]),
+		"t": 0.0,
+		"flash": 0.0,
+	}
+	queue_redraw()
+
 func _section_color(k: String) -> Color:
 	var path := String(_open_target.get(k, k))
 	var parts := path.split("/")
@@ -1380,6 +1478,7 @@ func _section_color(k: String) -> Color:
 func _node_color(k: String) -> Color:
 	var hot := k == _center_note or String(_companion.get(k, "")) == _center_note \
 		or k == _selected \
+		or k == _link_source \
 		or (_center_note != "" and String(_open_target.get(k, "")) == _center_note)
 	var col := _accent if hot else _section_color(k)
 	var in_focus := _center_note == "" or _levels.has(String(_open_target.get(k, "")))
@@ -1875,6 +1974,9 @@ func _gui_input(event: InputEvent) -> void:
 				elif _hub_at(event.position):
 					_tap_hub()
 					accept_event()
+				elif _link_mode != "":
+					_cancel_edge_mode()
+					accept_event()
 	elif event is InputEventMouseButton and event.pressed \
 			and (event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN):
 		_zoom_at(event.position, 1.15 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0 / 1.15)
@@ -1917,6 +2019,8 @@ func _gui_input(event: InputEvent) -> void:
 					_tap_node(tapped)
 				elif _hub_at(event.position):
 					_tap_hub()
+				elif _link_mode != "":
+					_cancel_edge_mode()
 			# Settle the label pass on release: a mobile pan/pinch is delivered as
 			# many small deltas, so re-place once the finger lifts.
 			if _touches.is_empty() and (_press_moved or _pinch_used):
@@ -2017,7 +2121,6 @@ func _drop_focus() -> void:
 ## still be dismissible by clicking the map.
 func _close_menu() -> void:
 	var had_menu := _menu.open
-	_pending_link = ""  # an outside press cancels a pending Link mode too
 	_drop_focus()
 	if had_menu:
 		_mark_map_dirty()
@@ -2027,12 +2130,9 @@ func _close_menu() -> void:
 ## menu, focus callback), then tell the host. Only the desktop dock acts on that
 ## — the full view keeps its tap = pure selection behaviour.
 func _tap_node(key: String) -> void:
-	if _pending_link != "":
-		# Link mode: this tap is the target, not a fresh selection.
-		var target := node_rel(key)
-		if target != "" and target != _pending_link and link_cb.is_valid():
-			link_cb.call(_pending_link, target)
-		_pending_link = ""
+	if _link_mode != "":
+		# Edge mode: this tap chooses the target, not a fresh selection.
+		_select_edge_target(key)
 		return
 	_select(key)
 	if tap_cb.is_valid():
@@ -2154,12 +2254,18 @@ func _reveal_key(key: String) -> bool:
 func _select(key: String, fly: bool = true) -> void:
 	_selected = key
 	var child_count: int = _children.get(key, []).size()
+	var note := String(_open_target.get(key, key))
+	var link_count := 0
+	if note != "":
+		var targets: Array = _resolved_links().get(note, [])
+		link_count = targets.size()
 	_menu.show_for({
 		"children": child_count,
 		"oversized": child_count > max(1, GameManager.graph_max_separate),
 		"ancestor": _scope != "" and _is_scope_ancestor(key),
 		"cluster": _cluster_nodes.has(key),
 		"note": node_is_note(key),
+		"links": link_count,
 	})
 	# The card first: its mobile inset is part of the camera fit, so the
 	# neighbourhood is framed in the space actually left on screen.
@@ -2211,6 +2317,16 @@ func _activate_menu(action: String) -> void:
 		_collapsed.erase(_selected)
 		_enter_group(_selected)
 		return
+	if action == "Link to":
+		_finish_link()
+		return
+	if action == "Unlink from":
+		_finish_unlink()
+		return
+	if action == "Cancel":
+		_cancel_edge_mode()
+		_reselect(_selected, false)
+		return
 	_drop_focus()
 	if action == "Move":
 		var target := _move_target_rel()
@@ -2221,12 +2337,88 @@ func _activate_menu(action: String) -> void:
 	elif action == "Delete" and delete_cb.is_valid() and note != "":
 		delete_cb.call(note)
 	elif action == "Link" and note != "":
-		# Enter Link mode: the next tapped note becomes the link target.
-		_pending_link = note
-		if status_cb.is_valid():
-			status_cb.call("Link from " + GameManager.note_title(note) + " — tap the target note")
+		_enter_edge_mode("link", note, "Link from " + GameManager.note_title(note) + " — tap the target note")
+	elif action == "Unlink" and note != "":
+		_enter_edge_mode("unlink", note, "Unlink from " + GameManager.note_title(note) + " — tap the linked note")
 	_mark_map_dirty()
 	queue_redraw()
+
+## Enter link/unlink mode: the source stays highlighted while the menu closes,
+## and the next tapped note is offered as the target.
+func _enter_edge_mode(mode: String, note: String, hint: String) -> void:
+	_link_mode = mode
+	_pending_source = note
+	_link_source = _selected
+	_menu.clear()
+	if blur_cb.is_valid():
+		blur_cb.call()
+	if status_cb.is_valid():
+		status_cb.call(hint)
+
+## Exit link/unlink mode without writing anything. Callers re-select afterwards
+## if they want the node to return to its normal menu.
+func _cancel_edge_mode() -> void:
+	_link_mode = ""
+	_pending_source = ""
+	_link_source = ""
+	_mark_map_dirty()
+	queue_redraw()
+
+## True when `src` has a resolved outbound [[wiki-link]] to `dst`.
+func _links_to(src: String, dst: String) -> bool:
+	var targets: Array = _resolved_links().get(src, [])
+	return targets.has(dst)
+
+## In edge mode a tap picks the target: select it and offer only "Link to" /
+## "Unlink from" and "Cancel" instead of the usual actions. The source stays
+## highlighted so the origin of the edge remains visible. Unlink only accepts a
+## note the source actually links to.
+func _select_edge_target(key: String) -> void:
+	if not node_is_note(key):
+		return
+	var target := node_rel(key)
+	if target == "" or target == _pending_source:
+		return
+	if _link_mode == "unlink" and not _links_to(_pending_source, target):
+		if status_cb.is_valid():
+			status_cb.call(GameManager.note_title(target) + " is not linked from " + GameManager.note_title(_pending_source))
+		return
+	_selected = key
+	_menu.show_with(["Unlink from" if _link_mode == "unlink" else "Link to", "Cancel"])
+	_mark_map_dirty()
+	queue_redraw()
+	state_changed.emit()
+
+## Drop the edge-mode state and selection before a write so the graph refresh it
+## triggers does not re-select anything.
+func _clear_edge_mode() -> void:
+	_link_mode = ""
+	_pending_source = ""
+	_link_source = ""
+	_menu.clear()
+	_selected = ""
+	if blur_cb.is_valid():
+		blur_cb.call()
+	_mark_map_dirty()
+	queue_redraw()
+
+## Complete Link mode: write the [[wiki-link]] from the stored source to the
+## selected target.
+func _finish_link() -> void:
+	var target := node_rel(_selected)
+	var source := _pending_source
+	_clear_edge_mode()
+	if source != "" and target != "" and link_cb.is_valid():
+		link_cb.call(source, target)
+
+## Complete Unlink mode: remove the [[wiki-link]] from the stored source to the
+## selected target.
+func _finish_unlink() -> void:
+	var target := node_rel(_selected)
+	var source := _pending_source
+	_clear_edge_mode()
+	if source != "" and target != "" and unlink_cb.is_valid():
+		unlink_cb.call(source, target)
 
 ## The vault path the circle menu's Move acts on: a container node moves the
 ## whole folder (its companion note travels with it), a leaf moves the note.
