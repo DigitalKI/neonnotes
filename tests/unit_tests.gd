@@ -13,6 +13,7 @@ const ListContinuationScript := preload("res://scripts/common/list_continuation.
 const VaultSearchScript := preload("res://scripts/common/vault_search.gd")
 const TfidfIndexScript := preload("res://scripts/common/tfidf_index.gd")
 const AreaLayoutScript := preload("res://scripts/common/area_layout.gd")
+const AreaViewScript := preload("res://scripts/render/area_view.gd")
 
 var failures := 0
 
@@ -30,6 +31,7 @@ func _init() -> void:
 	_check_inference()
 	_check_tfidf()
 	_check_area_layout()
+	_check_area_view()
 	_check_link_command()
 	_check_list_continuation()
 	_check_inbox_path()
@@ -532,6 +534,25 @@ func _check_area_layout() -> void:
 		if not vp.has_point(p):
 			in_bounds = false
 	_check(in_bounds, "every position stays inside the viewport")
+
+## Area View renderer view-model: build() computes positions + undirected edges.
+func _check_area_view() -> void:
+	var view = AreaViewScript.new()
+	var nb := {
+		"A.md": [{"note": "B.md", "score": 0.9}],
+		"B.md": [{"note": "A.md", "score": 0.9}],
+		"C.md": [],
+	}
+	var d = view.build(nb, {"A.md": "Alpha", "B.md": "Beta", "C.md": "Gamma"},
+		Rect2(0, 0, 800, 800))
+	var pos: Dictionary = d["positions"]
+	var edges: Array = d["edges"]
+	_check(pos.size() == 3, "area view positions every note")
+	_check(edges.size() == 1, "area view dedupes the mutual edge")
+	_check(String(edges[0]["from"]) == "A.md" and String(edges[0]["to"]) == "B.md",
+		"area view edge links the connected pair")
+	_check(pos["A.md"].distance_to(pos["B.md"]) < pos["A.md"].distance_to(pos["C.md"]),
+		"area view keeps connected notes nearer")
 
 ## LinkCommand text transforms: canonical target form, append (idempotent) and
 ## strip (alias-aware, escape-safe) — the pure half of Phase 1's link editing.
