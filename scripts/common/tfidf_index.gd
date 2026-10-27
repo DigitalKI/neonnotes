@@ -21,12 +21,27 @@ extends RefCounted
 ## words while punctuation and whitespace split. Returns {term: count}.
 static var _token_re: RegEx
 
+## Common English function words: too generic to carry subject meaning, so they
+## are dropped rather than relying on IDF alone (which a small corpus cannot
+## fully suppress). Non-English words pass through for now.
+const _STOPWORDS := {
+	"the": true, "and": true, "a": true, "an": true, "of": true, "to": true,
+	"in": true, "for": true, "with": true, "on": true, "at": true, "by": true,
+	"is": true, "are": true, "was": true, "were": true, "be": true, "been": true,
+	"this": true, "that": true, "these": true, "those": true, "it": true,
+	"from": true, "into": true, "over": true, "under": true, "or": true,
+	"as": true, "not": true, "your": true, "you": true, "has": true, "have": true,
+	"will": true, "can": true, "its": true, "our": true, "but": true, "if": true,
+}
+
 static func tokenize(text: String) -> Dictionary:
 	if _token_re == null:
 		_token_re = RegEx.create_from_string("[\\p{L}\\p{N}_]+")
 	var out := {}
 	for m in _token_re.search_all(String(text).to_lower()):
 		var w := m.get_string()
+		if _STOPWORDS.has(w):
+			continue
 		out[w] = int(out.get(w, 0)) + 1
 	return out
 

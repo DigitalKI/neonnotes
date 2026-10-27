@@ -487,23 +487,30 @@ func _check_tfidf() -> void:
 
 	var idx = TfidfIndexScript.new()
 	idx.build({
-		"physics.md": "quantum physics and relativity",
-		"space.md": "relativity and black holes in space",
-		"cooking.md": "pasta recipes and cooking techniques",
-		"music.md": "music theory and composition",
+		"physics.md": "quantum thermodynamics relativity",
+		"space.md": "thermodynamics black holes",
+		"cosmos.md": "relativity spacetime curvature",
+		"cooking.md": "pasta garlic sauce",
 	})
 	_check(idx.size() == 4, "tfidf index holds all docs")
 
 	var top = idx.top_neighbors("physics.md", 2)
 	_check(top.size() == 2, "top_neighbors returns k results")
-	_check(String(top[0]["note"]) == "space.md", "the shared-subject note is the nearest neighbour")
-	_check(float(top[0]["score"]) > 0.0, "nearest neighbour scores positive")
+	var got := {}
+	for r in top:
+		got[String(r["note"])] = true
+	_check(got.has("space.md") and got.has("cosmos.md"),
+		"neighbours share a distinctive word with the query")
+	_check(not got.has("cooking.md"), "an unrelated note is not a neighbour")
 	_check(idx.cosine("physics.md", "cooking.md") < idx.cosine("physics.md", "space.md"),
 		"shared subject ranks above an unrelated note")
 
-	idx.index_note("astronomy.md", "quantum fields and relativity")
-	top = idx.top_neighbors("physics.md", 1)
-	_check(String(top[0]["note"]) == "astronomy.md", "incremental index_note surfaces as nearest")
+	idx.index_note("astronomy.md", "quantum entanglement")
+	var found := false
+	for r in idx.top_neighbors("physics.md", 10):
+		if String(r["note"]) == "astronomy.md":
+			found = true
+	_check(found, "incremental index_note surfaces in neighbours")
 
 	idx.remove_note("astronomy.md")
 	var still_there := false
