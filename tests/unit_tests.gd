@@ -12,6 +12,7 @@ const LinkCommandScript := preload("res://scripts/common/link_command.gd")
 const ListContinuationScript := preload("res://scripts/common/list_continuation.gd")
 const VaultSearchScript := preload("res://scripts/common/vault_search.gd")
 const TfidfIndexScript := preload("res://scripts/common/tfidf_index.gd")
+const AreaLayoutScript := preload("res://scripts/common/area_layout.gd")
 
 var failures := 0
 
@@ -28,6 +29,7 @@ func _init() -> void:
 	_check_explicit_relationships()
 	_check_inference()
 	_check_tfidf()
+	_check_area_layout()
 	_check_link_command()
 	_check_list_continuation()
 	_check_inbox_path()
@@ -507,6 +509,29 @@ func _check_tfidf() -> void:
 		if String(r["note"]) == "astronomy.md":
 			still_there = true
 	_check(not still_there, "remove_note drops a note from the index")
+
+## Area View layout: deterministic island packing of a similarity graph.
+func _check_area_layout() -> void:
+	var nb := {
+		"A.md": [{"note": "B.md", "score": 0.9}],
+		"B.md": [{"note": "A.md", "score": 0.9}],
+		"C.md": [{"note": "D.md", "score": 0.8}],
+		"D.md": [{"note": "C.md", "score": 0.8}],
+		"E.md": [],
+	}
+	var vp := Rect2(0, 0, 1000, 1000)
+	var pos := AreaLayoutScript.layout(nb, vp)
+	_check(pos.size() == 5, "area layout positions every note")
+	_check(pos.has("E.md"), "an isolated note still gets a position")
+	_check(pos["A.md"].distance_to(pos["B.md"]) < pos["A.md"].distance_to(pos["C.md"]),
+		"connected notes sit closer than disconnected ones")
+	_check(AreaLayoutScript.layout(nb, vp)["A.md"] == pos["A.md"],
+		"area layout is deterministic")
+	var in_bounds := true
+	for p in pos.values():
+		if not vp.has_point(p):
+			in_bounds = false
+	_check(in_bounds, "every position stays inside the viewport")
 
 ## LinkCommand text transforms: canonical target form, append (idempotent) and
 ## strip (alias-aware, escape-safe) — the pure half of Phase 1's link editing.
