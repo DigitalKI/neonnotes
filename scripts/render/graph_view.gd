@@ -1464,16 +1464,7 @@ func pulse_link(source: String, target: String) -> void:
 	queue_redraw()
 
 func _section_color(k: String) -> Color:
-	var path := String(_open_target.get(k, k))
-	var parts := path.split("/")
-	if parts.size() > 1:
-		var palette: Array[Color] = [
-			Color("#ff4fd8"), Color("#45e6ff"), Color("#ffb347"),
-			Color("#a78bfa"), Color("#7dff8a"), Color("#ff6b6b"),
-		]
-		var index := int(parts[0].hash() & 0x7fffffff) % palette.size()
-		return palette[index]
-	return _accent2
+	return GraphColors.section_color(String(_open_target.get(k, k)), _accent2)
 
 func _node_color(k: String) -> Color:
 	var hot := k == _center_note or String(_companion.get(k, "")) == _center_note \

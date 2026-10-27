@@ -10,10 +10,14 @@ extends Control
 ## app dock/full-view integration are later slices.
 
 const AreaLayoutScript := preload("res://scripts/common/area_layout.gd")
+const GraphColorsScript := preload("res://scripts/common/graph_colors.gd")
 
 var _positions := {}     # note -> Vector2 (viewport coords)
 var _edges: Array = []   # [{from, to}]
 var _labels := {}        # note -> display title
+## Theme accent2 for folder-less root notes; the caller sets it before drawing
+## (keeps this renderer free of the GameManager autoload, so it unit-tests).
+var accent2 := Color.WHITE
 
 ## Build positions + edges from a neighbours dict and render inside `rect`.
 ## Returns the layout so headless tests (and later tween transitions) can read
@@ -58,7 +62,7 @@ func _draw() -> void:
 			draw_line(_positions[e["from"]], _positions[e["to"]],
 				Color(1, 1, 1, 0.14), 1.0, true)
 	for n in _positions.keys():
-		draw_circle(_positions[n], 6.0, Color(0.62, 0.82, 1.0, 0.9))
+		draw_circle(_positions[n], 6.0, GraphColorsScript.section_color(String(n), accent2))
 	for n in _positions.keys():
 		var label := String(_labels.get(n, String(n).get_file().trim_suffix(".md")))
 		draw_string(ThemeDB.fallback_font, _positions[n] + Vector2(8.0, -6.0),

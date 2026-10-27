@@ -77,5 +77,6 @@ func _ready() -> void:
 	add_child(view)
 	view.position = Vector2.ZERO
 	view.size = get_viewport().get_visible_rect().size
+	view.accent2 = GameManager.color("accent2")
 	var d = view.build(neighbours, labels, Rect2(Vector2.ZERO, view.size))
 	print("[area bench] notes=%d edges=%d" % [GameManager.notes.size(), d["edges"].size()])

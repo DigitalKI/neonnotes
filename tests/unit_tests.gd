@@ -14,6 +14,7 @@ const VaultSearchScript := preload("res://scripts/common/vault_search.gd")
 const TfidfIndexScript := preload("res://scripts/common/tfidf_index.gd")
 const AreaLayoutScript := preload("res://scripts/common/area_layout.gd")
 const AreaViewScript := preload("res://scripts/render/area_view.gd")
+const GraphColorsScript := preload("res://scripts/common/graph_colors.gd")
 
 var failures := 0
 
@@ -32,6 +33,7 @@ func _init() -> void:
 	_check_tfidf()
 	_check_area_layout()
 	_check_area_view()
+	_check_graph_colors()
 	_check_link_command()
 	_check_list_continuation()
 	_check_inbox_path()
@@ -560,6 +562,17 @@ func _check_area_view() -> void:
 		"area view edge links the connected pair")
 	_check(pos["A.md"].distance_to(pos["B.md"]) < pos["A.md"].distance_to(pos["C.md"]),
 		"area view keeps connected notes nearer")
+
+## Shared graph colours: a note's colour comes from its top-level folder, so it
+## survives switching between the radial and area views.
+func _check_graph_colors() -> void:
+	var a2 := Color(1, 1, 0)
+	_check(GraphColorsScript.section_color("Root.md", a2) == a2,
+		"a root note uses accent2")
+	_check(GraphColorsScript.section_color("Sec/Note.md", a2) == GraphColorsScript.section_color("Sec/Other.md", a2),
+		"notes in the same top-level folder share a colour")
+	_check(GraphColorsScript.section_color("Sec/Note.md", a2) != a2,
+		"a folder note gets a palette colour")
 
 ## LinkCommand text transforms: canonical target form, append (idempotent) and
 ## strip (alias-aware, escape-safe) — the pure half of Phase 1's link editing.
