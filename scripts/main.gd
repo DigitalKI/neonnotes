@@ -408,6 +408,7 @@ func _on_metadata_ready() -> void:
 	# shown until now) and any open derived view.
 	_boot_mark("metadata")
 	graph_shell.clear_card_maps()
+	graph_shell.tfidf_rescan()
 	_refresh_list()
 	if backlinks_card.visible:
 		_refresh_backlinks()

@@ -54,6 +54,7 @@ var _graph_slide: SlideSurface
 var _swipe_kind := ""
 ## Digest worker + cache behind the graph focus card (off-thread summaries).
 var _digest_store: GraphDigestStore
+var _tfidf_store: TfidfBodyStore
 ## The note the card currently describes (digest results arrive by rel).
 var _focus_rel := ""
 ## Wiki-link resolve maps for the open card, rebuilt per graph open (or when
@@ -82,6 +83,9 @@ func setup() -> void:
 	_digest_store.name = "GraphDigestStore"
 	add_child(_digest_store)
 	_digest_store.digest_ready.connect(_on_digest_ready)
+	_tfidf_store = TfidfBodyStore.new()
+	_tfidf_store.name = "TfidfBodyStore"
+	add_child(_tfidf_store)
 	# Card rows navigate: a child or backlink press focuses that node on the map
 	# (revealing the scope/page hiding it); a tag chip filters the vault exactly
 	# like typing "#tag" into the tree search.
@@ -125,6 +129,7 @@ func setup() -> void:
 	content_split.dragged.connect(_on_dock_dragged)
 	editor.saved_cb = func(rel: String):
 		_digest_store.invalidate(rel)
+		_tfidf_store.invalidate(rel)
 		if focus_card.is_open() and String(focus_card.model().get("rel", "")) == rel:
 			_render_focus_card(rel)
 	get_viewport().size_changed.connect(apply_card_layout)
@@ -578,6 +583,7 @@ func _unlink_graph_notes(source: String, target: String) -> void:
 ## floating focus card (used on vault switch / import / restore).
 func clear_caches() -> void:
 	_digest_store.clear()
+	_tfidf_store.clear()
 	_card_maps.clear()
 	close_focus_card()
 
@@ -585,3 +591,8 @@ func clear_caches() -> void:
 ## Rebuild the resolve maps on the next focus (metadata index completed).
 func clear_card_maps() -> void:
 	_card_maps.clear()
+
+
+## Kick the Area View body-word scan now that the vault's note list is final.
+func tfidf_rescan() -> void:
+	_tfidf_store.rescan()
