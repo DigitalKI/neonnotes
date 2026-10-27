@@ -116,6 +116,8 @@ var graph_levels := 2
 ## per-parent page size while inside an entered group.
 var graph_max_separate := 48
 var graph_max_page := 200
+## Active graph view type: 1 radial, 2 area (future views append here).
+var graph_view_type := 1
 var export_crt := true  # apply CRT overlay to exported PNG/JPEG/GIF
 var crt_ui := true  # live CRT overlay on the UI — master switch for CRT FX
 var share_target_enabled := true  # appear in the OS share sheet (addons/SharePlugin)
@@ -1130,6 +1132,7 @@ func _load_settings() -> void:
 	graph_levels = clampi(int(cf.get_value("ui", "graph_levels", graph_levels)), 1, 10)
 	graph_max_separate = maxi(1, int(cf.get_value("ui", "graph_max_separate", graph_max_separate)))
 	graph_max_page = maxi(10, int(cf.get_value("ui", "graph_max_page", graph_max_page)))
+	graph_view_type = clampi(int(cf.get_value("ui", "graph_view_type", graph_view_type)), 1, 2)
 	var mode := String(cf.get_value("ui", "open_start_mode", open_start_mode))
 	open_start_mode = mode if mode in ["last", "homepage", "graph"] else "last"
 	last_opened_rel = String(cf.get_value("ui", "last_opened_rel", last_opened_rel))
@@ -1197,6 +1200,7 @@ func _save_settings() -> void:
 	cf.set_value("ui", "graph_levels", graph_levels)
 	cf.set_value("ui", "graph_max_separate", graph_max_separate)
 	cf.set_value("ui", "graph_max_page", graph_max_page)
+	cf.set_value("ui", "graph_view_type", graph_view_type)
 	cf.set_value("ui", "open_start_mode", open_start_mode)
 	cf.set_value("ui", "last_opened_rel", last_opened_rel)
 	cf.set_value("ui", "graph_view_state", graph_view_state)

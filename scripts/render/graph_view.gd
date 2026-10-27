@@ -278,6 +278,14 @@ func _build_layers() -> void:
 	move_child(_mm_ring, 3)
 	move_child(_overlay, 4)
 
+## Hide/show the radial map's static layers (used when the Area View takes over
+## the same canvas). `_draw()` only emits a transient pulse, so it needs no
+## gating here.
+func set_radial_visible(v: bool) -> void:
+	for n in [_bg, _mm_leaf, _mm_folder, _mm_ring, _overlay]:
+		if n != null:
+			n.visible = v
+
 ## The marker mesh is a unit quad (vertices -0.5..0.5, UV 0..1, z=0). A
 ## `QuadMesh` would be the obvious choice, but `disable_3d` builds omit the 3D
 ## primitive meshes; only vertex/UV/index are read by the canvas_item shader,

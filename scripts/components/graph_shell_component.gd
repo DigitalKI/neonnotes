@@ -55,6 +55,8 @@ var _swipe_kind := ""
 ## Digest worker + cache behind the graph focus card (off-thread summaries).
 var _digest_store: GraphDigestStore
 var _tfidf_store: TfidfBodyStore
+var area_view: AreaView
+var view_toolbar: GraphViewToolbar
 ## The note the card currently describes (digest results arrive by rel).
 var _focus_rel := ""
 ## Wiki-link resolve maps for the open card, rebuilt per graph open (or when
@@ -86,6 +88,18 @@ func setup() -> void:
 	_tfidf_store = TfidfBodyStore.new()
 	_tfidf_store.name = "TfidfBodyStore"
 	add_child(_tfidf_store)
+	area_view = AreaView.new()
+	area_view.name = "AreaView"
+	area_view.visible = false
+	area_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	area_view.set_anchors_preset(Control.PRESET_FULL_RECT)
+	graph_view.add_child(area_view)
+	view_toolbar = GraphViewToolbar.new()
+	view_toolbar.name = "GraphViewToolbar"
+	view_toolbar.position = Vector2(8, 8)
+	graph_view.add_child(view_toolbar)
+	view_toolbar.view_selected.connect(_set_view_type)
+	_apply_view_type()
 	# Card rows navigate: a child or backlink press focuses that node on the map
 	# (revealing the scope/page hiding it); a tag chip filters the vault exactly
 	# like typing "#tag" into the tree search.
@@ -596,3 +610,39 @@ func clear_card_maps() -> void:
 ## Kick the Area View body-word scan now that the vault's note list is final.
 func tfidf_rescan() -> void:
 	_tfidf_store.rescan()
+
+
+## Switch the active graph view (radial / area) and persist the choice.
+func _set_view_type(view_type: int) -> void:
+	if view_type == GameManager.graph_view_type:
+		return
+	GameManager.graph_view_type = view_type
+	GameManager._save_settings()
+	_apply_view_type()
+
+
+## Push the selected view type into the scene: the radial map (plus its nav bar)
+## or the Area View takes over the same canvas. The toolbar stays visible in
+## both, since it is a child of graph_view and untouched by the layer toggle.
+func _apply_view_type() -> void:
+	var area := GameManager.graph_view_type == 2
+	graph_view.set_radial_visible(not area)
+	graph_nav.visible = not area
+	area_view.visible = area
+	view_toolbar.set_active(GameManager.graph_view_type)
+	if area:
+		_build_area_view.call_deferred()
+
+
+## Build the Area View from the semantic index: top-k neighbours -> positions.
+func _build_area_view() -> void:
+	var size := area_view.size
+	if size.x <= 0.0 or size.y <= 0.0:
+		size = graph_view.size
+	var neighbours := {}
+	var labels := {}
+	for rel in GameManager.notes:
+		neighbours[rel] = _tfidf_store.top_neighbors(rel, 3)
+		labels[rel] = GameManager.note_title(rel)
+	area_view.accent2 = GameManager.color("accent2")
+	area_view.build(neighbours, labels, Rect2(Vector2.ZERO, size))
