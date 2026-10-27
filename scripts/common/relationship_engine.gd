@@ -263,17 +263,90 @@ static func infer(notes: Array[String], links: Dictionary, tags: Dictionary,
 		title_words[n] = _title_words(t)
 
 	var out: Array = []
-	for i in notes.size():
-		var a: String = notes[i]
-		for j in range(i + 1, notes.size()):
-			var b: String = notes[j]
-			var rel = _infer_pair(a, b, tags, neighbours, title_words, weights)
-			if rel == null or rel.score < threshold:
-				continue
-			out.append(rel)
-			if max_results > 0 and out.size() >= max_results:
-				return out
+	for p in _candidate_pairs(notes, tags, neighbours, title_words):
+		var rel = _infer_pair(String(p[0]), String(p[1]), tags, neighbours, title_words, weights)
+		if rel == null or rel.score < threshold:
+			continue
+		out.append(rel)
+		if max_results > 0 and out.size() >= max_results:
+			return out
 	return out
+
+## Enumerate unordered candidate pairs via inverted indexes over the four
+## signals — shared tag, shared link neighbour, shared title word and shared
+## (non-root) folder. A pair with a nonzero score must share at least one of
+## these, so this is exact: it skips only the pairs `_infer_pair` would score 0.
+## Turns all-pairs O(n^2) into O(total co-occurrences), sparse for real vaults.
+## The root folder is excluded because the structural signal never fires there
+## (its base dir is "."), so a flat vault does not degenerate back to O(n^2).
+static func _candidate_pairs(notes: Array[String], tags: Dictionary,
+		neighbours: Dictionary, title_words: Dictionary) -> Array:
+	var pos := {}
+	for i in notes.size():
+		pos[notes[i]] = i
+	var seen := {}
+	var pairs: Array = []
+
+	var by_tag := {}
+	for n in notes:
+		for t in tags.get(n, []):
+			if not by_tag.has(t):
+				by_tag[t] = []
+			by_tag[t].append(n)
+	for t in by_tag.keys():
+		_collect_pairs(by_tag[t], pos, seen, pairs)
+
+	var by_word := {}
+	for n in notes:
+		for w in title_words.get(n, {}).keys():
+			if not by_word.has(w):
+				by_word[w] = []
+			by_word[w].append(n)
+	for w in by_word.keys():
+		_collect_pairs(by_word[w], pos, seen, pairs)
+
+	var by_nb := {}
+	for n in notes:
+		for nb in neighbours.get(n, {}).keys():
+			if not by_nb.has(nb):
+				by_nb[nb] = []
+			by_nb[nb].append(n)
+	for nb in by_nb.keys():
+		_collect_pairs(by_nb[nb], pos, seen, pairs)
+
+	var by_folder := {}
+	for n in notes:
+		var d := String(n).get_base_dir()
+		if d != "" and d != ".":
+			if not by_folder.has(d):
+				by_folder[d] = []
+			by_folder[d].append(n)
+	for d in by_folder.keys():
+		_collect_pairs(by_folder[d], pos, seen, pairs)
+
+	return pairs
+
+## Add every unordered pair within `lst` to `pairs`, deduped and ordered by the
+## note's position in `notes` (so `_infer_pair` sees source before target).
+static func _collect_pairs(lst: Array, pos: Dictionary, seen: Dictionary, pairs: Array) -> void:
+	for i in lst.size():
+		for j in range(i + 1, lst.size()):
+			var x = lst[i]
+			var y = lst[j]
+			var px := int(pos[x])
+			var py := int(pos[y])
+			if px > py:
+				var t = x
+				x = y
+				y = t
+				var tp = px
+				px = py
+				py = tp
+			var key := str(px) + "|" + str(py)
+			if seen.has(key):
+				continue
+			seen[key] = true
+			pairs.append([x, y])
 
 ## Score one unordered pair. Returns null when no signal fires; otherwise a
 ## filled KnowledgeRelationship with provenance "inferred".

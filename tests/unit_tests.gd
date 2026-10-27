@@ -11,6 +11,7 @@ const RelationshipEngineScript := preload("res://scripts/common/relationship_eng
 const LinkCommandScript := preload("res://scripts/common/link_command.gd")
 const ListContinuationScript := preload("res://scripts/common/list_continuation.gd")
 const VaultSearchScript := preload("res://scripts/common/vault_search.gd")
+const TfidfIndexScript := preload("res://scripts/common/tfidf_index.gd")
 
 var failures := 0
 
@@ -26,6 +27,7 @@ func _init() -> void:
 	_check_knowledge_index()
 	_check_explicit_relationships()
 	_check_inference()
+	_check_tfidf()
 	_check_link_command()
 	_check_list_continuation()
 	_check_inbox_path()
@@ -447,6 +449,64 @@ func _check_inference() -> void:
 			"D-E evidence is structural only")
 	var capped := RelationshipEngineScript.infer(notes, links, tags, titles, {"max_results": 1})
 	_check(capped.size() == 1, "infer respects max_results")
+
+	# Candidate generation must not miss pairs that share only one signal.
+	var notes2: Array[String] = ["W1.md", "W2.md", "N1.md", "N2.md", "Hub.md"]
+	var links2 := {"N1.md": ["Hub"], "N2.md": ["Hub"]}
+	var titles2 := {
+		"W1.md": "entropy and the second law",
+		"W2.md": "entropy second law of thermodynamics",
+		"N1.md": "Alpha",
+		"N2.md": "Beta",
+		"Hub.md": "Hub",
+	}
+	var rels2 := RelationshipEngineScript.infer(notes2, links2, {}, titles2)
+	var has_word := false
+	var has_nb := false
+	for r in rels2:
+		var s := String(r["source"])
+		var t := String(r["target"])
+		if (s == "W1.md" and t == "W2.md") or (s == "W2.md" and t == "W1.md"):
+			has_word = true
+		if (s == "N1.md" and t == "N2.md") or (s == "N2.md" and t == "N1.md"):
+			has_nb = true
+	_check(has_word, "candidate generation finds a word-only pair")
+	_check(has_nb, "candidate generation finds a neighbour-only pair")
+
+## Body-word TF-IDF index (Area View): multilingual tokenisation, cosine
+## ranking, inverted-index candidate generation, and incremental add/remove.
+func _check_tfidf() -> void:
+	_check(TfidfIndexScript.tokenize("Héllo wörld 123 café 日本語 —dash—").has("héllo"),
+		"tokenize lowercases and splits multilingual words")
+	_check(TfidfIndexScript.tokenize("café").has("café"),
+		"accented word tokenises as one term")
+
+	var idx = TfidfIndexScript.new()
+	idx.build({
+		"physics.md": "quantum physics and relativity",
+		"space.md": "relativity and black holes in space",
+		"cooking.md": "pasta recipes and cooking techniques",
+		"music.md": "music theory and composition",
+	})
+	_check(idx.size() == 4, "tfidf index holds all docs")
+
+	var top = idx.top_neighbors("physics.md", 2)
+	_check(top.size() == 2, "top_neighbors returns k results")
+	_check(String(top[0]["note"]) == "space.md", "the shared-subject note is the nearest neighbour")
+	_check(float(top[0]["score"]) > 0.0, "nearest neighbour scores positive")
+	_check(idx.cosine("physics.md", "cooking.md") < idx.cosine("physics.md", "space.md"),
+		"shared subject ranks above an unrelated note")
+
+	idx.index_note("astronomy.md", "quantum fields and relativity")
+	top = idx.top_neighbors("physics.md", 1)
+	_check(String(top[0]["note"]) == "astronomy.md", "incremental index_note surfaces as nearest")
+
+	idx.remove_note("astronomy.md")
+	var still_there := false
+	for r in idx.top_neighbors("physics.md", 10):
+		if String(r["note"]) == "astronomy.md":
+			still_there = true
+	_check(not still_there, "remove_note drops a note from the index")
 
 ## LinkCommand text transforms: canonical target form, append (idempotent) and
 ## strip (alias-aware, escape-safe) — the pure half of Phase 1's link editing.
