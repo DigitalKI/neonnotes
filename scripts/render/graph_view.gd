@@ -1,14 +1,21 @@
 class_name GraphView extends Control
-## Radial vault map. Folders are the spine, notes are their leaves, and each
-## wiki-link is drawn as light that *flows* from the linking note to the linked
-## one — direction is visible at a glance, and a pair of notes that link to each
-## other flows both ways.
+## Vault map canvas. One canvas, two layouts, one interaction model.
 ##
-## Layout is computed once when the map opens (no runtime physics); only the
-## light animates. Links are routed along the folder hierarchy (hierarchical
-## edge bundling), so parallel links share a path instead of crossing the map.
+## The *radial* layout (the default, ADR-0005): folders are the spine, notes are
+## their leaves, and each wiki-link is drawn as light that *flows* from the
+## linking note to the linked one. Links are routed along the folder hierarchy
+## (hierarchical edge bundling).
 ##
-## Pan/zoom is a draw transform, so map data is never mutated per frame.
+## The *area* layout (ADR-0013 Phase 5): every note is a flat leaf grouped into
+## semantic islands by the shell's similarity index (`area_neighbours_cb`).
+##
+## Everything else — camera pan/zoom (a draw transform; nodes and labels are
+## screen-space, so their size never changes with zoom), the collision-aware
+## label pass, the MultiMesh node markers, the circle menu, link editing and
+## the focus-card routing — is shared by both layouts, so switching views
+## (`set_area_layout`) is a rebuild of the same control, never a different one.
+## Layout is computed once per build (no runtime physics); only the light
+## animates.
 
 var open_cb := Callable()       # circle menu: open the node's note
 var delete_cb := Callable()     # circle menu: delete the node's note
@@ -36,6 +43,7 @@ signal state_changed
 var view_inset := {"left": 0.0, "top": 0.0, "right": 0.0, "bottom": 0.0}
 
 const TAP_SLOP := 12.0          # max pointer travel that still counts as a tap
+const AreaLayoutScript := preload("res://scripts/common/area_layout.gd")
 
 # Each link flows at its own speed, derived deterministically from its two
 # endpoints — so a given link always fires at the same rate, and neighbouring
@@ -152,6 +160,14 @@ var _hover_active := false      # distinguishes "hovering root" from "no hover"
 var _center_note := ""
 var _time := 0.0
 var _map_ready := false
+## The active layout: false = radial (folder spine), true = area (semantic
+## islands). Switched by the shell's view toolbar via `set_area_layout()`.
+var _area_active := false
+## `(rel: String) -> Array[{note, score}]` — top-k semantic neighbours for the
+## area layout, injected by the shell (TfidfBodyStore). An invalid callback
+## leaves every note an isolated island. The view stays renderer/controller-only
+## (ADR-0013 layering): it computes nothing about similarity itself.
+var area_neighbours_cb := Callable()
 
 var _pos := {}
 var _parent := {}
@@ -278,13 +294,40 @@ func _build_layers() -> void:
 	move_child(_mm_ring, 3)
 	move_child(_overlay, 4)
 
-## Hide/show the radial map's static layers (used when the Area View takes over
-## the same canvas). `_draw()` only emits a transient pulse, so it needs no
-## gating here.
-func set_radial_visible(v: bool) -> void:
-	for n in [_bg, _mm_leaf, _mm_folder, _mm_ring, _overlay]:
-		if n != null:
-			n.visible = v
+## Switch the active layout (radial ⇄ area) while the map is open. The focused
+## note survives through its note path — the one node identity both layouts
+## share — and the camera glides to its new position; with no focus the new
+## layout fits the view. While the map is closed this only flips the flag:
+## the next `open()` builds whichever layout is active.
+func set_area_layout(active: bool) -> void:
+	if active == _area_active:
+		return
+	# Map the focused node onto its note before the layout's keys change.
+	var keep_note := ""
+	if _menu.open and _selected != "":
+		keep_note = node_rel(_selected)
+		if keep_note == "":
+			keep_note = String(_open_target.get(_selected, ""))
+	_area_active = active
+	_pulse = {}
+	_link_mode = ""
+	_pending_source = ""
+	_link_source = ""
+	_selected = ""
+	_drop_focus()
+	_mark_map_dirty()
+	# A camera glide from the old layout must not fight the new layout's camera.
+	if _cam_tween and _cam_tween.is_valid():
+		_cam_tween.kill()
+	if not _map_ready or not visible:
+		return
+	_rebuild_map()
+	_relayout()
+	if keep_note == "" or not focus_note(keep_note):
+		_fit_to_view()
+	queue_redraw()
+	nav_changed.emit()
+	state_changed.emit()
 
 ## The marker mesh is a unit quad (vertices -0.5..0.5, UV 0..1, z=0). A
 ## `QuadMesh` would be the obvious choice, but `disable_3d` builds omit the 3D
@@ -360,6 +403,12 @@ func _on_metadata_ready() -> void:
 	# Titles can arrive with the metadata pass (the root hub label reads one).
 	_label_metrics.clear()
 	_rebuild_resolve_maps()
+	if _area_active:
+		# The area layout's similarity comes from the separate TF-IDF scan, so
+		# only the labels change here; the islands are refreshed when that
+		# scan completes (the shell re-triggers `refresh_graph()`).
+		queue_redraw()
+		return
 	_build_levels()
 	_build_routes()
 	queue_redraw()
@@ -386,21 +435,14 @@ func open(center_note: String = "") -> void:
 	# Build the note→path lookup maps once; both passes below resolve every
 	# link against them (WikiLinks.resolve() per link was O(links × notes)).
 	_rebuild_resolve_maps()
-	# A restored/persisted open re-applies its navigation *before* the
-	# hierarchy is keyed, so `_rebuild_keys` (run inside `_build_hierarchy`)
-	# pages the scope the user left instead of a fresh overview.
+	# A restored/persisted open re-applies its navigation *before* the map is
+	# keyed, so the key pass pages the scope the user left instead of a fresh
+	# overview.
 	if not _pending_restore.is_empty():
 		_apply_nav_state(_pending_restore)
-	_build_hierarchy()
-	if not _pending_restore.is_empty():
-		# The vault may have changed between sessions: drop a scope/history that
-		# no longer exists before the first layout and route pass.
-		_resolve_live_scope(String(_pending_restore.get("scope", "")),
-			bool(_pending_restore.get("scope_active", false)),
-			int(_pending_restore.get("page", 0)))
-		_prune_history()
-		_rebuild_keys()
-	_build_levels()
+	_rebuild_map()
+	if not _area_active:
+		_build_levels()
 	visible = true
 	mouse_default_cursor_shape = Control.CURSOR_ARROW
 	# Content size can be zero on the first toggle because this Control was
@@ -437,8 +479,7 @@ func _apply_nav_state(state: Dictionary) -> void:
 	_scope_history = _coerce_history(state.get("scope_history", []))
 
 func _finish_open_layout() -> void:
-	_layout_points()
-	_build_routes()
+	_relayout()
 	if not _pending_restore.is_empty():
 		_restore_view_state(_pending_restore)
 		_pending_restore = {}
@@ -450,6 +491,31 @@ func _finish_open_layout() -> void:
 	_map_ready = true
 	set_process(true)
 	queue_redraw()
+
+## Rebuild the active layout's data (keys + maps, no positions). Dispatches to
+## the radial hierarchy or the flat area keys; every other pass (labels, menu,
+## camera, input) is shared and needs no branching.
+func _rebuild_map() -> void:
+	if _area_active:
+		_build_area_keys()
+		return
+	_build_hierarchy()
+	if not _pending_restore.is_empty():
+		# The vault may have changed between sessions: drop a scope/history that
+		# no longer exists before the first layout and route pass.
+		_resolve_live_scope(String(_pending_restore.get("scope", "")),
+			bool(_pending_restore.get("scope_active", false)),
+			int(_pending_restore.get("page", 0)))
+		_prune_history()
+		_rebuild_keys()
+
+## Positions + geometry of the active layout (the deferred half of `open()`).
+func _relayout() -> void:
+	if _area_active:
+		_layout_area_points()
+		return
+	_layout_points()
+	_build_routes()
 
 func suspend_for_open(note: String) -> void:
 	_suspended_state = {
@@ -467,9 +533,13 @@ func suspend_for_open(note: String) -> void:
 
 func _restore_state(state: Dictionary) -> void:
 	_apply_nav_state(state)
-	_rebuild_keys()
-	_layout_points()
-	_build_routes()
+	if _area_active:
+		_build_area_keys()
+		_layout_area_points()
+	else:
+		_rebuild_keys()
+		_layout_points()
+		_build_routes()
 	_map_scale = float(state.get("scale", _map_scale))
 	_map_offset = state.get("offset", _map_offset)
 	_restore_selection(state, true)
@@ -553,21 +623,25 @@ func view_state() -> Dictionary:
 func refresh_graph() -> void:
 	if not _map_ready or not visible:
 		return
-	var keep_scope := _scope
-	var keep_scope_active := _scope_active
-	var keep_page := _page
 	var keep_scale := _map_scale
 	var keep_offset := _map_offset
 	var keep_selected := _selected
 	var had_selection := _menu.open
-	_rebuild_resolve_maps()
-	_build_hierarchy()
-	_resolve_live_scope(keep_scope, keep_scope_active, keep_page)
-	_prune_history()
-	_rebuild_keys()
-	_layout_points()
-	_build_routes()
-	_build_levels()
+	if _area_active:
+		_build_area_keys()
+		_layout_area_points()
+	else:
+		var keep_scope := _scope
+		var keep_scope_active := _scope_active
+		var keep_page := _page
+		_rebuild_resolve_maps()
+		_build_hierarchy()
+		_resolve_live_scope(keep_scope, keep_scope_active, keep_page)
+		_prune_history()
+		_rebuild_keys()
+		_layout_points()
+		_build_routes()
+		_build_levels()
 	# Keep the camera exactly where it was — no fit — so the update is invisible
 	# apart from the removed node.
 	_map_scale = clampf(keep_scale, _min_zoom, _max_zoom)
@@ -850,6 +924,10 @@ func _is_leaf(key: String) -> bool:
 	return _children.get(key, []).is_empty()
 
 func _label(key: String) -> String:
+	if _area_active:
+		# Flat layout: every node is a note, so the label is its title (or file
+		# name) — no folders, companions or hub to special-case.
+		return GameManager.note_title(node_rel(key))
 	if String(key) == "":
 		if _root_home != "" and GameManager.titles.has(_root_home):
 			return String(GameManager.titles[_root_home])
@@ -871,6 +949,8 @@ func _depth(k: String) -> int:
 
 ## Map any note path to the node drawn for it (collapsed leaves fold up).
 func _norm(k: String) -> String:
+	if _area_active:
+		return String(k)  # flat layout: notes are the nodes, nothing folds up
 	var stem := String(k).trim_suffix(".md")
 	var key := stem if _children.has(stem) else String(k)
 	if key == _root_home:
@@ -1171,6 +1251,72 @@ func _assign_sectors(children: Array[String], start: float,
 				base_edge * LAYOUT_CHILD_SCALE)
 		cursor += child_span + gap
 
+# --------------------------------------------------------------- area layout
+## The area (island) projection shares this canvas end to end: keys/notes,
+## positions from `AreaLayout`, similarity edges into the same batched
+## `_edge_pts` the radial spine uses, and every behaviour below (menu, labels,
+## link editing, focus) comes from the shared code paths over empty hierarchy
+## maps — an empty `_children` makes every node a plain leaf note.
+
+## Key pass: notes are the nodes (no folders, no hub, no Inbox). The hierarchy
+## maps stay empty, which is what makes the shared menu/label/selection code
+## degrade into "every node is a leaf note" semantics.
+func _build_area_keys() -> void:
+	_label_metrics.clear()
+	_pos.clear(); _parent.clear(); _children.clear(); _companion.clear()
+	_open_target.clear(); _collapsed.clear(); _cluster_nodes.clear(); _keys.clear()
+	_root_home = ""
+	for raw in GameManager.notes:
+		if GameManager.is_inbox_path(raw):
+			continue  # same knowledge-map rule as the radial hierarchy
+		var rel := String(raw)
+		_keys.append(rel)
+		_open_target[rel] = rel
+	_mark_map_dirty()
+
+## Layout pass: island positions from the semantic index, similarity edges into
+## the batched static geometry. No animated routes and no level dimming in this
+## projection — the edges are static and every node is equally in focus.
+func _layout_area_points() -> void:
+	var neighbours := {}
+	for k in _keys:
+		neighbours[k] = area_neighbours_cb.call(k) if area_neighbours_cb.is_valid() else []
+	var laid := AreaLayoutScript.layout(neighbours, Rect2(Vector2.ZERO, size))
+	_pos.clear()
+	for k in _keys:
+		_pos[k] = laid.get(k, size * 0.5)
+	_build_area_edges(neighbours)
+	_routes.clear()
+	_rail_pts = PackedVector2Array()
+	_rail_cols = PackedColorArray()
+	_levels = {}
+	_mark_map_dirty()
+
+## Dedupe the similarity pairs and flatten them into `_edge_pts`, so the whole
+## island web renders as one batched `draw_multiline` like the radial spine.
+func _build_area_edges(neighbours: Dictionary) -> void:
+	_edge_pts = PackedVector2Array()
+	var seen := {}
+	for src in _keys:
+		for e in neighbours.get(String(src), []):
+			var a := String(src)
+			var b := String(e.get("note", ""))
+			if a == "" or b == "" or a == b:
+				continue
+			if a > b:
+				var t := a
+				a = b
+				b = t
+			if not _pos.has(a) or not _pos.has(b):
+				continue
+			var key := a + "|" + b
+			if seen.has(key):
+				continue
+			seen[key] = true
+			_edge_pts.append(_pos[a])
+			_edge_pts.append(_pos[b])
+	_mark_map_dirty()
+
 func _fit_to_view() -> void:
 	if _pos.is_empty():
 		return
@@ -1188,7 +1334,7 @@ func _fit_to_view() -> void:
 	_map_scale = fit_scale
 	# Phones default closer than fit-all, portrait or landscape alike (the
 	# floor is derived from the short edge, so rotation does not change it).
-	if mobile_fit:
+	if mobile_fit and not _area_active:
 		var ring1 := _layout_radius()
 		_map_scale = maxf(fit_scale, clampf(0.85 * 0.5 * minf(size.x, size.y) / ring1, 0.5, 2.0))
 	var mid := (lo + hi) / 2.0

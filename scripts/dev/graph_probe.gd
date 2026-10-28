@@ -643,5 +643,84 @@ func _ready() -> void:
 	GameManager.links = saved_links5
 	GameManager.titles = saved_titles5
 
+	# 20. Area layout: the same canvas renders the semantic islands. Keys are
+	#     notes, the shared machinery (menu, labels, camera, focus) works over
+	#     the empty hierarchy maps, and switching keeps the focused note.
+	var saved_notes6: Array[String] = GameManager.notes
+	var saved_links6: Dictionary = GameManager.links
+	var saved_titles6: Dictionary = GameManager.titles
+	GameManager.notes = ["hubnote.md", "physics.md", "physics/quantum.md",
+		"cooking.md", "Inbox/capture.md"]
+	GameManager.links = {}
+	GameManager.titles = {"physics.md": "Physics"}
+	gv._build_hierarchy()
+	gv._rebuild_keys()
+	gv._layout_points()
+	gv._build_routes()
+	gv._select("physics")
+	check.call("radial layout is active first", not gv._area_active
+		and not gv._children.get("physics", []).is_empty())
+	# Semantic neighbours: physics notes cluster together.
+	gv.area_neighbours_cb = func(rel: String) -> Array:
+		if rel.ends_with(".md") and String(rel).begins_with("physics"):
+			var stem := String(rel).get_file().trim_suffix(".md")
+			return [{"note": "physics/quantum.md" if stem == "physics" else "physics.md", "score": 0.9}]
+		return []
+	gv.set_area_layout(true)
+	check.call("area layout keys are the notes", gv._area_active
+		and gv._keys.has("physics.md") and gv._keys.has("hubnote.md")
+		and not gv._keys.has("Inbox/capture.md"))
+	check.call("area layout has no groups", gv._children.is_empty()
+		and gv._collapsed.is_empty() and gv._root_home == "")
+	check.call("every area node has a position", gv._pos.has("physics.md")
+		and gv._pos.has("cooking.md") and gv._pos.size() == 4)
+	check.call("area edges are batched and deduped", gv._edge_pts.size() == 2
+		and gv._routes.is_empty() and gv._rail_pts.is_empty())
+	check.call("area selection survives through the note",
+		gv._selected == "physics.md" and gv._menu.open)
+	check.call("area node label uses the title", gv._label("physics.md") == "Physics")
+	# The circle menu is the shared one, with note-only actions.
+	check.call("area menu offers the note actions",
+		gv._menu.actions.has("Open") and gv._menu.actions.has("Move")
+		and gv._menu.actions.has("Delete") and gv._menu.actions.has("Link")
+		and not gv._menu.actions.has("Enter"))
+	# Nodes are notes: open targets resolve and links are counted from the index.
+	check.call("area node is a note", gv.node_is_note("physics.md")
+		and gv.node_rel("physics.md") == "physics.md"
+		and not gv.node_has_children("physics.md"))
+	# focus_note (tree click / focus card) works on the flat layout.
+	check.call("area focus_note selects the note",
+		gv.focus_note("physics/quantum.md") and gv._selected == "physics/quantum.md")
+	if gv._cam_tween and gv._cam_tween.is_valid():
+		gv._cam_tween.kill()
+	# Zoom is the shared camera: fit-all frames the islands, then the zoom-out
+	# limit is exactly fit-all and the zoom-in limit stays reachable.
+	gv._fit_to_view()
+	var fit_scale: float = gv._map_scale
+	check.call("area fit frames the islands", fit_scale == gv._min_zoom
+		and fit_scale <= gv._max_zoom)
+	gv._zoom_at(gv.size / 2.0, 1.0 / 50.0)
+	check.call("zoom-out clamps at fit-all", absf(gv._map_scale - gv._min_zoom) < 0.001)
+	gv._zoom_at(gv.size / 2.0, 50.0)
+	check.call("zoom-in clamps at max", absf(gv._map_scale - gv._max_zoom) < 0.001)
+	check.call("hit-test finds an area node",
+		gv._key_at(gv._to_screen(gv._pos["physics.md"])) == "physics.md")
+	# Switch back: the radial hierarchy returns and the focused note follows.
+	gv.set_area_layout(false)
+	check.call("switch back restores the radial hierarchy",
+		not gv._area_active and not gv._children.is_empty()
+		and gv._keys.has("physics"))
+	check.call("switch back keeps the focused note",
+		gv._selected != "" and gv._menu.open
+		and gv._open_target.get(gv._selected, "") == "physics/quantum.md")
+	gv.set_area_layout(true)
+	check.call("switching again maps the note to its area node",
+		gv._selected == "physics/quantum.md")
+	gv.area_neighbours_cb = Callable()
+	gv.set_area_layout(false)
+	GameManager.notes = saved_notes6
+	GameManager.links = saved_links6
+	GameManager.titles = saved_titles6
+
 	print("PROBE RESULT: %s (%d fails)" % ["OK" if _fails == 0 else "FAIL", _fails])
 	get_tree().quit(_fails)

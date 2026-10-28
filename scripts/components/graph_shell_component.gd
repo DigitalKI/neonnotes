@@ -55,8 +55,10 @@ var _swipe_kind := ""
 ## Digest worker + cache behind the graph focus card (off-thread summaries).
 var _digest_store: GraphDigestStore
 var _tfidf_store: TfidfBodyStore
-var area_view: AreaView
+## The view-type toolbar (Radial / Area), a child of the graph canvas.
 var view_toolbar: GraphViewToolbar
+## Top-k semantic neighbours per note for the Area layout's islands.
+const AREA_NEIGHBOUR_K := 3
 ## The note the card currently describes (digest results arrive by rel).
 var _focus_rel := ""
 ## Wiki-link resolve maps for the open card, rebuilt per graph open (or when
@@ -88,12 +90,13 @@ func setup() -> void:
 	_tfidf_store = TfidfBodyStore.new()
 	_tfidf_store.name = "TfidfBodyStore"
 	add_child(_tfidf_store)
-	area_view = AreaView.new()
-	area_view.name = "AreaView"
-	area_view.visible = false
-	area_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	area_view.set_anchors_preset(Control.PRESET_FULL_RECT)
-	graph_view.add_child(area_view)
+	# The Area layout derives its islands from the shell's semantic index: the
+	# view stays renderer-only and asks for neighbours through this callback.
+	graph_view.area_neighbours_cb = func(rel: String) -> Array:
+		return _tfidf_store.top_neighbors(rel, AREA_NEIGHBOUR_K)
+	# The scan finishes on the worker: rebuild the Area layout in place when it
+	# owns the canvas, so the islands appear without another toggle.
+	_tfidf_store.index_ready.connect(_on_tfidf_ready)
 	view_toolbar = GraphViewToolbar.new()
 	view_toolbar.name = "GraphViewToolbar"
 	view_toolbar.position = Vector2(8, 8)
@@ -621,28 +624,21 @@ func _set_view_type(view_type: int) -> void:
 	_apply_view_type()
 
 
-## Push the selected view type into the scene: the radial map (plus its nav bar)
-## or the Area View takes over the same canvas. The toolbar stays visible in
-## both, since it is a child of graph_view and untouched by the layer toggle.
+## Push the selected view type into the map: the same GraphView renders the
+## radial spine or the semantic islands, so the switch keeps the camera
+## machinery, labels, circle menu and focus-card routing identical in both.
+## The nav bar is radial-only chrome (scopes/pages); the toolbar stays a canvas
+## child and is untouched by the switch.
 func _apply_view_type() -> void:
 	var area := GameManager.graph_view_type == 2
-	graph_view.set_radial_visible(not area)
+	graph_view.set_area_layout(area)
 	graph_nav.visible = not area
-	area_view.visible = area
 	view_toolbar.set_active(GameManager.graph_view_type)
-	if area:
-		_build_area_view.call_deferred()
 
 
-## Build the Area View from the semantic index: top-k neighbours -> positions.
-func _build_area_view() -> void:
-	var size := area_view.size
-	if size.x <= 0.0 or size.y <= 0.0:
-		size = graph_view.size
-	var neighbours := {}
-	var labels := {}
-	for rel in GameManager.notes:
-		neighbours[rel] = _tfidf_store.top_neighbors(rel, 3)
-		labels[rel] = GameManager.note_title(rel)
-	area_view.accent2 = GameManager.color("accent2")
-	area_view.build(neighbours, labels, Rect2(Vector2.ZERO, size))
+## The semantic index finished on its worker: rebuild the Area layout in place
+## when it owns the canvas (keeps the camera), so the islands reflect the scan
+## without another view toggle.
+func _on_tfidf_ready() -> void:
+	if GameManager.graph_view_type == 2 and graph_open() and graph_view.is_ready():
+		graph_view.refresh_graph()

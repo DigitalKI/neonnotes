@@ -1,7 +1,8 @@
 extends Node
-## Dev-only visual check for the Area View renderer: seeds a small scratch vault
-## of subject-grouped notes, runs the body-word TF-IDF scan, and renders the
-## island layout full-screen so the clustering is visible.
+## Dev-only visual check for the Area layout of the graph canvas: seeds a small
+## scratch vault of subject-grouped notes, runs the body-word TF-IDF scan, and
+## opens the real GraphView with the area layout active so the island
+## clustering, labels and circle menu are visible.
 ##
 ## Run with a REAL renderer (headless renders nothing):
 ##   NEONNOTES_DEV=1 godot --path . scenes/dev/AreaBench.tscn
@@ -9,7 +10,7 @@ extends Node
 ## Never touches the real vault or its settings; safe to delete.
 
 const TfidfBodyStoreScript := preload("res://scripts/common/tfidf_body_store.gd")
-const AreaViewScript := preload("res://scripts/render/area_view.gd")
+const GraphViewScript := preload("res://scripts/render/graph_view.gd")
 const PROBE_VAULT := "user://neonnotes-area-bench"
 
 ## Subject -> note bodies. Notes sharing a subject's vocabulary should cluster
@@ -66,17 +67,16 @@ func _ready() -> void:
 		await get_tree().process_frame
 		frames += 1
 
-	var neighbours := {}
-	var labels := {}
-	for rel in GameManager.notes:
-		neighbours[rel] = store.top_neighbors(rel, 3)
-		labels[rel] = GameManager.note_title(rel)
-
-	var view = AreaViewScript.new()
-	view.name = "AreaView"
-	add_child(view)
-	view.position = Vector2.ZERO
-	view.size = get_viewport().get_visible_rect().size
-	view.accent2 = GameManager.color("accent2")
-	var d = view.build(neighbours, labels, Rect2(Vector2.ZERO, view.size))
-	print("[area bench] notes=%d edges=%d" % [GameManager.notes.size(), d["edges"].size()])
+	var gv: GraphView = GraphViewScript.new()
+	gv.name = "GraphAreaBench"
+	gv.area_neighbours_cb = func(rel: String) -> Array:
+		return store.top_neighbors(rel, 3)
+	add_child(gv)
+	gv.position = Vector2.ZERO
+	gv.size = get_viewport().get_visible_rect().size
+	gv.set_area_layout(true)
+	gv.open("")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	print("[area bench] notes=%d keys=%d edge_pts=%d" % [
+		GameManager.notes.size(), gv._keys.size(), gv._edge_pts.size() / 2])

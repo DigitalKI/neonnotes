@@ -34,6 +34,7 @@ func _ready() -> void:
 	GameManager.graph_view_state = {}
 	GameManager.last_opened_rel = ""
 	GameManager.graph_presentation = 1
+	GameManager.graph_view_type = 1
 
 	var main: Node = load("res://scenes/main/Main.tscn").instantiate()
 	get_tree().root.add_child.call_deferred(main)

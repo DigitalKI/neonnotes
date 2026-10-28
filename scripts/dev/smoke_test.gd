@@ -32,9 +32,11 @@ func _write_smoke_features_note() -> void:
 
 func _run_smoke() -> void:
 	var fails := 0
-	# The dock-vs-full-view presentation is persisted, so reset it here — the
-	# suite must not depend on the developer's real settings.cfg.
+	# The dock-vs-full-view presentation and the active graph view type are
+	# persisted, so reset both here — the suite must not depend on the
+	# developer's real settings.cfg.
 	GameManager.graph_presentation = 1
+	GameManager.graph_view_type = 1
 	var doc := MarkdownParser.parse("---\ntitle: \"T\"\ntheme: \"Toxic Terminal\"\n---\n\n# H\n[[Alpha]] and [[Beta|alias]]\n%%g%% ++f++\n")
 	fails += _check(doc["meta"].get("title", "") == "T" and doc["meta"].get("theme", "") == "Toxic Terminal", "front-matter title/theme")
 	var links := WikiLinks.extract_links("see [[Alpha]] and [[Beta|alias]] and [[Alpha]]")

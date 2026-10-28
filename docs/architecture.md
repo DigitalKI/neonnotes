@@ -67,7 +67,7 @@ settings live in `user://settings.cfg`; exports and embedded media live under
 | `scripts/markdown/wiki_links.gd` | Link extraction, resolution, backlinks, graph |
 | `scripts/render/preview_builder.gd` | Markdown → RichTextLabel blocks, charts, FX |
 | `scripts/render/graph_model.gd` | Renderer-agnostic graph levels/edges |
-| `scripts/render/graph_view.gd` | Radial map: adaptive layout, collision-aware labels, static layers, MultiMesh nodes, focus/nav |
+| `scripts/render/graph_view.gd` | Vault-map canvas: camera/labels/markers/menu shared by both layouts — radial (folder spine) and area (semantic islands via `AreaLayout` + `TfidfBodyStore`) |
 | `scripts/sync/sync_service.gd` | UDP discovery, pairing proof, manifest/stream transfer, LWW state |
 | `scripts/sync/sync_page.gd` | Sync settings/status page |
 | `scripts/export/*.gd` | PNG/GIF/HTML exporters and outbound share |
@@ -176,6 +176,16 @@ a move destination, not a graph node).
 
 ### Graph
 `GraphModel` builds levels/edges from `GameManager.notes` + `links`.
+`GraphView` is one canvas with two layouts (ADR-0013 Phase 5): the *radial*
+hierarchy and the flat *area* islands. Switching (`set_area_layout()`, driven
+by the shell's view toolbar and the persisted `graph_view_type`) is a rebuild
+of the same control — the camera pan/zoom, the screen-space MultiMesh markers,
+the collision-aware label pass, the circle menu, link editing and the
+focus-card routing are all shared, so both layouts behave identically. The
+area layout keeps the hierarchy maps empty, which makes the shared code
+degrade into "every node is a leaf note" semantics; its islands come from
+`AreaLayout` over top-k `TfidfBodyStore` neighbours injected through
+`area_neighbours_cb` (the view computes nothing about similarity itself).
 `GraphView.open()` rebuilds keys, then `_layout_points()` / `_assign_sectors()`
 lay out radial sectors with an adaptive child-ring radius (`_child_edge()`);
 `label_layout()` resolves outline-style labels with priority, outward anchors,

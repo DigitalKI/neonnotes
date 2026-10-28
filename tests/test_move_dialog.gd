@@ -29,6 +29,11 @@ func _wait_for_tree(md: MoveDialog, rel: String) -> void:
 func _ready() -> void:
 	var original_vault := GameManager.vault_dir
 	GameManager.suppress_settings_save = true
+	# The active graph view type is persisted in the developer's real
+	# settings.cfg (this suite reads it: only writes are suppressed); this test
+	# asserts radial-map semantics (folder spine targets and group moves), so
+	# force the shipped radial default like a fresh install.
+	GameManager.graph_view_type = 1
 	var vault := "user://test-move-vault"
 	GameManager.vault_dir = vault
 	NoteCrud.rm_dir("")

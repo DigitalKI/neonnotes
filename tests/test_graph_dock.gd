@@ -42,6 +42,7 @@ func _ready() -> void:
 	GameManager.graph_view_state = {}
 	GameManager.last_opened_rel = ""
 	GameManager.graph_presentation = 1
+	GameManager.graph_view_type = 1
 
 	var main: Node = load("res://scenes/main/Main.tscn").instantiate()
 	get_tree().root.add_child.call_deferred(main)
@@ -278,6 +279,87 @@ func _ready() -> void:
 	main._toggle_graph()
 	await get_tree().process_frame
 	main.layout_component.is_mobile_layout = false
+
+	# ---- Area layout: the same canvas renders the semantic islands -----
+	# Everything the two views share is exercised through the real shell:
+	# zooming (wheel on the shared camera), opening a node from the dock, and
+	# the full view's circle menu + focus-card preview.
+	GameManager.graph_presentation = 1
+	GameManager.graph_view_type = 1
+	main._toggle_graph()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var open_rel: String = GameManager.current_rel
+	main.graph_shell._set_view_type(2)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_check("area layout takes over the canvas", main.graph_view._area_active
+		and main.graph_view._keys.has("A.md") and not main.graph_view._keys.has("Folder"))
+	_check("area nodes have positions", main.graph_view._pos.has("A.md")
+		and main.graph_view._pos.has("Folder/B.md"))
+	_check("area layout keeps the focused note",
+		main.graph_view._selected != "" and main.graph_view.node_rel(main.graph_view._selected) == open_rel)
+	# Zoom: a wheel event on the canvas moves the shared camera.
+	var scale_before: float = main.graph_view._map_scale
+	var wheel := InputEventMouseButton.new()
+	wheel.button_index = MOUSE_BUTTON_WHEEL_UP
+	wheel.pressed = true
+	wheel.position = main.graph_view.size * 0.5
+	main.graph_view._gui_input(wheel)
+	_check("area layout zooms with the shared camera",
+		main.graph_view._map_scale > scale_before)
+	# A dock tap opens the tapped note beside the map, exactly like radial. The
+	# circle menu around the previously focused node closes first — a tap that
+	# lands on a menu button acts on the menu, not the node under it.
+	main.graph_view._drop_focus()
+	var before_rel: String = GameManager.current_rel
+	var tap_pos: Vector2 = main.graph_view._to_screen(main.graph_view._pos["Folder/B.md"])
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	press.position = tap_pos
+	main.graph_view._gui_input(press)
+	var release := InputEventMouseButton.new()
+	release.button_index = MOUSE_BUTTON_LEFT
+	release.pressed = false
+	release.position = tap_pos
+	main.graph_view._gui_input(release)
+	_check("area dock tap opens the note", GameManager.current_rel == "Folder/B.md"
+		and before_rel != "Folder/B.md")
+	# Full view: a tap selects — circle menu open, focus card renders the note
+	# preview, the menu offers the note actions.
+	main._toggle_graph_expanded()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	main.graph_view._drop_focus()
+	var tap_b: Vector2 = main.graph_view._to_screen(main.graph_view._pos["A.md"])
+	press.position = tap_b
+	main.graph_view._gui_input(press)
+	release.position = tap_b
+	main.graph_view._gui_input(release)
+	_check("area full-view tap selects the node",
+		main.graph_view._selected == "A.md" and main.graph_view._menu.open)
+	_check("area circle menu offers the note actions",
+		main.graph_view._menu.actions.has("Open")
+		and main.graph_view._menu.actions.has("Delete")
+		and main.graph_view._menu.actions.has("Link")
+		and not main.graph_view._menu.actions.has("Enter"))
+	_check("area selection opens the focus card", main.focus_card.is_open())
+	var preview_deadline := Time.get_ticks_msec() + 2000
+	while Time.get_ticks_msec() < preview_deadline \
+			and main.focus_card.preview_box.get_child_count() == 0:
+		await get_tree().process_frame
+	_check("focus card renders the note preview",
+		main.focus_card.preview_box.get_child_count() > 0)
+	# Switching back restores the radial spine (folders as group nodes).
+	main.graph_shell._set_view_type(1)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_check("switch back restores the radial layout",
+		not main.graph_view._area_active and main.graph_view._keys.has("Folder"))
+	main._toggle_graph()
+	await get_tree().process_frame
+	GameManager.graph_view_type = 1
 
 	GameManager.vault_dir = original_vault
 	print("GRAPH DOCK RESULT: %s (%d fails)" % ["OK" if _fails == 0 else "FAIL", _fails])
