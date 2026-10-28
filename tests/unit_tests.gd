@@ -598,6 +598,21 @@ func _check_tfidf_caches() -> void:
 	_check(small.vector("a.md").has("glue"), "the filter stays off in small vaults")
 	_check(small.cosine("a.md", "b.md") > 0.0, "small vaults still connect on shared words")
 
+	# build_counts (the cache-load path) reproduces a cold scan exactly.
+	var bc1 = TfidfIndexScript.new()
+	bc1.build({"a.md": "quantum entanglement field",
+		"b.md": "quantum gravity field"})
+	var bc2 = TfidfIndexScript.new()
+	bc2.build_counts({"a.md": bc1.term_counts("a.md"),
+		"b.md": bc1.term_counts("b.md")})
+	var counts_same := bc2.vector("a.md") == bc1.vector("a.md") \
+		and bc2.idf("quantum") == bc1.idf("quantum") \
+		and bc2.term_counts("b.md") == bc1.term_counts("b.md") \
+		and String(bc2.top_neighbors("a.md", 1)[0]["note"]) == "b.md"
+	_check(counts_same, "build_counts reproduces a cold scan")
+	_check(bc1.term_counts("missing.md").is_empty(),
+		"term_counts is empty for an unknown note")
+
 ## Area View layout: deterministic island packing of a similarity graph.
 func _check_area_layout() -> void:
 	var nb := {
@@ -673,6 +688,36 @@ func _check_area_embedding() -> void:
 	var s := AreaEmbeddingScript.layout(star)
 	_check(s["H.md"].distance_to(s["A.md"]) < s["H.md"].distance_to(s["C.md"]),
 		"a stronger similarity sits closer to the hub")
+
+	# Warm start (the cache path): seeded from a previous layout, an edit
+	# moves only its own neighbourhood — untouched components keep their
+	# place instead of being re-anchored on a reshuffled grid — and the
+	# result stays semantically correct and deterministic given its seed.
+	var g1 := {
+		"A.md": [{"note": "B.md", "score": 0.9}],
+		"B.md": [{"note": "A.md", "score": 0.9}],
+		"C.md": [{"note": "D.md", "score": 0.9}],
+		"D.md": [{"note": "C.md", "score": 0.9}],
+		"E.md": [],
+		"F.md": [],
+	}
+	var cold1 := AreaEmbeddingScript.layout(g1)
+	var g2 := g1.duplicate(true)
+	g2["G.md"] = []
+	var warm2 := AreaEmbeddingScript.layout(g2, AreaEmbeddingScript.ITERATIONS, cold1)
+	var cold2 := AreaEmbeddingScript.layout(g2)
+	_check(warm2.size() == 7, "warm layout positions every note")
+	_check(warm2["A.md"].distance_to(warm2["B.md"]) < warm2["A.md"].distance_to(warm2["C.md"]),
+		"warm layout stays semantically correct")
+	var moved_warm := 0.0
+	var moved_cold := 0.0
+	for k in ["A.md", "B.md", "C.md", "D.md", "E.md", "F.md"]:
+		moved_warm += Vector2(warm2[k]).distance_to(Vector2(cold1[k]))
+		moved_cold += Vector2(cold2[k]).distance_to(Vector2(cold1[k]))
+	_check(moved_warm < moved_cold,
+		"warm start keeps untouched regions in place")
+	_check(AreaEmbeddingScript.layout(g2, AreaEmbeddingScript.ITERATIONS, cold1)["E.md"] == warm2["E.md"],
+		"warm layout is deterministic given its seed")
 
 ## Shared graph colours: a note's colour comes from its top-level folder, so it
 ## survives switching between the radial and area views.

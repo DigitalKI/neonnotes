@@ -21,10 +21,13 @@ extends RefCounted
 ##      nodes do not interact at all, so one region's edit cannot wander
 ##      another region's placement.
 ##
-## No randomness anywhere, and every pass walks sorted, stable orders, so the
-## same input yields bit-identical positions (the `AreaLayout` contract).
+## No randomness anywhere, and every pass walks sorted, stable orders, so
+## the same input yields bit-identical positions (the `AreaLayout` contract).
 ## Editing a note changes only its component's edges — its own region moves,
-## and at most the grid anchors; the rest of the map stays put.
+## and at most the grid anchors; the rest of the map stays put. A warm start
+## (previous positions passed as `warm`) skips the anchor grid entirely, so
+## an edit moves only its own neighbourhood and the global fit; the layout is
+## then deterministic given (input, seed) instead of the input alone.
 
 const MAP_SPAN := 1000.0        # square map frame; `_fit_to_view()` frames it
 const ITERATIONS := 150        # fixed: determinism over adaptive stopping
@@ -36,7 +39,7 @@ const TEMP_FRAC := 0.12        # start temperature as a fraction of the span
 const FIT_PAD := 60.0          # padding kept when fitting the frame
 const GOLDEN_ANGLE := 2.399963229728653  # even spiral, no RNG
 
-static func layout(graph: Dictionary, iterations := ITERATIONS) -> Dictionary:
+static func layout(graph: Dictionary, iterations := ITERATIONS, warm := {}) -> Dictionary:
 	var keys: Array[String] = []
 	for k in graph.keys():
 		keys.append(String(k))
@@ -81,26 +84,62 @@ static func layout(graph: Dictionary, iterations := ITERATIONS) -> Dictionary:
 			return String(a[0]) < String(b[0])
 		return a.size() > b.size())
 
-	# 2. Anchor each component on the grid, largest first, and spread its
-	#    members on a golden-angle spiral sized to the component.
-	var cols := maxi(1, ceili(sqrt(float(comps.size()))))
-	var rows := maxi(1, ceili(float(comps.size()) / float(cols)))
-	var cell_w := MAP_SPAN / float(cols)
-	var cell_h := MAP_SPAN / float(rows)
+	# 2. Seed the relaxation. Cold: anchor each component on the grid, largest
+	#    first, and spread its members on a golden-angle spiral sized to the
+	#    component. Warm (sidecar cache): the previous positions are the seed
+	#    and the anchor grid is skipped entirely, so regions the edit did not
+	#    touch keep their place — only the global fit can move them, uniformly.
+	#    Notes new since the last layout start on a small golden-angle spiral
+	#    around the mean position of the neighbours they link to (frame centre
+	#    when isolated), then the relaxation places them.
 	var pos := {}
-	for ci in comps.size():
-		var members: Array = comps[ci]
-		var anchor := Vector2((float(ci % cols) + 0.5) * cell_w,
-			(float(ci / cols) + 0.5) * cell_h)
-		if members.size() == 1:
-			pos[members[0]] = anchor
-			continue
-		var r_init := minf(minf(cell_w, cell_h) * 0.45,
-			ideal * sqrt(float(members.size())))
-		for j in members.size():
-			var ang := float(j) * GOLDEN_ANGLE
-			var rr := r_init * sqrt((float(j) + 1.0) / float(members.size()))
-			pos[members[j]] = anchor + Vector2(cos(ang), sin(ang)) * rr
+	if not warm.is_empty():
+		var seeded := {}
+		for k in keys:
+			if warm.has(k):
+				pos[k] = warm[k]
+				seeded[k] = true
+		var fresh := 0
+		for k in keys:
+			if seeded.has(k):
+				continue
+			var sx := 0.0
+			var sy := 0.0
+			var nb_count := 0
+			for e in graph[k]:
+				var nb := String(e.get("note", ""))
+				if pos.has(nb):
+					sx += float(pos[nb].x)
+					sy += float(pos[nb].y)
+					nb_count += 1
+			if nb_count > 0:
+				sx /= float(nb_count)
+				sy /= float(nb_count)
+			else:
+				sx = MAP_SPAN * 0.5
+				sy = MAP_SPAN * 0.5
+			var ang := float(fresh) * GOLDEN_ANGLE
+			var rr := ideal * (1.0 + sqrt(float(fresh)))
+			pos[k] = Vector2(sx, sy) + Vector2(cos(ang), sin(ang)) * rr
+			fresh += 1
+	else:
+		var cols := maxi(1, ceili(sqrt(float(comps.size()))))
+		var rows := maxi(1, ceili(float(comps.size()) / float(cols)))
+		var cell_w := MAP_SPAN / float(cols)
+		var cell_h := MAP_SPAN / float(rows)
+		for ci in comps.size():
+			var members: Array = comps[ci]
+			var anchor := Vector2((float(ci % cols) + 0.5) * cell_w,
+				(float(ci / cols) + 0.5) * cell_h)
+			if members.size() == 1:
+				pos[members[0]] = anchor
+				continue
+			var r_init := minf(minf(cell_w, cell_h) * 0.45,
+				ideal * sqrt(float(members.size())))
+			for j in members.size():
+				var ang := float(j) * GOLDEN_ANGLE
+				var rr := r_init * sqrt((float(j) + 1.0) / float(members.size()))
+				pos[members[j]] = anchor + Vector2(cos(ang), sin(ang)) * rr
 
 	# Edge list in sorted key order for a deterministic attraction walk.
 	var edge_list: Array = []

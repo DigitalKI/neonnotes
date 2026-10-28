@@ -68,6 +68,20 @@ func _init() -> void:
 	var embed := AreaEmbeddingScript.layout(idx.knn_graph(3))
 	var embed_ms := Time.get_ticks_msec() - t0
 
+	# The cache paths (ADR-0016 Phase 3): a warm boot rebuilds the index from
+	# persisted counts (no reads, no tokenisation) and a single-note edit
+	# re-embeds warm-started from the previous positions.
+	var counts_snap := {}
+	for p in docs.keys():
+		counts_snap[String(p)] = idx.term_counts(String(p))
+	t0 = Time.get_ticks_msec()
+	var idx_warm = TfidfIndexScript.new()
+	idx_warm.build_counts(counts_snap)
+	var build_counts_ms := Time.get_ticks_msec() - t0
+	t0 = Time.get_ticks_msec()
+	AreaEmbeddingScript.layout(idx.knn_graph(3), AreaEmbeddingScript.ITERATIONS, embed)
+	var warm_embed_ms := Time.get_ticks_msec() - t0
+
 	# Cache exactness at bench scale: both passes must agree completely.
 	var agree := true
 	var edges := 0
@@ -84,4 +98,6 @@ func _init() -> void:
 		% [vectors_cold_ms, vectors_warm_ms, edges, agree, glue_count,
 		not sample.has("gluea")])
 	print("[tfidf bench] embedding=%dms nodes=%d" % [embed_ms, embed.size()])
+	print("[tfidf bench] cache load: build_counts=%dms warm_reembed=%dms"
+		% [build_counts_ms, warm_embed_ms])
 	quit(0)

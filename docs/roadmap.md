@@ -1,6 +1,6 @@
 # NeonNotes — Roadmap
 
-_Last updated: 2026-10-27_
+_Last updated: 2026-10-28_
 
 Direction and open work only. Finished items are deleted (git is the history).
 Pending decisions state the question and the current recommendation.
@@ -14,16 +14,6 @@ phone ↔ PC over the local network.
 
 ## Next
 
-- **Area View rework (agreed plan; Phases 0–2 done)** — Phase 3: persisted
-  sidecar cache (`tf` per note + `df` per vault, content-hash invalidation)
-  with a backfill worker, so a vault with no cached vectors is scanned once,
-  never on every boot; warm-start the embedding from the previous positions
-  while at it. Landed: Phase 0 (idf/vector memoisation, common-term filter,
-  `vectors()`/`knn_graph()`); Phase 1 (area edges are wiki-links only —
-  straight direct routes carrying the travelling light); Phase 2 (ADR-0016:
-  `AreaEmbedding`, a deterministic force-directed layout over the k-NN graph,
-  computed on the store's worker — similar notes near, topics in regions;
-  `AreaLayout` stays as the pre-scan fallback).
 - **Desktop Open-with** — add `MimeType=text/markdown;` and
   `Exec=neonnotes %F` once a file argument is handled at boot (copy into the
   Inbox like Android's Open-with); until then the entry launches the app only.
@@ -170,9 +160,10 @@ Baselines are device/version dependent; re-measure with the benches.
 - Parser: `MarkdownParser.parse()` ≈7 ms / 2,064 lines; full highlight path
   ≈98 ms (rebuild ≈79 ms).
 - Area View TF-IDF (400 synthetic notes, `scripts/dev/tfidf_bench.gd`): index
-  build ≈60 ms; whole-vault top-3 neighbours ≈250 ms (≈4x faster after
-  common-term candidate pruning); vector snapshot cold ≈32 ms → warm ≈1 ms;
-  embedding (`AreaEmbedding`, same worker pass) ≈0.9 s.
+  build ≈47 ms (≈7 ms rebuilt from cached counts); whole-vault top-3
+  neighbours ≈150 ms; vector snapshot cold ≈15 ms → warm ≈1 ms; embedding
+  (`AreaEmbedding`, worker pass) ≈0.7 s — skipped entirely when the sidecar
+  cache's corpus fingerprint is unchanged (positions reused verbatim).
 - Scan: ≈84 ms / 1,000 notes full-file on desktop.
 
 Commands: `NEONNOTES_BOOT_DEBUG=1 godot --path .`,

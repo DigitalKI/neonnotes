@@ -87,6 +87,31 @@ func build(docs: Dictionary) -> void:
 	for path in docs.keys():
 		index_note(String(path), String(docs[path]))
 
+## Rebuild the whole index from cached token counts ({path: {term: count}}) —
+## the warm-boot path from the sidecar cache: postings, df and the derived
+## caches rebuild without a single file read or regex pass. `index_note()`
+## stays the incremental edit path.
+func build_counts(counts: Dictionary) -> void:
+	_docs.clear()
+	_postings.clear()
+	_df.clear()
+	_clear_derived()
+	for path in counts.keys():
+		var tf: Dictionary = counts[path]
+		if tf.is_empty():
+			continue
+		_docs[path] = tf
+		for term in tf.keys():
+			if not _postings.has(term):
+				_postings[term] = {}
+			_postings[term][path] = tf[term]
+			_df[term] = int(_df.get(term, 0)) + 1
+
+## Raw term counts for one note — the sidecar cache's payload. Read-only view
+## into `_docs`; callers must not mutate it.
+func term_counts(path: String) -> Dictionary:
+	return _docs.get(path, {})
+
 ## Add or replace one note's terms, maintaining postings + df. Cheap enough to
 ## run per note during an incremental scan; no full rebuild needed.
 func index_note(path: String, text: String) -> void:

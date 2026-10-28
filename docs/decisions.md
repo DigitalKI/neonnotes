@@ -1,6 +1,6 @@
 # NeonNotes — Decisions
 
-_Last updated: 2026-10-27_
+_Last updated: 2026-10-28_
 
 Settled decisions only; pending questions live in [`roadmap.md`](roadmap.md).
 Most decisions are one line. A decision gets an ADR file when the rationale is
@@ -100,6 +100,10 @@ revisited.
 - **Area View draws only wiki-link edges** — straight direct routes with the
   radial view's travelling light; semantic similarity shows as proximity,
   never as lines.
+- **Area View semantic cache is a user:// sidecar** — token counts + positions
+  keyed per vault (its id file, else the hashed path), mtime + content-hash
+  invalidation, fingerprint-gated position reuse; never inside the vault,
+  whose notes stay the only source of truth.
 
 ## Superseded
 

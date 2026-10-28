@@ -1,6 +1,6 @@
 # NeonNotes — Architecture
 
-_Last updated: 2026-10-27 · Godot 4.7 · renderer: `gl_compatibility`_
+_Last updated: 2026-10-28 · Godot 4.7 · renderer: `gl_compatibility`_
 
 Read this after [`../AGENTS.md`](../AGENTS.md). It is the orientation map, not a
 changelog. Deep dives belong in `docs/architecture/*.md` and are read on demand.
@@ -59,8 +59,8 @@ settings live in `user://settings.cfg`; exports and embedded media live under
 | `scripts/common/vault_tree_rows.gd` | Shared tree rows: folders, folder-as-note merges, note leaves, browse/results shapes |
 | `scripts/common/list_continuation.gd` | Smart Enter for Markdown lists: marker/next-prefix analysis + fence guard (pure) |
 | `scripts/common/graph_digest.gd`, `graph_digest_store.gd` | Graph preview view-models + worker-thread cache |
-| `scripts/common/tfidf_index.gd`, `tfidf_body_store.gd` | Area View similarity: body-word TF-IDF (memoised idf/vectors, common-term filter), worker-threaded scan + embedding |
-| `scripts/common/area_layout.gd`, `area_embedding.gd` | Area View positions: the island grid (pre-scan fallback) and the deterministic force-directed embedding (ADR-0016) |
+| `scripts/common/tfidf_index.gd`, `tfidf_body_store.gd` | Area View similarity: body-word TF-IDF (memoised idf/vectors, common-term filter), worker-threaded scan + embedding with a persisted sidecar cache (warm boots, backfill, position reuse) |
+| `scripts/common/area_layout.gd`, `area_embedding.gd` | Area View positions: the island grid (pre-scan fallback) and the deterministic force-directed embedding (ADR-0016, warm-startable) |
 | `scripts/common/dev_session.gd` | Opt-in dev/MCP isolation policy |
 | `scripts/common/backup_service.gd` | Vault zip backup/restore, manifest, zip-slip, SAF URI copy |
 | `scripts/common/markdown_importer.gd` | Plain `.md` import; media skipped, title/created injected |
@@ -199,7 +199,11 @@ no guide rails; proximity, not lines, carries the semantic grouping.
 on every mutation, so a hit is always exact — and drops terms appearing in
 ≥85% of notes (`COMMON_TERM_FRAC`), so function words in any language cannot
 glue the vault into one similarity island; `scripts/dev/tfidf_bench.gd`
-measures the whole-vault pass.
+measures the whole-vault pass. The scan is sidecar-cached under `user://`
+(per-note mtime + content hash, whole-corpus fingerprint): warm boots stat
+the vault and rebuild the index from persisted counts, only new or changed
+notes are read and tokenised, an unchanged corpus reuses its cached embedding
+verbatim and a changed one warm-starts from it.
 `GraphView.open()` rebuilds keys, then `_layout_points()` / `_assign_sectors()`
 lay out radial sectors with an adaptive child-ring radius (`_child_edge()`);
 `label_layout()` resolves outline-style labels with priority, outward anchors,
@@ -255,6 +259,7 @@ common wrapper stripped, bare note gets `title`/`created`); sync pauses/resumes.
 | `tests/ReproTreeTap.tscn` | Mobile tree tap/long-press + drawer/card dismissal |
 | `tests/TestSelectionOverlay.tscn` | Android selection bar, loupe, edge auto-scroll |
 | `tests/TestGraphCard.tscn` | Graph digest/card, form factors, nav, view restore |
+| `tests/TestTfidfStore.tscn` | Worker scan + embedding delivery, invalidate re-embed, sidecar cache (warm boot, backfill, position reuse, corruption self-heal) |
 | `tests/TestGraphDock.tscn` | Graph dock/full view, follow-note, swipes |
 | `tests/TestGraphTreeSync.tscn` | Tree click follows into another scope/page |
 | `scripts/dev/GraphProbe.tscn` | Graph canvas internals: menus, link/unlink modes, labels, camera, area projection (link-only routes, embedding positions + island fallback, view switching) |

@@ -54,10 +54,17 @@ proximity, never as lines.
 - Editing a note shifts its own region (and at most the grid anchors), not one
   isolated island — an accepted trade for the organic shape.
 - `AreaLayout` is no longer the primary area layout but stays as the
-  pre-scan fallback and unit-test fixture; it can be retired once (if ever)
-  the embedding is persisted across boots (roadmap Phase 3).
+  pre-scan fallback and unit-test fixture even though the embedding now
+  persists across boots.
+- The scan persists a sidecar cache under `user://` (per-note mtime + content
+  hash, whole-corpus fingerprint): a warm boot backfills only new or changed
+  notes, an unchanged corpus reuses its cached embedding verbatim, and a
+  changed corpus warm-starts the relaxation from it — so an edit shifts only
+  its own neighbourhood. The cache is an accelerator, never a requirement:
+  a corrupt or stale file falls back to one full scan. Nothing derived is
+  ever written into the vault; the notes stay the only source of truth.
 - The embedding runs entirely off the main thread (INV-015); at ~400 synthetic
-  notes it measures ≈0.9 s on the worker (`scripts/dev/tfidf_bench.gd`).
+  notes it measures ≈0.7 s on the worker (`scripts/dev/tfidf_bench.gd`).
 
 ## Alternatives considered
 
