@@ -93,6 +93,9 @@ revisited.
 - **Common-term filter, not per-language stopword lists** — TF-IDF vectors drop
   any term appearing in ≥85% of notes (once the vault has ≥8 notes), so
   function words in any language stop gluing the Area View into one island.
+- **Area View draws only wiki-link edges** — straight direct routes with the
+  radial view's travelling light; semantic similarity shows as proximity,
+  never as lines.
 
 ## Superseded
 

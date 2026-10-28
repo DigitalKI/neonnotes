@@ -404,9 +404,11 @@ func _on_metadata_ready() -> void:
 	_label_metrics.clear()
 	_rebuild_resolve_maps()
 	if _area_active:
-		# The area layout's similarity comes from the separate TF-IDF scan, so
-		# only the labels change here; the islands are refreshed when that
-		# scan completes (the shell re-triggers `refresh_graph()`).
+		# The area islands come from the separate TF-IDF scan (refreshed via
+		# refresh_graph when it completes), but the link routes read the same
+		# link index as the radial spine — rebuild them so the travelling
+		# light appears even when the graph opened inside the fast-boot window.
+		_build_area_routes()
 		queue_redraw()
 		return
 	_build_levels()
@@ -628,6 +630,9 @@ func refresh_graph() -> void:
 	var keep_selected := _selected
 	var had_selection := _menu.open
 	if _area_active:
+		# The link routes read the same shared index as the radial spine, so
+		# the index must be current before the direct routes are built from it.
+		_rebuild_resolve_maps()
 		_build_area_keys()
 		_layout_area_points()
 	else:
@@ -1002,10 +1007,17 @@ func _build_routes() -> void:
 	_routes.clear()
 	_rail_pts = PackedVector2Array()
 	_rail_cols = PackedColorArray()
+	_build_link_routes(_route_samples)
+	_build_rail_geometry()
+
+## Resolved wiki-link pairs shared by both layouts' route builders. Endpoints
+## are `_norm()`-folded (in the area projection every note is its own node),
+## visible-only, deduped per direction; the directed map is what the bidir flag
+## reads. Collecting the directions first matters: marking the reverse as
+## "seen" while adding the first route hid the second direction entirely, so a
+## mutually-linked pair never animated both ways.
+func _route_pairs() -> Dictionary:
 	var links := _resolved_links()
-	# Collect the directed pairs first. Marking the reverse as "seen" while adding
-	# the first route hid the second direction entirely, so a mutually-linked pair
-	# never animated both ways: bidir was always false.
 	var directed := {}
 	var pairs: Array = []
 	for src in links.keys():
@@ -1022,8 +1034,16 @@ func _build_routes() -> void:
 				continue
 			directed[a][b] = true
 			pairs.append([a, b])
+	return {"pairs": pairs, "directed": directed}
+
+## Fill `_routes` from the resolved link pairs: one route per unordered pair
+## (a mutual pair animates both ways through `bidir`), capped at MAX_ROUTES,
+## each shaped by `sampler` — the radial folder spine or the area direct line.
+func _build_link_routes(sampler: Callable) -> void:
+	var pr := _route_pairs()
+	var directed: Dictionary = pr["directed"]
 	var done := {}
-	for pair in pairs:
+	for pair in pr["pairs"]:
 		var a: String = pair[0]
 		var b: String = pair[1]
 		if done.has(a) and done[a].has(b):
@@ -1036,23 +1056,24 @@ func _build_routes() -> void:
 		done[b][a] = true
 		if _routes.size() >= MAX_ROUTES:
 			break
-		var samples := _route_samples(a, b)
+		var samples: PackedVector2Array = sampler.call(a, b)
 		if samples.size() >= 2:
-			var back: bool = directed.has(b) and directed[b].has(a)
-			# Only the *travel speed* varies per link — every link starts from its
-			# source at the same phase, so what differs is how fast the light moves
-			# along the link, not when it leaves. The mixed value is used whole as a
-			# 32-bit fraction; `% 1000` would sample low bits, which multiplication
-			# mixes weakly.
-			var h := _mix((a + "|" + b).hash())
-			var speed := SPEED_MIN + (float(h) / 4294967296.0) * (SPEED_MAX - SPEED_MIN)
-			# Keep both resolved endpoints so drawing can tint the signal with the
-			# colour of the node it *leaves*. `a`/`b` are `_norm()`-resolved, so a
-			# link from a note folded into a collapsed folder already names that
-			# aggregate node — the signal inherits the aggregate's colour.
-			_routes.append({"samples": samples, "bidir": back, "speed": speed,
-				"src": a, "dst": b})
-	_build_rail_geometry()
+			_routes.append(_make_route(a, b, samples, directed))
+
+## One route entry. Only the *travel speed* varies per link — every link starts
+## from its source at the same phase, so what differs is how fast the light
+## moves along the link, not when it leaves. The mixed value is used whole as a
+## 32-bit fraction; `% 1000` would sample low bits, which multiplication mixes
+## weakly. Both resolved endpoints ride along so drawing can tint the signal
+## with the colour of the node it *leaves*: `a`/`b` are `_norm()`-resolved, so
+## a link from a note folded into a collapsed folder already names that
+## aggregate node and the signal inherits the aggregate's colour.
+func _make_route(a: String, b: String, samples: PackedVector2Array,
+		directed: Dictionary) -> Dictionary:
+	var h := _mix((a + "|" + b).hash())
+	var speed := SPEED_MIN + (float(h) / 4294967296.0) * (SPEED_MAX - SPEED_MIN)
+	var back: bool = directed.has(b) and directed[b].has(a)
+	return {"samples": samples, "bidir": back, "speed": speed, "src": a, "dst": b}
 
 ## Flatten every route's guide rail into one coloured segment list: the whole
 ## set of rails then renders as a single `draw_multiline_colors` call. The rail
@@ -1253,10 +1274,11 @@ func _assign_sectors(children: Array[String], start: float,
 
 # --------------------------------------------------------------- area layout
 ## The area (island) projection shares this canvas end to end: keys/notes,
-## positions from `AreaLayout`, similarity edges into the same batched
-## `_edge_pts` the radial spine uses, and every behaviour below (menu, labels,
-## link editing, focus) comes from the shared code paths over empty hierarchy
-## maps — an empty `_children` makes every node a plain leaf note.
+## positions from `AreaLayout`, wiki-links as direct routes carrying the same
+## travelling light as the radial spine, and every behaviour below (menu,
+## labels, link editing, focus) comes from the shared code paths over empty
+## hierarchy maps — an empty `_children` makes every node a plain leaf note.
+## Edges are links only: semantic grouping shows as proximity, never as lines.
 
 ## Key pass: notes are the nodes (no folders, no hub, no Inbox). The hierarchy
 ## maps stay empty, which is what makes the shared menu/label/selection code
@@ -1274,9 +1296,10 @@ func _build_area_keys() -> void:
 		_open_target[rel] = rel
 	_mark_map_dirty()
 
-## Layout pass: island positions from the semantic index, similarity edges into
-## the batched static geometry. No animated routes and no level dimming in this
-## projection — the edges are static and every node is equally in focus.
+## Layout pass: island positions from the semantic index, wiki-links into the
+## shared route machinery — the travelling light runs along direct lines, no
+## folder spine and no guide rails. No level dimming in this projection — every
+## node is equally in focus.
 func _layout_area_points() -> void:
 	var neighbours := {}
 	for k in _keys:
@@ -1285,37 +1308,28 @@ func _layout_area_points() -> void:
 	_pos.clear()
 	for k in _keys:
 		_pos[k] = laid.get(k, size * 0.5)
-	_build_area_edges(neighbours)
-	_routes.clear()
-	_rail_pts = PackedVector2Array()
-	_rail_cols = PackedColorArray()
+	# The radial spine's static geometry must not linger behind the projection
+	# switch; the similarity web itself is gone — only the link routes remain.
+	_edge_pts = PackedVector2Array()
+	_build_area_routes()
 	_levels = {}
 	_mark_map_dirty()
 
-## Dedupe the similarity pairs and flatten them into `_edge_pts`, so the whole
-## island web renders as one batched `draw_multiline` like the radial spine.
-func _build_area_edges(neighbours: Dictionary) -> void:
-	_edge_pts = PackedVector2Array()
-	var seen := {}
-	for src in _keys:
-		for e in neighbours.get(String(src), []):
-			var a := String(src)
-			var b := String(e.get("note", ""))
-			if a == "" or b == "" or a == b:
-				continue
-			if a > b:
-				var t := a
-				a = b
-				b = t
-			if not _pos.has(a) or not _pos.has(b):
-				continue
-			var key := a + "|" + b
-			if seen.has(key):
-				continue
-			seen[key] = true
-			_edge_pts.append(_pos[a])
-			_edge_pts.append(_pos[b])
-	_mark_map_dirty()
+## Wiki-links are the area projection's only edges: the same pair dedup, bidir
+## flag and deterministic per-link speed as the radial `_build_routes()`, but
+## sampled as a straight line — the light travels directly from source to
+## target. No similarity web and no guide rails: proximity carries the semantic
+## grouping, the drawn relation is the explicit link alone.
+func _build_area_routes() -> void:
+	_routes.clear()
+	_rail_pts = PackedVector2Array()
+	_rail_cols = PackedColorArray()
+	_build_link_routes(_direct_samples)
+
+## Straight samples between two notes — the area projection's route shape.
+## The folder spine does not exist there, so the light simply crosses the map.
+func _direct_samples(a: String, b: String) -> PackedVector2Array:
+	return _resample(PackedVector2Array([_pos[a], _pos[b]]), ROUTE_SAMPLES)
 
 func _fit_to_view() -> void:
 	if _pos.is_empty():
@@ -1609,7 +1623,7 @@ func pulse_link(source: String, target: String) -> void:
 	if not _pos.has(a) or not _pos.has(b):
 		return
 	_pulse = {
-		"samples": _route_samples(a, b),
+		"samples": _direct_samples(a, b) if _area_active else _route_samples(a, b),
 		"src": Vector2(_pos[a]),
 		"dst": Vector2(_pos[b]),
 		"t": 0.0,

@@ -78,5 +78,5 @@ func _ready() -> void:
 	gv.open("")
 	await get_tree().process_frame
 	await get_tree().process_frame
-	print("[area bench] notes=%d keys=%d edge_pts=%d" % [
-		GameManager.notes.size(), gv._keys.size(), gv._edge_pts.size() / 2])
+	print("[area bench] notes=%d keys=%d routes=%d" % [
+		GameManager.notes.size(), gv._keys.size(), gv._routes.size()])

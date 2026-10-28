@@ -1,6 +1,6 @@
 # NeonNotes — Architecture
 
-_Last updated: 2026-10-20 · Godot 4.7 · renderer: `gl_compatibility`_
+_Last updated: 2026-10-27 · Godot 4.7 · renderer: `gl_compatibility`_
 
 Read this after [`../AGENTS.md`](../AGENTS.md). It is the orientation map, not a
 changelog. Deep dives belong in `docs/architecture/*.md` and are read on demand.
@@ -68,7 +68,7 @@ settings live in `user://settings.cfg`; exports and embedded media live under
 | `scripts/markdown/wiki_links.gd` | Link extraction, resolution, backlinks, graph |
 | `scripts/render/preview_builder.gd` | Markdown → RichTextLabel blocks, charts, FX |
 | `scripts/render/graph_model.gd` | Renderer-agnostic graph levels/edges |
-| `scripts/render/graph_view.gd` | Vault-map canvas: camera/labels/markers/menu shared by both layouts — radial (folder spine) and area (semantic islands via `AreaLayout` + `TfidfBodyStore`) |
+| `scripts/render/graph_view.gd` | Vault-map canvas: camera/labels/markers/menu shared by both layouts — radial (folder spine) and area (semantic islands via `AreaLayout` + `TfidfBodyStore`, link-only direct light) |
 | `scripts/sync/sync_service.gd` | UDP discovery, pairing proof, manifest/stream transfer, LWW state |
 | `scripts/sync/sync_page.gd` | Sync settings/status page |
 | `scripts/export/*.gd` | PNG/GIF/HTML exporters and outbound share |
@@ -187,6 +187,10 @@ area layout keeps the hierarchy maps empty, which makes the shared code
 degrade into "every node is a leaf note" semantics; its islands come from
 `AreaLayout` over top-k `TfidfBodyStore` neighbours injected through
 `area_neighbours_cb` (the view computes nothing about similarity itself).
+Its edges are wiki-links only: `_build_area_routes()` feeds the shared
+`_build_link_routes()` a straight-line sampler (`_direct_samples`), so the
+travelling light crosses directly between the two notes — no folder spine,
+no guide rails; proximity, not lines, carries the semantic grouping.
 `TfidfBodyStore`'s `TfidfIndex` memoises idf/vectors — the caches are cleared
 on every mutation, so a hit is always exact — and drops terms appearing in
 ≥85% of notes (`COMMON_TERM_FRAC`), so function words in any language cannot
@@ -249,6 +253,7 @@ common wrapper stripped, bare note gets `title`/`created`); sync pauses/resumes.
 | `tests/TestGraphCard.tscn` | Graph digest/card, form factors, nav, view restore |
 | `tests/TestGraphDock.tscn` | Graph dock/full view, follow-note, swipes |
 | `tests/TestGraphTreeSync.tscn` | Tree click follows into another scope/page |
+| `scripts/dev/GraphProbe.tscn` | Graph canvas internals: menus, link/unlink modes, labels, camera, area projection (link-only routes, islands, view switching) |
 | `tests/TestGraphTreeDrag.tscn` | Tree drop rebuilds the graph and follows the moved note |
 | `tests/TestSyncDeleteMove.tscn` | Loopback sync protocol, tombstones, moves |
 | `tests/TestPerVaultSync.tscn` | Per-vault identity, unpair/reset |

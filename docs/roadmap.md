@@ -14,16 +14,16 @@ phone ↔ PC over the local network.
 
 ## Next
 
-- **Area View rework (agreed plan; Phase 0 done)** — Phase 1: the area view
-  draws only wiki-link edges, straight between notes, with the radial view's
-  travelling light (drop the similarity web and the guide rails). Phase 2:
-  replace the island grid with a continuous deterministic force-directed
-  embedding over the TF-IDF vectors (similar notes near, topics in regions);
-  edits then shift a neighbourhood, not one island. Phase 3: persisted sidecar
-  cache (`tf` per note + `df` per vault, content-hash invalidation) with a
-  backfill worker, so a vault with no cached vectors is scanned once, never
-  on every boot. Phase 0 (idf/vector memoisation, common-term filter,
-  `vectors()`/`knn_graph()`) landed.
+- **Area View rework (agreed plan; Phases 0–1 done)** — Phase 2: replace the
+  island grid with a continuous deterministic force-directed embedding over
+  the TF-IDF vectors (similar notes near, topics in regions); edits then
+  shift a neighbourhood, not one island. Phase 3: persisted sidecar cache
+  (`tf` per note + `df` per vault, content-hash invalidation) with a backfill
+  worker, so a vault with no cached vectors is scanned once, never on every
+  boot. Landed: Phase 0 (idf/vector memoisation, common-term filter,
+  `vectors()`/`knn_graph()`) and Phase 1 (area edges are wiki-links only —
+  straight direct routes carrying the travelling light, no similarity web,
+  no guide rails).
 - **Desktop Open-with** — add `MimeType=text/markdown;` and
   `Exec=neonnotes %F` once a file argument is handled at boot (copy into the
   Inbox like Android's Open-with); until then the entry launches the app only.

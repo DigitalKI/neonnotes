@@ -645,14 +645,18 @@ func _ready() -> void:
 
 	# 20. Area layout: the same canvas renders the semantic islands. Keys are
 	#     notes, the shared machinery (menu, labels, camera, focus) works over
-	#     the empty hierarchy maps, and switching keeps the focused note.
+	#     the empty hierarchy maps, edges are wiki-links only (direct light
+	#     routes), and switching keeps the focused note.
 	var saved_notes6: Array[String] = GameManager.notes
 	var saved_links6: Dictionary = GameManager.links
 	var saved_titles6: Dictionary = GameManager.titles
 	GameManager.notes = ["hubnote.md", "physics.md", "physics/quantum.md",
 		"cooking.md", "Inbox/capture.md"]
-	GameManager.links = {}
+	# One real wiki-link (bare target, as link_notes writes) so the area
+	# projection's link-only routes have something to carry.
+	GameManager.links = {"physics.md": ["hubnote"]}
 	GameManager.titles = {"physics.md": "Physics"}
+	gv._rebuild_resolve_maps()
 	gv._build_hierarchy()
 	gv._rebuild_keys()
 	gv._layout_points()
@@ -674,8 +678,29 @@ func _ready() -> void:
 		and gv._collapsed.is_empty() and gv._root_home == "")
 	check.call("every area node has a position", gv._pos.has("physics.md")
 		and gv._pos.has("cooking.md") and gv._pos.size() == 4)
-	check.call("area edges are batched and deduped", gv._edge_pts.size() == 2
-		and gv._routes.is_empty() and gv._rail_pts.is_empty())
+	# Edges are links only: the similarity web is gone (proximity carries the
+	# semantic grouping) and each wiki-link becomes one straight route carrying
+	# the same travelling light as the radial spine — but directly, no rails.
+	check.call("area view has no similarity web", gv._edge_pts.is_empty()
+		and gv._rail_pts.is_empty())
+	check.call("area links become direct routes", gv._routes.size() == 1)
+	var r: Dictionary = gv._routes[0]
+	check.call("area route endpoints are the notes",
+		r["src"] == "physics.md" and r["dst"] == "hubnote.md")
+	check.call("area route is one-way", not bool(r["bidir"]))
+	check.call("area route speed is in range",
+		float(r["speed"]) >= GraphView.SPEED_MIN
+		and float(r["speed"]) <= GraphView.SPEED_MAX)
+	var straight := true
+	var pa: Vector2 = Vector2(gv._pos["physics.md"])
+	var seg: Vector2 = Vector2(gv._pos["hubnote.md"]) - pa
+	for s in r["samples"]:
+		# Perpendicular distance to the segment in px (cross / length): the
+		# resampler interpolates in float32, so a straight line is straight to
+		# ~1e-2 px, not to bit-exactness. A spine detour would be off by far.
+		if absf((Vector2(s) - pa).cross(seg)) > 0.1 * seg.length():
+			straight = false
+	check.call("area route samples are a straight line", straight)
 	check.call("area selection survives through the note",
 		gv._selected == "physics.md" and gv._menu.open)
 	check.call("area node label uses the title", gv._label("physics.md") == "Physics")
