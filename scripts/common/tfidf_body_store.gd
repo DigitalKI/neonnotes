@@ -25,8 +25,10 @@ const AreaEmbeddingScript := preload("res://scripts/common/area_embedding.gd")
 
 ## Cache format version; a mismatch (or corrupt JSON) drops the file and falls
 ## back to one full scan, so the cache is always an accelerator, never a
-## requirement.
-const CACHE_VERSION := 1
+## requirement. Bump it whenever the bag semantics change — v2: tags fold into
+## the bag, so a v1 cache would otherwise keep serving pre-tag bags for every
+## mtime-unchanged note.
+const CACHE_VERSION := 2
 const VAULT_ID_FILE := ".neonnotes-id"
 
 ## k for the neighbour graph the embedding consumes; the shell owns the knob.
@@ -286,11 +288,36 @@ static func _positions_to_cache(positions: Dictionary) -> Dictionary:
 
 # ------------------------------------------------------------------ helpers
 
-## Title + body as one bag of words. Title words live in front-matter (absent
-## from `body()`), so fold them in once — high-signal subject words.
+## A tag term folds into the bag this many times: a tag is a word the user
+## curated as a subject marker, so it carries more signal than a single body
+## mention — (1 + ln(3)) ≈ 2.1x the TF-IDF weight — and unlike body words,
+## tags bridge languages (a #japan note is about Japan in any language).
+const TAG_WEIGHT := 3
+
+## Title + tags + body as one bag of words. Title and tag words live in
+## front-matter (absent from `body()`), so they fold in here — titles once,
+## tags `TAG_WEIGHT` times (see above). Any change to this bag changes every
+## note's content hash: bump CACHE_VERSION so stale caches drop wholesale.
 func _bag(text: String) -> String:
 	var title := NoteMetadata.field(text, "title", "")
 	var body := NoteMetadata.body(text)
-	if title == "":
-		return body
-	return title + " " + body
+	var parts: Array[String] = []
+	if title != "":
+		parts.append(title)
+	for tag in _tag_terms(NoteMetadata.field(text, "tags", "")):
+		for i in TAG_WEIGHT:
+			parts.append(tag)
+	parts.append(body)
+	return " ".join(parts)
+
+## A front-matter tags value ("alpha, beta, #gamma") as plain bag terms:
+## comma-separated, leading '#' stripped, lowercased. A tag may itself
+## contain spaces ("machine learning") — the tokeniser splits those into
+## their words, which is exactly right for the bag.
+static func _tag_terms(raw: String) -> Array[String]:
+	var out: Array[String] = []
+	for chunk in raw.split(","):
+		var tag := chunk.strip_edges().trim_prefix("#").strip_edges()
+		if tag != "":
+			out.append(tag.to_lower())
+	return out

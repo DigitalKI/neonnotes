@@ -59,7 +59,7 @@ settings live in `user://settings.cfg`; exports and embedded media live under
 | `scripts/common/vault_tree_rows.gd` | Shared tree rows: folders, folder-as-note merges, note leaves, browse/results shapes |
 | `scripts/common/list_continuation.gd` | Smart Enter for Markdown lists: marker/next-prefix analysis + fence guard (pure) |
 | `scripts/common/graph_digest.gd`, `graph_digest_store.gd` | Graph preview view-models + worker-thread cache |
-| `scripts/common/tfidf_index.gd`, `tfidf_body_store.gd` | Area View similarity: body-word TF-IDF (memoised idf/vectors, common-term filter), worker-threaded scan + embedding with a persisted sidecar cache (warm boots, backfill, position reuse) |
+| `scripts/common/tfidf_index.gd`, `tfidf_body_store.gd` | Area View similarity: note-word TF-IDF — title + boosted tags + body (memoised idf/vectors, common-term filter), worker-threaded scan + embedding with a persisted sidecar cache (warm boots, backfill, position reuse) |
 | `scripts/common/area_layout.gd`, `area_embedding.gd` | Area View positions: the island grid (pre-scan fallback) and the deterministic force-directed embedding (ADR-0016, warm-startable) |
 | `scripts/common/dev_session.gd` | Opt-in dev/MCP isolation policy |
 | `scripts/common/backup_service.gd` | Vault zip backup/restore, manifest, zip-slip, SAF URI copy |
@@ -203,7 +203,9 @@ measures the whole-vault pass. The scan is sidecar-cached under `user://`
 (per-note mtime + content hash, whole-corpus fingerprint): warm boots stat
 the vault and rebuild the index from persisted counts, only new or changed
 notes are read and tokenised, an unchanged corpus reuses its cached embedding
-verbatim and a changed one warm-starts from it.
+verbatim and a changed one warm-starts from it. The signal bag folds a note's
+title, its tags (`TAG_WEIGHT`×, boosted — user-curated subject markers, and
+the one signal that bridges languages in a multilingual vault) and its body.
 `GraphView.open()` rebuilds keys, then `_layout_points()` / `_assign_sectors()`
 lay out radial sectors with an adaptive child-ring radius (`_child_edge()`);
 `label_layout()` resolves outline-style labels with priority, outward anchors,

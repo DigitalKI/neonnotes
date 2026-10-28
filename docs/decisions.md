@@ -104,6 +104,10 @@ revisited.
   keyed per vault (its id file, else the hashed path), mtime + content-hash
   invalidation, fingerprint-gated position reuse; never inside the vault,
   whose notes stay the only source of truth.
+- **Tags fold into the Area View semantic signal** — boosted bag terms (×3):
+  user-curated subject markers, and the one signal that bridges languages in
+  a multilingual vault; a tag in ≥85% of notes still drops to the
+  common-term filter.
 
 ## Superseded
 

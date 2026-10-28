@@ -130,6 +130,28 @@ func _ready() -> void:
 		and int(s4.get("tokenized", -1)) == ncount
 		and store2.area_positions().size() == ncount)
 
+	# Tags fold into the semantic signal (boosted bag terms): two notes with
+	# disjoint vocabularies but a shared tag become each other's nearest
+	# neighbour — the bridging property that matters in a multilingual vault,
+	# where a shared tag reads the same in any language.
+	_write(PROBE_VAULT.path_join("bake.md"),
+		"---\ntitle: Baking\ntags: trip\n---\n\nSourdough bread and yeast.")
+	_write(PROBE_VAULT.path_join("song.md"),
+		"---\ntitle: Chords\ntags: trip\n---\n\nMelody and harmony.")
+	GameManager.scan_paths()
+	ready2[0] = false
+	store2.rescan()
+	frames2 = 0
+	while not ready2[0] and frames2 < 600:
+		await get_tree().process_frame
+		frames2 += 1
+	var top_trip := store2.top_neighbors("bake.md", 1)
+	check.call("a shared tag connects disjoint vocabularies",
+		top_trip.size() == 1 and String(top_trip[0]["note"]) == "song.md")
+	var top_back := store2.top_neighbors("song.md", 1)
+	check.call("the tag bridge is symmetric",
+		top_back.size() == 1 and String(top_back[0]["note"]) == "bake.md")
+
 	store.queue_free()
 	store2.queue_free()
 	await get_tree().process_frame
