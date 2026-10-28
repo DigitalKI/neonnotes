@@ -163,11 +163,18 @@ var _map_ready := false
 ## The active layout: false = radial (folder spine), true = area (semantic
 ## islands). Switched by the shell's view toolbar via `set_area_layout()`.
 var _area_active := false
-## `(rel: String) -> Array[{note, score}]` — top-k semantic neighbours for the
-## area layout, injected by the shell (TfidfBodyStore). An invalid callback
-## leaves every note an isolated island. The view stays renderer/controller-only
-## (ADR-0013 layering): it computes nothing about similarity itself.
+## `(rel: String) -> Array[{note, score}]` — top-k semantic neighbours for
+## the area layout's island-grid fallback (no embedding delivered yet). An
+## invalid callback leaves every note an isolated island. The view stays
+## renderer/controller-only (ADR-0013 layering): it computes nothing about
+## similarity itself.
 var area_neighbours_cb := Callable()
+## `() -> Dictionary` — the whole-vault embedding `{note: Vector2}` in map
+## space, injected by the shell's worker (ADR-0016); the camera fits it, the
+## layout never knows the viewport. When invalid or empty — before the
+## semantic scan delivers, or a standalone/test use — the island grid above
+## takes over.
+var area_positions_cb := Callable()
 
 var _pos := {}
 var _parent := {}
@@ -1296,18 +1303,30 @@ func _build_area_keys() -> void:
 		_open_target[rel] = rel
 	_mark_map_dirty()
 
-## Layout pass: island positions from the semantic index, wiki-links into the
-## shared route machinery — the travelling light runs along direct lines, no
-## folder spine and no guide rails. No level dimming in this projection — every
-## node is equally in focus.
+## Layout pass: positions from the shell's embedding worker when it has
+## delivered, else the deterministic island grid as the placeholder (before
+## the semantic scan, every note is a lone island). Wiki-links go into the
+## shared route machinery either way — the travelling light runs along direct
+## lines, no folder spine and no guide rails. No level dimming in this
+## projection — every node is equally in focus.
 func _layout_area_points() -> void:
-	var neighbours := {}
-	for k in _keys:
-		neighbours[k] = area_neighbours_cb.call(k) if area_neighbours_cb.is_valid() else []
-	var laid := AreaLayoutScript.layout(neighbours, Rect2(Vector2.ZERO, size))
+	var positions := {}
+	if area_positions_cb.is_valid():
+		positions = area_positions_cb.call()
 	_pos.clear()
-	for k in _keys:
-		_pos[k] = laid.get(k, size * 0.5)
+	if positions.is_empty():
+		var neighbours := {}
+		for k in _keys:
+			neighbours[k] = area_neighbours_cb.call(k) \
+				if area_neighbours_cb.is_valid() else []
+		var laid := AreaLayoutScript.layout(neighbours, Rect2(Vector2.ZERO, size))
+		for k in _keys:
+			_pos[k] = laid.get(k, size * 0.5)
+	else:
+		for k in _keys:
+			# A note the embedding has not seen yet (added since the last
+			# embed) parks at the frame centre until the next refresh lands.
+			_pos[k] = positions.get(k, size * 0.5)
 	# The radial spine's static geometry must not linger behind the projection
 	# switch; the similarity web itself is gone — only the link routes remain.
 	_edge_pts = PackedVector2Array()

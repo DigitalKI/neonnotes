@@ -63,6 +63,10 @@ revisited.
   PCK (one executable), `SHA256SUMS`, XDG desktop entry + AppStream metainfo +
   hicolor icons on Linux, embedded ICO/VERSIONINFO on Windows. →
   [`decisions/ADR-0015-desktop-packaging.md`](decisions/ADR-0015-desktop-packaging.md)
+- **ADR-0016 — Area View is a continuous semantic embedding.** Deterministic
+  force-directed layout over the TF-IDF k-NN graph (components anchored on a
+  grid), computed on the worker; edges are wiki-links only. →
+  [`decisions/ADR-0016-area-embedding.md`](decisions/ADR-0016-area-embedding.md)
 
 ## One-line decisions
 

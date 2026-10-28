@@ -59,7 +59,8 @@ settings live in `user://settings.cfg`; exports and embedded media live under
 | `scripts/common/vault_tree_rows.gd` | Shared tree rows: folders, folder-as-note merges, note leaves, browse/results shapes |
 | `scripts/common/list_continuation.gd` | Smart Enter for Markdown lists: marker/next-prefix analysis + fence guard (pure) |
 | `scripts/common/graph_digest.gd`, `graph_digest_store.gd` | Graph preview view-models + worker-thread cache |
-| `scripts/common/tfidf_index.gd`, `tfidf_body_store.gd` | Area View similarity: body-word TF-IDF (memoised idf/vectors, common-term filter), worker-threaded vault scan |
+| `scripts/common/tfidf_index.gd`, `tfidf_body_store.gd` | Area View similarity: body-word TF-IDF (memoised idf/vectors, common-term filter), worker-threaded scan + embedding |
+| `scripts/common/area_layout.gd`, `area_embedding.gd` | Area View positions: the island grid (pre-scan fallback) and the deterministic force-directed embedding (ADR-0016) |
 | `scripts/common/dev_session.gd` | Opt-in dev/MCP isolation policy |
 | `scripts/common/backup_service.gd` | Vault zip backup/restore, manifest, zip-slip, SAF URI copy |
 | `scripts/common/markdown_importer.gd` | Plain `.md` import; media skipped, title/created injected |
@@ -68,7 +69,7 @@ settings live in `user://settings.cfg`; exports and embedded media live under
 | `scripts/markdown/wiki_links.gd` | Link extraction, resolution, backlinks, graph |
 | `scripts/render/preview_builder.gd` | Markdown → RichTextLabel blocks, charts, FX |
 | `scripts/render/graph_model.gd` | Renderer-agnostic graph levels/edges |
-| `scripts/render/graph_view.gd` | Vault-map canvas: camera/labels/markers/menu shared by both layouts — radial (folder spine) and area (semantic islands via `AreaLayout` + `TfidfBodyStore`, link-only direct light) |
+| `scripts/render/graph_view.gd` | Vault-map canvas: camera/labels/markers/menu shared by both layouts — radial (folder spine) and area (embedding positions via `area_positions_cb`, link-only direct light) |
 | `scripts/sync/sync_service.gd` | UDP discovery, pairing proof, manifest/stream transfer, LWW state |
 | `scripts/sync/sync_page.gd` | Sync settings/status page |
 | `scripts/export/*.gd` | PNG/GIF/HTML exporters and outbound share |
@@ -184,9 +185,12 @@ of the same control — the camera pan/zoom, the screen-space MultiMesh markers,
 the collision-aware label pass, the circle menu, link editing and the
 focus-card routing are all shared, so both layouts behave identically. The
 area layout keeps the hierarchy maps empty, which makes the shared code
-degrade into "every node is a leaf note" semantics; its islands come from
-`AreaLayout` over top-k `TfidfBodyStore` neighbours injected through
-`area_neighbours_cb` (the view computes nothing about similarity itself).
+degrade into "every node is a leaf note" semantics; its positions come from
+the `AreaEmbedding` computed on `TfidfBodyStore`'s worker and injected
+through `area_positions_cb` as whole-vault `{note: Vector2}` map-space
+positions (the view computes nothing about similarity itself — ADR-0016),
+with `AreaLayout`'s island grid over `area_neighbours_cb` as the pre-scan
+fallback.
 Its edges are wiki-links only: `_build_area_routes()` feeds the shared
 `_build_link_routes()` a straight-line sampler (`_direct_samples`), so the
 travelling light crosses directly between the two notes — no folder spine,
@@ -232,7 +236,7 @@ common wrapper stripped, bare note gets `title`/`created`); sync pauses/resumes.
 
 | Test | Guards |
 |---|---|
-| `tests/unit_tests.gd` | Pure helpers: tag/text match, list continuation, paths, metadata, inbox, TF-IDF index (caches, common-term filter), area layout, icon fallback |
+| `tests/unit_tests.gd` | Pure helpers: tag/text match, list continuation, paths, metadata, inbox, TF-IDF index (caches, common-term filter), area layout, area embedding, icon fallback |
 | `tests/TestSearchWorker.tscn` | Shared runner: debounce, cancellation/publishing, batched rows |
 | `tests/TestVaultTreeDrag.tscn` | Tree drag/drop, folder merge, link rewrite, ordering |
 | `tests/TestCapture.tscn` | Inbox capture (text/link/image), pinned/badged row |
@@ -253,7 +257,7 @@ common wrapper stripped, bare note gets `title`/`created`); sync pauses/resumes.
 | `tests/TestGraphCard.tscn` | Graph digest/card, form factors, nav, view restore |
 | `tests/TestGraphDock.tscn` | Graph dock/full view, follow-note, swipes |
 | `tests/TestGraphTreeSync.tscn` | Tree click follows into another scope/page |
-| `scripts/dev/GraphProbe.tscn` | Graph canvas internals: menus, link/unlink modes, labels, camera, area projection (link-only routes, islands, view switching) |
+| `scripts/dev/GraphProbe.tscn` | Graph canvas internals: menus, link/unlink modes, labels, camera, area projection (link-only routes, embedding positions + island fallback, view switching) |
 | `tests/TestGraphTreeDrag.tscn` | Tree drop rebuilds the graph and follows the moved note |
 | `tests/TestSyncDeleteMove.tscn` | Loopback sync protocol, tombstones, moves |
 | `tests/TestPerVaultSync.tscn` | Per-vault identity, unpair/reset |

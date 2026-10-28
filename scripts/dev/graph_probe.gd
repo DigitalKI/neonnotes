@@ -741,6 +741,23 @@ func _ready() -> void:
 	gv.set_area_layout(true)
 	check.call("switching again maps the note to its area node",
 		gv._selected == "physics/quantum.md")
+	# ADR-0016: embedding positions from the worker take precedence; the
+	# neighbour-callback islands are the pre-scan fallback.
+	gv.area_positions_cb = func() -> Dictionary:
+		return {
+			"hubnote.md": Vector2(100, 100),
+			"physics.md": Vector2(200, 200),
+			"physics/quantum.md": Vector2(300, 300),
+			"cooking.md": Vector2(400, 400),
+		}
+	gv.refresh_graph()
+	check.call("embedding positions drive the area layout",
+		Vector2(gv._pos["physics.md"]) == Vector2(200, 200))
+	check.call("area routes rebuild over the embedding", gv._routes.size() == 1)
+	gv.area_positions_cb = Callable()
+	gv.refresh_graph()
+	check.call("without embedding the island-grid fallback returns",
+		gv._pos.has("physics.md") and gv._routes.size() == 1)
 	gv.area_neighbours_cb = Callable()
 	gv.set_area_layout(false)
 	GameManager.notes = saved_notes6

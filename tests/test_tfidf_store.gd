@@ -48,6 +48,19 @@ func _ready() -> void:
 	if top.size() > 0:
 		check.call("invalidate re-indexes the changed note", String(top[0]["note"]) == "cooking.md")
 
+	# The save also re-embeds on the worker (ADR-0016): positions arrive async
+	# through positions_ready and cover the vault. Awaited before freeing the
+	# store so no deferred emission lands on a freed object.
+	var embedded := [false]
+	store.positions_ready.connect(func(): embedded[0] = true)
+	var eframes := 0
+	while not embedded[0] and eframes < 600:
+		await get_tree().process_frame
+		eframes += 1
+	check.call("invalidate re-embeds on the worker", embedded[0])
+	check.call("the embedding covers every note",
+		store.area_positions().size() == GameManager.notes.size())
+
 	store.queue_free()
 	await get_tree().process_frame
 

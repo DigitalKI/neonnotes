@@ -13,6 +13,7 @@ const ListContinuationScript := preload("res://scripts/common/list_continuation.
 const VaultSearchScript := preload("res://scripts/common/vault_search.gd")
 const TfidfIndexScript := preload("res://scripts/common/tfidf_index.gd")
 const AreaLayoutScript := preload("res://scripts/common/area_layout.gd")
+const AreaEmbeddingScript := preload("res://scripts/common/area_embedding.gd")
 const GraphColorsScript := preload("res://scripts/common/graph_colors.gd")
 
 var failures := 0
@@ -32,6 +33,7 @@ func _init() -> void:
 	_check_tfidf()
 	_check_tfidf_caches()
 	_check_area_layout()
+	_check_area_embedding()
 	_check_graph_colors()
 	_check_link_command()
 	_check_list_continuation()
@@ -618,6 +620,59 @@ func _check_area_layout() -> void:
 		if not vp.has_point(p):
 			in_bounds = false
 	_check(in_bounds, "every position stays inside the viewport")
+
+## Area View embedding (ADR-0016): deterministic force-directed positions over
+## a k-NN similarity graph — components anchored apart, linked notes closer
+## than unrelated ones, stronger similarity tighter, everything finite and in
+## frame.
+func _check_area_embedding() -> void:
+	var graph := {
+		"A.md": [{"note": "B.md", "score": 0.9}],
+		"B.md": [{"note": "A.md", "score": 0.9}],
+		"C.md": [{"note": "D.md", "score": 0.9}],
+		"D.md": [{"note": "C.md", "score": 0.9}],
+		"E.md": [],
+	}
+	var p := AreaEmbeddingScript.layout(graph)
+	_check(p.size() == 5, "embedding positions every note")
+	_check(p.has("E.md"), "an isolated note still gets a position")
+	_check(p["A.md"].distance_to(p["B.md"]) < p["A.md"].distance_to(p["C.md"]),
+		"linked notes sit closer than unrelated ones")
+	_check(AreaEmbeddingScript.layout(graph)["A.md"] == p["A.md"],
+		"embedding is deterministic")
+	var finite := true
+	var in_frame := true
+	for k in p.keys():
+		var v: Vector2 = p[k]
+		if not (is_finite(v.x) and is_finite(v.y)):
+			finite = false
+		if v.x < 0.0 or v.y < 0.0 or v.x > AreaEmbeddingScript.MAP_SPAN \
+				or v.y > AreaEmbeddingScript.MAP_SPAN:
+			in_frame = false
+	_check(finite, "embedding positions are finite")
+	_check(in_frame, "positions stay inside the map frame")
+
+	# A path chain spreads: the endpoints of a chain sit farther apart than
+	# its adjacent links.
+	var chain := {
+		"1.md": [{"note": "2.md", "score": 0.8}],
+		"2.md": [{"note": "1.md", "score": 0.8}, {"note": "3.md", "score": 0.8}],
+		"3.md": [{"note": "2.md", "score": 0.8}, {"note": "4.md", "score": 0.8}],
+		"4.md": [{"note": "3.md", "score": 0.8}],
+	}
+	var c := AreaEmbeddingScript.layout(chain)
+	_check(c["1.md"].distance_to(c["2.md"]) < c["1.md"].distance_to(c["4.md"]),
+		"a similarity chain spreads monotonically outward")
+
+	# A stronger similarity sits closer to the hub than a weaker one.
+	var star := {
+		"H.md": [{"note": "A.md", "score": 0.95}, {"note": "C.md", "score": 0.05}],
+		"A.md": [{"note": "H.md", "score": 0.95}],
+		"C.md": [{"note": "H.md", "score": 0.05}],
+	}
+	var s := AreaEmbeddingScript.layout(star)
+	_check(s["H.md"].distance_to(s["A.md"]) < s["H.md"].distance_to(s["C.md"]),
+		"a stronger similarity sits closer to the hub")
 
 ## Shared graph colours: a note's colour comes from its top-level folder, so it
 ## survives switching between the radial and area views.

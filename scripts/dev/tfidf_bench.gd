@@ -11,6 +11,7 @@ extends SceneTree
 ## Dev-only and synthetic: no vault, no settings, safe to delete.
 
 const TfidfIndexScript := preload("res://scripts/common/tfidf_index.gd")
+const AreaEmbeddingScript := preload("res://scripts/common/area_embedding.gd")
 
 const NOTES := 400
 const SUBJECTS := 24
@@ -61,6 +62,12 @@ func _init() -> void:
 	idx.vectors()
 	var vectors_warm_ms := Time.get_ticks_msec() - t0
 
+	# The Area View embedding over the same index (ADR-0016): the pass the
+	# store's worker runs after the scan.
+	t0 = Time.get_ticks_msec()
+	var embed := AreaEmbeddingScript.layout(idx.knn_graph(3))
+	var embed_ms := Time.get_ticks_msec() - t0
+
 	# Cache exactness at bench scale: both passes must agree completely.
 	var agree := true
 	var edges := 0
@@ -76,4 +83,5 @@ func _init() -> void:
 	print("[tfidf bench] vectors cold=%dms warm=%dms edges=%d cache_exact=%s glue_notes=%d glue_dropped=%s"
 		% [vectors_cold_ms, vectors_warm_ms, edges, agree, glue_count,
 		not sample.has("gluea")])
+	print("[tfidf bench] embedding=%dms nodes=%d" % [embed_ms, embed.size()])
 	quit(0)

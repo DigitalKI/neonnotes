@@ -90,13 +90,16 @@ func setup() -> void:
 	_tfidf_store = TfidfBodyStore.new()
 	_tfidf_store.name = "TfidfBodyStore"
 	add_child(_tfidf_store)
-	# The Area layout derives its islands from the shell's semantic index: the
-	# view stays renderer-only and asks for neighbours through this callback.
-	graph_view.area_neighbours_cb = func(rel: String) -> Array:
-		return _tfidf_store.top_neighbors(rel, AREA_NEIGHBOUR_K)
-	# The scan finishes on the worker: rebuild the Area layout in place when it
-	# owns the canvas, so the islands appear without another toggle.
-	_tfidf_store.index_ready.connect(_on_tfidf_ready)
+	# The Area layout reads the embedding computed on the store's worker
+	# (ADR-0016): the view stays renderer-only and receives positions through
+	# this callback; before the first scan it falls back to the island grid.
+	_tfidf_store.embed_k = AREA_NEIGHBOUR_K
+	graph_view.area_positions_cb = func() -> Dictionary:
+		return _tfidf_store.area_positions()
+	# The scan/embed finishes on the worker: rebuild the Area layout in place
+	# when it owns the canvas, so the map reflects the fresh positions without
+	# another view toggle.
+	_tfidf_store.positions_ready.connect(_on_tfidf_ready)
 	view_toolbar = GraphViewToolbar.new()
 	view_toolbar.name = "GraphViewToolbar"
 	view_toolbar.position = Vector2(8, 8)
@@ -636,9 +639,9 @@ func _apply_view_type() -> void:
 	view_toolbar.set_active(GameManager.graph_view_type)
 
 
-## The semantic index finished on its worker: rebuild the Area layout in place
-## when it owns the canvas (keeps the camera), so the islands reflect the scan
-## without another view toggle.
+## The embedding finished on its worker: rebuild the Area layout in place
+## when it owns the canvas (keeps the camera), so the map reflects the fresh
+## positions without another view toggle.
 func _on_tfidf_ready() -> void:
 	if GameManager.graph_view_type == 2 and graph_open() and graph_view.is_ready():
 		graph_view.refresh_graph()
