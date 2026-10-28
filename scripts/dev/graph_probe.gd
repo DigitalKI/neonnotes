@@ -255,9 +255,13 @@ func _ready() -> void:
 	gv._go_overview()
 
 	# 11. Node colors are stable per section and folder vs leaf halo predicate.
-	var section_a := gv._section_color("scope/child_204.md")
-	var section_a_again := gv._section_color("scope/child_000.md")
+	# The palette is built from GameManager.notes (last _build_hierarchy), so
+	# the "a" folder notes resolve through it, not the root fallback.
+	var section_a := gv._section_color("a/a1.md")
+	var section_a_again := gv._section_color("a/a2.md")
 	check.call("section color stable", section_a == section_a_again)
+	check.call("folder notes are palette-coloured, root notes accent2",
+		section_a != gv._accent2 and gv._section_color("b.md") == gv._accent2)
 	check.call("folder semantics distinct", not gv._children.get("a", []).is_empty()
 		and gv._children.get("a/a1.md", []).is_empty())
 
@@ -664,6 +668,14 @@ func _ready() -> void:
 	gv._select("physics")
 	check.call("radial layout is active first", not gv._area_active
 		and not gv._children.get("physics", []).is_empty())
+	# Graph colours survive the view switch (ADR-0017): the folder note keeps
+	# its generated "physics" hue, the root note stays on the accent2 fallback.
+	var radial_folder_col := gv._section_color("physics/quantum.md")
+	var radial_root_col := gv._section_color("cooking.md")
+	check.call("radial folder note is palette-coloured",
+		radial_folder_col != gv._accent2)
+	check.call("radial root note falls back to accent2",
+		radial_root_col == gv._accent2)
 	# Semantic neighbours: physics notes cluster together.
 	gv.area_neighbours_cb = func(rel: String) -> Array:
 		if rel.ends_with(".md") and String(rel).begins_with("physics"):
@@ -676,6 +688,10 @@ func _ready() -> void:
 		and not gv._keys.has("Inbox/capture.md"))
 	check.call("area layout has no groups", gv._children.is_empty()
 		and gv._collapsed.is_empty() and gv._root_home == "")
+	check.call("area keeps the radial folder colour",
+		gv._section_color("physics/quantum.md") == radial_folder_col)
+	check.call("area keeps the root fallback colour",
+		gv._section_color("cooking.md") == radial_root_col)
 	check.call("every area node has a position", gv._pos.has("physics.md")
 		and gv._pos.has("cooking.md") and gv._pos.size() == 4)
 	# Edges are links only: the similarity web is gone (proximity carries the

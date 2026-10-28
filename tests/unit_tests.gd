@@ -725,15 +725,62 @@ func _check_area_embedding() -> void:
 		"warm layout is deterministic given its seed")
 
 ## Shared graph colours: a note's colour comes from its top-level folder, so it
-## survives switching between the radial and area views.
+## survives switching between the radial and area views. The palette is
+## generated per vault (ADR-0017): every top-level folder hashes to its own
+## OKHSL hue, and a hash collision is pushed apart by the golden angle.
 func _check_graph_colors() -> void:
 	var a2 := Color(1, 1, 0)
-	_check(GraphColorsScript.section_color("Root.md", a2) == a2,
+	_check(GraphColorsScript.section_color("Root.md", {}, a2) == a2,
 		"a root note uses accent2")
-	_check(GraphColorsScript.section_color("Sec/Note.md", a2) == GraphColorsScript.section_color("Sec/Other.md", a2),
+	_check(GraphColorsScript.section_color("Sec/Note.md", {}, a2) == a2,
+		"an unmapped folder falls back to accent2")
+	var notes := ["Sec/Note.md", "Sec/Other.md", "Alpha/One.md", "Beta/Two.md"]
+	var pal := GraphColorsScript.build_palette(notes)
+	_check(GraphColorsScript.section_color("Sec/Note.md", pal, a2)
+		== GraphColorsScript.section_color("Sec/Other.md", pal, a2),
 		"notes in the same top-level folder share a colour")
-	_check(GraphColorsScript.section_color("Sec/Note.md", a2) != a2,
+	_check(GraphColorsScript.section_color("Sec/Note.md", pal, a2) != a2,
 		"a folder note gets a palette colour")
+	_check(GraphColorsScript.section_color("Sec/Note.md", pal, a2)
+		!= GraphColorsScript.section_color("Alpha/One.md", pal, a2),
+		"different top-level folders get different colours")
+	_check(GraphColorsScript.build_palette(notes) == pal,
+		"the palette is deterministic")
+	_check(GraphColorsScript.build_palette(["Beta/Two.md", "Sec/Note.md",
+		"Alpha/One.md", "Sec/Other.md"]) == pal,
+		"the palette ignores note order")
+	# More colours than the old fixed six: eight folders stay pairwise
+	# distinct (the golden repair keeps every hue ≥ HUE_MIN_GAP apart).
+	var many: Array[String] = []
+	for i in 8:
+		many.append("f%d/n.md" % i)
+	var pal_many := GraphColorsScript.build_palette(many)
+	var seen := {}
+	var distinct := true
+	for i in 8:
+		var col: Color = pal_many["f%d" % i]
+		if seen.has(col):
+			distinct = false
+		seen[col] = true
+	_check(distinct, "eight top-level folders stay colour-distinct")
+	# Collision repair: "alpha" and "lima" hash to nearly the same hue — the
+	# precondition is re-derived so an engine hash change fails loudly here —
+	# and the golden-angle walk must still separate them.
+	_check(GraphColorsScript._hue_gap(GraphColorsScript._hash_hue("alpha"),
+		[GraphColorsScript._hash_hue("lima")]) < GraphColorsScript.HUE_MIN_GAP,
+		"the repair fixture really collides")
+	var pal_fix := GraphColorsScript.build_palette(["alpha/x.md", "lima/y.md"])
+	_check(pal_fix["alpha"] != pal_fix["lima"],
+		"hash-colliding folders get different colours")
+	# Past the hue budget every folder still gets a colour (best effort) and
+	# the walk terminates deterministically instead of looping forever.
+	var big: Array[String] = []
+	for i in 24:
+		big.append("g%02d/n.md" % i)
+	var pal_big := GraphColorsScript.build_palette(big)
+	_check(pal_big.size() == 24, "every folder is mapped past the hue budget")
+	_check(GraphColorsScript.build_palette(big) == pal_big,
+		"an oversubscribed palette stays deterministic")
 
 ## LinkCommand text transforms: canonical target form, append (idempotent) and
 ## strip (alias-aware, escape-safe) — the pure half of Phase 1's link editing.

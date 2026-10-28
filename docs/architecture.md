@@ -61,6 +61,7 @@ settings live in `user://settings.cfg`; exports and embedded media live under
 | `scripts/common/graph_digest.gd`, `graph_digest_store.gd` | Graph preview view-models + worker-thread cache |
 | `scripts/common/tfidf_index.gd`, `tfidf_body_store.gd` | Area View similarity: note-word TF-IDF — title + boosted tags + body (memoised idf/vectors, common-term filter), worker-threaded scan + embedding with a persisted sidecar cache (warm boots, backfill, position reuse); saves re-index synchronously, re-embed debounced + queued behind busy workers, persist throttled (INV-015) |
 | `scripts/common/area_layout.gd`, `area_embedding.gd` | Area View positions: the island grid (pre-scan fallback) and the deterministic force-directed embedding (ADR-0016, warm-startable) |
+| `scripts/common/graph_colors.gd` | Shared folder colours for both graph layouts: per-vault generated OKHSL palette — folder → diffused hash hue, golden-angle collision repair, constant perceived lightness (ADR-0017) |
 | `scripts/common/dev_session.gd` | Opt-in dev/MCP isolation policy |
 | `scripts/common/backup_service.gd` | Vault zip backup/restore, manifest, zip-slip, SAF URI copy |
 | `scripts/common/markdown_importer.gd` | Plain `.md` import; media skipped, title/created injected |
@@ -191,6 +192,10 @@ through `area_positions_cb` as whole-vault `{note: Vector2}` map-space
 positions (the view computes nothing about similarity itself — ADR-0016),
 with `AreaLayout`'s island grid over `area_neighbours_cb` as the pre-scan
 fallback.
+Node colours are shared the same way: both key builders fold the vault's note
+list through `GraphColors.build_palette()` (each top-level folder hashes to
+its own generated OKHSL hue; root notes fall back to the theme's `accent2`),
+so a note keeps its colour across the radial ⇄ area switch (ADR-0017).
 Its edges are wiki-links only: `_build_area_routes()` feeds the shared
 `_build_link_routes()` a straight-line sampler (`_direct_samples`), so the
 travelling light crosses directly between the two notes — no folder spine,

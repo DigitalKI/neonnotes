@@ -69,6 +69,12 @@ revisited.
   synchronously, re-embed debounced + coalesced, and persist the sidecar
   throttled — the save path never joins a worker (INV-015). →
   [`decisions/ADR-0016-area-embedding.md`](decisions/ADR-0016-area-embedding.md)
+- **ADR-0017 — Graph folder colours are generated, not fixed.** Every
+  top-level folder hashes to its own OKHSL hue (murmur3-diffused, golden-angle
+  collision repair, constant perceived lightness) so the palette has no size
+  cap, folders stay visually distinct, and a note keeps its colour across
+  views, themes and synced devices. →
+  [`decisions/ADR-0017-graph-colors.md`](decisions/ADR-0017-graph-colors.md)
 
 ## One-line decisions
 

@@ -119,6 +119,10 @@ var _label_font: Font
 var _accent: Color
 var _accent2: Color
 var _text: Color
+## Top-level folder colours for the current vault (`GraphColors.build_palette`,
+## ADR-0017). Rebuilt with the keys by both layouts, so a note keeps its
+## colour across the radial ⇄ area switch.
+var _folder_colors := {}
 
 var _map_scale := 1.0
 var _map_offset := Vector2.ZERO
@@ -737,6 +741,9 @@ func _build_hierarchy() -> void:
 	for raw in GameManager.notes:
 		if not GameManager.is_inbox_path(raw):
 			notes.append(raw)
+	# The folder palette comes from the same filtered note list the hierarchy
+	# is built from: both layouts build it over the same rule (ADR-0017).
+	_folder_colors = GraphColors.build_palette(notes)
 	for n in notes:
 		var chain: Array[String] = []
 		var f := n.get_base_dir()
@@ -1295,10 +1302,15 @@ func _build_area_keys() -> void:
 	_pos.clear(); _parent.clear(); _children.clear(); _companion.clear()
 	_open_target.clear(); _collapsed.clear(); _cluster_nodes.clear(); _keys.clear()
 	_root_home = ""
+	var notes: Array[String] = []
 	for raw in GameManager.notes:
 		if GameManager.is_inbox_path(raw):
 			continue  # same knowledge-map rule as the radial hierarchy
-		var rel := String(raw)
+		notes.append(String(raw))
+	# Same folder palette rule as the radial hierarchy (ADR-0017): built over
+	# the same filtered note list, so colours survive the view switch.
+	_folder_colors = GraphColors.build_palette(notes)
+	for rel in notes:
 		_keys.append(rel)
 		_open_target[rel] = rel
 	_mark_map_dirty()
@@ -1651,7 +1663,7 @@ func pulse_link(source: String, target: String) -> void:
 	queue_redraw()
 
 func _section_color(k: String) -> Color:
-	return GraphColors.section_color(String(_open_target.get(k, k)), _accent2)
+	return GraphColors.section_color(String(_open_target.get(k, k)), _folder_colors, _accent2)
 
 func _node_color(k: String) -> Color:
 	var hot := k == _center_note or String(_companion.get(k, "")) == _center_note \
