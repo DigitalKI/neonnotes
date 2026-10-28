@@ -30,6 +30,7 @@ func _init() -> void:
 	_check_explicit_relationships()
 	_check_inference()
 	_check_tfidf()
+	_check_tfidf_caches()
 	_check_area_layout()
 	_check_graph_colors()
 	_check_link_command()
@@ -518,6 +519,82 @@ func _check_tfidf() -> void:
 		if String(r["note"]) == "astronomy.md":
 			still_there = true
 	_check(not still_there, "remove_note drops a note from the index")
+
+## TfidfIndex derived-value caches and the common-term filter: cached reads
+## must stay exact through every mutation kind (edit / add / remove), and a
+## term in nearly every note must stop connecting pairs — the fix for a
+## mixed-language vault collapsing into one giant similarity island.
+func _check_tfidf_caches() -> void:
+	var texts := {
+		"physics.md": "quantum thermodynamics relativity",
+		"space.md": "thermodynamics black holes",
+		"cosmos.md": "relativity spacetime curvature",
+		"cooking.md": "pasta garlic sauce",
+	}
+	var idx = TfidfIndexScript.new()
+	idx.build(texts)
+	var snap := {}
+	for p in texts.keys():
+		snap[String(p)] = idx.vector(String(p)).duplicate()
+	var same := true
+	for p in snap.keys():
+		if idx.vector(String(p)) != snap[String(p)]:
+			same = false
+	_check(same, "cached vector reads stay identical")
+
+	idx.index_note("cooking.md", "pasta garlic sauce olive oil")
+	texts["cooking.md"] = "pasta garlic sauce olive oil"
+	idx.index_note("astronomy.md", "quantum entanglement gravity")
+	texts["astronomy.md"] = "quantum entanglement gravity"
+	idx.remove_note("space.md")
+	texts.erase("space.md")
+	var fresh = TfidfIndexScript.new()
+	fresh.build(texts)
+	var exact := true
+	for p in texts.keys():
+		if idx.vector(String(p)) != fresh.vector(String(p)):
+			exact = false
+	_check(exact, "vectors stay exact after edit, add and remove")
+	_check(idx.idf("quantum") == fresh.idf("quantum"),
+		"cached idf stays exact after mutations")
+	_check(idx.vector("space.md").is_empty(), "a removed note has an empty vector")
+	_check(fresh.vector("space.md").is_empty(), "a fresh index agrees on the removed note")
+
+	var g := idx.knn_graph(1)
+	_check(g.size() == idx.size(), "knn_graph covers every note")
+	_check(String(g["physics.md"][0]["note"]) == String(idx.top_neighbors("physics.md", 1)[0]["note"]),
+		"knn_graph matches top_neighbors")
+	var allv := idx.vectors()
+	_check(allv.size() == idx.size() and allv.has("physics.md"),
+		"vectors() snapshots every note")
+
+	# Common-term filter: enough notes for "nearly every note" to mean
+	# something; a 90% term is dropped, an 80% term stays.
+	var common = TfidfIndexScript.new()
+	var docs := {}
+	for i in 10:
+		var body := "word%d" % i
+		if i < 9:
+			body = "glue " + body
+		if i < 8:
+			body = "link " + body
+		docs["n%d.md" % i] = body
+	common.build(docs)
+	_check(not common.vector("n0.md").has("glue"), "a term in 90% of notes is dropped")
+	_check(common.vector("n0.md").has("link"), "a term in 80% of notes is kept")
+	_check(common.cosine("n0.md", "n1.md") > 0.0, "pairs sharing a kept term still score")
+	_check(common.cosine("n0.md", "n8.md") == 0.0,
+		"a pair sharing only the common term scores zero")
+	_check(common.top_neighbors("n8.md", 5).is_empty(),
+		"no neighbour survives on a common term alone")
+
+	# Below the note-count guard the filter is off, so tiny vaults still
+	# connect on any shared word.
+	var small = TfidfIndexScript.new()
+	small.build({"a.md": "glue apple", "b.md": "glue banana",
+		"c.md": "glue cherry", "d.md": "glue date"})
+	_check(small.vector("a.md").has("glue"), "the filter stays off in small vaults")
+	_check(small.cosine("a.md", "b.md") > 0.0, "small vaults still connect on shared words")
 
 ## Area View layout: deterministic island packing of a similarity graph.
 func _check_area_layout() -> void:

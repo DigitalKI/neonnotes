@@ -1,6 +1,6 @@
 # NeonNotes — Roadmap
 
-_Last updated: 2026-10-18_
+_Last updated: 2026-10-27_
 
 Direction and open work only. Finished items are deleted (git is the history).
 Pending decisions state the question and the current recommendation.
@@ -14,6 +14,16 @@ phone ↔ PC over the local network.
 
 ## Next
 
+- **Area View rework (agreed plan; Phase 0 done)** — Phase 1: the area view
+  draws only wiki-link edges, straight between notes, with the radial view's
+  travelling light (drop the similarity web and the guide rails). Phase 2:
+  replace the island grid with a continuous deterministic force-directed
+  embedding over the TF-IDF vectors (similar notes near, topics in regions);
+  edits then shift a neighbourhood, not one island. Phase 3: persisted sidecar
+  cache (`tf` per note + `df` per vault, content-hash invalidation) with a
+  backfill worker, so a vault with no cached vectors is scanned once, never
+  on every boot. Phase 0 (idf/vector memoisation, common-term filter,
+  `vectors()`/`knn_graph()`) landed.
 - **Desktop Open-with** — add `MimeType=text/markdown;` and
   `Exec=neonnotes %F` once a file argument is handled at boot (copy into the
   Inbox like Android's Open-with); until then the entry launches the app only.
@@ -159,8 +169,12 @@ Baselines are device/version dependent; re-measure with the benches.
   CPU); a pure pan translates the cached boxes instead of re-placing (<1 ms).
 - Parser: `MarkdownParser.parse()` ≈7 ms / 2,064 lines; full highlight path
   ≈98 ms (rebuild ≈79 ms).
+- Area View TF-IDF (400 synthetic notes, `scripts/dev/tfidf_bench.gd`): index
+  build ≈60 ms; whole-vault top-3 neighbours ≈250 ms (≈4x faster after
+  common-term candidate pruning); vector snapshot cold ≈32 ms → warm ≈1 ms.
 - Scan: ≈84 ms / 1,000 notes full-file on desktop.
 
 Commands: `NEONNOTES_BOOT_DEBUG=1 godot --path .`,
 `godot --headless --path . --script scripts/dev/bench_scan.gd`,
+`godot --headless --path . --script scripts/dev/tfidf_bench.gd`,
 `NEONNOTES_DEV=1 godot --path . scenes/dev/GraphBench.tscn`.

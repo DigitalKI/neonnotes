@@ -1,6 +1,6 @@
 # NeonNotes — Decisions
 
-_Last updated: 2026-10-20_
+_Last updated: 2026-10-27_
 
 Settled decisions only; pending questions live in [`roadmap.md`](roadmap.md).
 Most decisions are one line. A decision gets an ADR file when the rationale is
@@ -90,6 +90,9 @@ revisited.
   scanning or semantic analysis).
 - **AI is a suggestion layer only** — previewable, reversible, never a silent
   mutation, never required for graph navigation.
+- **Common-term filter, not per-language stopword lists** — TF-IDF vectors drop
+  any term appearing in ≥85% of notes (once the vault has ≥8 notes), so
+  function words in any language stop gluing the Area View into one island.
 
 ## Superseded
 

@@ -59,6 +59,7 @@ settings live in `user://settings.cfg`; exports and embedded media live under
 | `scripts/common/vault_tree_rows.gd` | Shared tree rows: folders, folder-as-note merges, note leaves, browse/results shapes |
 | `scripts/common/list_continuation.gd` | Smart Enter for Markdown lists: marker/next-prefix analysis + fence guard (pure) |
 | `scripts/common/graph_digest.gd`, `graph_digest_store.gd` | Graph preview view-models + worker-thread cache |
+| `scripts/common/tfidf_index.gd`, `tfidf_body_store.gd` | Area View similarity: body-word TF-IDF (memoised idf/vectors, common-term filter), worker-threaded vault scan |
 | `scripts/common/dev_session.gd` | Opt-in dev/MCP isolation policy |
 | `scripts/common/backup_service.gd` | Vault zip backup/restore, manifest, zip-slip, SAF URI copy |
 | `scripts/common/markdown_importer.gd` | Plain `.md` import; media skipped, title/created injected |
@@ -186,6 +187,11 @@ area layout keeps the hierarchy maps empty, which makes the shared code
 degrade into "every node is a leaf note" semantics; its islands come from
 `AreaLayout` over top-k `TfidfBodyStore` neighbours injected through
 `area_neighbours_cb` (the view computes nothing about similarity itself).
+`TfidfBodyStore`'s `TfidfIndex` memoises idf/vectors — the caches are cleared
+on every mutation, so a hit is always exact — and drops terms appearing in
+≥85% of notes (`COMMON_TERM_FRAC`), so function words in any language cannot
+glue the vault into one similarity island; `scripts/dev/tfidf_bench.gd`
+measures the whole-vault pass.
 `GraphView.open()` rebuilds keys, then `_layout_points()` / `_assign_sectors()`
 lay out radial sectors with an adaptive child-ring radius (`_child_edge()`);
 `label_layout()` resolves outline-style labels with priority, outward anchors,
@@ -222,7 +228,7 @@ common wrapper stripped, bare note gets `title`/`created`); sync pauses/resumes.
 
 | Test | Guards |
 |---|---|
-| `tests/unit_tests.gd` | Pure helpers: tag/text match, list continuation, paths, metadata, inbox, icon fallback |
+| `tests/unit_tests.gd` | Pure helpers: tag/text match, list continuation, paths, metadata, inbox, TF-IDF index (caches, common-term filter), area layout, icon fallback |
 | `tests/TestSearchWorker.tscn` | Shared runner: debounce, cancellation/publishing, batched rows |
 | `tests/TestVaultTreeDrag.tscn` | Tree drag/drop, folder merge, link rewrite, ordering |
 | `tests/TestCapture.tscn` | Inbox capture (text/link/image), pinned/badged row |
