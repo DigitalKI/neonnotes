@@ -136,3 +136,16 @@ change must respect live in [`invariants.md`](invariants.md).
   `_exit_tree`. Callback fields on an instance are safe; only statics outlive
   their script. Guard: every headless boot exits 0, and `run_tests.sh` fails a
   test that dies with a signal after printing its marker.
+- **GOT-029 — autoload identifiers do not compile in `--script` (MainLoop)
+  test runs.** `godot --headless --script tests/x.gd` boots a bare SceneTree:
+  autoloads are never instantiated, and the GDScript analyzer refuses the
+  autoload's *name* while compiling anything that references it
+  (`Identifier not found: GameManager`), which then fails every dependent
+  script in the run. A script referenced — directly or through a global
+  `class_name` — by a `--script` test must therefore stay autoload-free; that
+  is why pure helpers take theme colours and vault paths as parameters
+  instead of reading `GameManager` (the old `AreaView`/`GraphColors` design).
+  Autoload-touching checks belong in the scene-based harnesses
+  (`tests/Test*.tscn`), where the project autoloads are live. Guard:
+  `tests/unit_tests.gd` (store-dependent checks live in
+  `tests/test_tfidf_store.gd`).

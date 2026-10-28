@@ -152,6 +152,15 @@ func _ready() -> void:
 	check.call("the tag bridge is symmetric",
 		top_back.size() == 1 and String(top_back[0]["note"]) == "bake.md")
 
+	# The parse half of the tag fold lives here (not in unit_tests.gd): the
+	# store class references the GameManager autoload, which a --script
+	# (MainLoop) run cannot compile, so unit_tests must stay store-free.
+	check.call("tag terms parse from a front-matter value",
+		TfidfBodyStoreScript._tag_terms("alpha, beta, #gamma")
+		== ["alpha", "beta", "gamma"])
+	check.call("empty tags fold in nothing",
+		TfidfBodyStoreScript._tag_terms("   ") == [])
+
 	store.queue_free()
 	store2.queue_free()
 	await get_tree().process_frame

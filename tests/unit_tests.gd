@@ -613,11 +613,10 @@ func _check_tfidf_caches() -> void:
 	_check(bc1.term_counts("missing.md").is_empty(),
 		"term_counts is empty for an unknown note")
 
-	# Tag terms parse from the front-matter value (the store's bag folds them
-	# in with a boosted weight).
-	_check(TfidfBodyStore._tag_terms("alpha, beta, #gamma") == ["alpha", "beta", "gamma"],
-		"tag terms parse from a front-matter value")
-	_check(TfidfBodyStore._tag_terms("   ") == [], "empty tags fold in nothing")
+	# The store's _tag_terms parsing is checked in TestTfidfStore.tscn: that
+	# class references the GameManager autoload, which does not resolve when
+	# a --script (MainLoop) run compiles it, so referencing it from here would
+	# fail the whole file's compile.
 
 ## Area View layout: deterministic island packing of a similarity graph.
 func _check_area_layout() -> void:
