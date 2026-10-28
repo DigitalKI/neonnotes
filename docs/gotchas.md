@@ -136,6 +136,29 @@ change must respect live in [`invariants.md`](invariants.md).
   `_exit_tree`. Callback fields on an instance are safe; only statics outlive
   their script. Guard: every headless boot exits 0, and `run_tests.sh` fails a
   test that dies with a signal after printing its marker.
+- **GOT-027 — joining a worker from a per-keystroke callback freezes mobile,
+  and Android kills it.** The first Area View save path joined its embed
+  worker from the editor's `saved_cb` — which fires on every autosave
+  (0.5 s after typing stops). A whole-vault embed is ~1 s on a desktop and
+  seconds on a phone, so every keystroke pause parked the UI thread inside
+  `wait_to_finish()`; past ~5 s Android raises an ANR and the user reads it
+  as a crash. The same path also `JSON.stringify`-ed the whole-corpus
+  sidecar cache (megabytes on a real vault) per save — repeated on every
+  keystroke pause, that is the memory/flash churn that killed the app
+  outright once. The shape that works: do the cheap part synchronously
+  (re-index one note, ~ms), debounce the heavy part, queue invalidations
+  behind a busy worker for its **deferred completion** to drain, and
+  throttle whole-corpus file dumps. Guard: `scripts/common/tfidf_body_store.gd`,
+  `tests/TestTfidfStore.tscn`, INV-015, ADR-0016.
+- **GOT-028 — a finished `Thread` object still needs `wait_to_finish()`
+  before it is replaced.** Godot 4.7 does not fully realize a `Thread` when
+  its callable returns: replacing the member that holds it frees the object
+  and logs `A Thread object is being destroyed without its completion having
+  been realized`. The completion deferred (`call_deferred` posted by the
+  worker) guarantees the callable has returned, so realizing it afterwards is
+  pure bookkeeping and can never wait on work — do exactly that before
+  assigning a new thread, and join in `_exit_tree` as usual. Guard:
+  `scripts/common/tfidf_body_store.gd` (`_start_reembed`).
 - **GOT-029 — autoload identifiers do not compile in `--script` (MainLoop)
   test runs.** `godot --headless --script tests/x.gd` boots a bare SceneTree:
   autoloads are never instantiated, and the GDScript analyzer refuses the

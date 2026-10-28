@@ -42,7 +42,13 @@ proximity, never as lines.
 2. **Delivery:** `TfidfBodyStore` computes index + embedding on its worker
    thread and hands the whole map to `GraphView` through
    `area_positions_cb` (`{note: Vector2}` in a fixed map frame; the camera
-   fits it). A note save re-indexes synchronously and re-embeds on the worker.
+   fits it). A note save re-indexes the one note synchronously (~ms, so the
+   focus card answers the new text immediately) and re-embeds **debounced on
+   the worker** — one embed per typing burst — queued behind any in-flight
+   worker; the save path never joins a worker (INV-015). Re-embeds persist
+   the sidecar cache at most once per persist interval (the boot scan always
+   persists); a skipped persist loses nothing because the next boot's
+   stat-and-hash backfill re-reads exactly the changed notes.
 3. **Edges:** wiki-links only, straight lines, the radial view's travelling
    light — no folder spine, no guide rails, no similarity web.
 4. **Fallback:** while no embedding exists (before the first scan, or
@@ -65,6 +71,10 @@ proximity, never as lines.
   ever written into the vault; the notes stay the only source of truth.
 - The embedding runs entirely off the main thread (INV-015); at ~400 synthetic
   notes it measures ≈0.7 s on the worker (`scripts/dev/tfidf_bench.gd`).
+  The first on-device release of the per-save variant froze typing and ANR'd
+  Android: joining a ~1 s embed per autosave (and dumping the whole-corpus
+  sidecar JSON per save) is why the save path is debounced, queued and
+  persist-throttled today (GOT-027).
 
 ## Alternatives considered
 

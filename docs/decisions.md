@@ -65,7 +65,9 @@ revisited.
   [`decisions/ADR-0015-desktop-packaging.md`](decisions/ADR-0015-desktop-packaging.md)
 - **ADR-0016 — Area View is a continuous semantic embedding.** Deterministic
   force-directed layout over the TF-IDF k-NN graph (components anchored on a
-  grid), computed on the worker; edges are wiki-links only. →
+  grid), computed on the worker; edges are wiki-links only; saves re-index
+  synchronously, re-embed debounced + coalesced, and persist the sidecar
+  throttled — the save path never joins a worker (INV-015). →
   [`decisions/ADR-0016-area-embedding.md`](decisions/ADR-0016-area-embedding.md)
 
 ## One-line decisions

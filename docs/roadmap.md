@@ -164,6 +164,12 @@ Baselines are device/version dependent; re-measure with the benches.
   neighbours ≈150 ms; vector snapshot cold ≈15 ms → warm ≈1 ms; embedding
   (`AreaEmbedding`, worker pass) ≈0.7 s — skipped entirely when the sidecar
   cache's corpus fingerprint is unchanged (positions reused verbatim).
+  Scale check (2026-10-28, desktop): at 2,000 notes a post-edit re-embed
+  pays ≈22 s (17.5 s of it the cold k-NN pass — `index_note` clears the
+  whole vector cache, and a rebuild is O(N·terms·candidates)); the
+  sidecar JSON is ≈8 MB (≈1.6 MB at 400). Fine off-thread for mid-size
+  vaults, minutes-scale on a phone at 2k+ — the next lever is incremental
+  vectors (or keeping warm re-embeds' vector rebuilds), not more threads.
 - Scan: ≈84 ms / 1,000 notes full-file on desktop.
 
 Commands: `NEONNOTES_BOOT_DEBUG=1 godot --path .`,

@@ -12,10 +12,20 @@ extends Node
 ## or touched notes are read and (when their content moved) tokenised — the
 ## backfill — and when the whole corpus fingerprint is unchanged the cached
 ## embedding is reused verbatim; otherwise the embedding is warm-started from
-## the cached positions so an edit shifts only its own neighbourhood. A note
-## save re-indexes synchronously, re-embeds on the worker and re-persists the
-## cache. Both workers are join-serialized (a new run waits for an in-flight
-## one), so the main thread never mutates state a worker still reads.
+## the cached positions so an edit shifts only its own neighbourhood.
+##
+## The save path never joins a worker (INV-015): a whole-vault embed is ~1 s
+## on a desktop CPU and multi-second on a phone, so joining it per autosave
+## froze typing and tripped Android's ANR. `invalidate()` instead re-indexes
+## the one note synchronously (a single tokenize pass, ~ms) so the focus card
+## stays fresh, debounces the re-embed (one embed per typing burst, not one
+## per save), and — while a worker is in flight — queues the rel for the
+## worker's own deferred completion to drain. The sidecar persist rides the
+## same discipline: the boot scan always persists, but re-embeds persist at
+## most once per `persist_interval_ms`, because stringifying the whole corpus
+## is a multi-megabyte allocation a phone cannot pay per keystroke pause. A
+## skipped persist loses nothing: the next boot's stat-and-hash backfill
+## re-reads exactly the notes that changed.
 
 signal index_ready
 signal positions_ready
@@ -31,8 +41,20 @@ const AreaEmbeddingScript := preload("res://scripts/common/area_embedding.gd")
 const CACHE_VERSION := 2
 const VAULT_ID_FILE := ".neonnotes-id"
 
+## Debounce between the last save invalidation and the re-embed (seconds).
+## Long enough that a typing burst coalesces into one embed, short enough
+## that the map follows an edit without a visible lag.
+const EMBED_DEBOUNCE_S := 1.5
+## Minimum gap between sidecar persists from re-embeds (ms). The boot scan
+## always persists; between re-embeds the dump is throttled to this rate
+## because the JSON is whole-corpus sized (megabytes on a real vault).
+const PERSIST_INTERVAL_MS := 10000
+
 ## k for the neighbour graph the embedding consumes; the shell owns the knob.
 var embed_k := 3
+## Test/bench knobs; the defaults above are the shipping behaviour.
+var embed_debounce_s := EMBED_DEBOUNCE_S
+var persist_interval_ms := PERSIST_INTERVAL_MS
 
 var _index = TfidfIndexScript.new()
 var _positions := {}
@@ -42,15 +64,40 @@ var _generation := 0
 var _mutex := Mutex.new()
 var _thread: Thread
 var _embed_thread: Thread
+## True while a worker whose deferred completion has not run yet is current
+## (generation matches). Main-thread only: set when a worker starts, cleared
+## by the worker's deferred completion or by whoever joins the worker. A
+## superseded worker's deferred skips the flag — a newer worker owns it.
+var _scan_busy := false
+var _embed_busy := false
+## rel -> true; invalidations queued while a worker is busy. Drained on the
+## main thread by the busy worker's deferred completion, which then reschedules
+## the debounced re-embed.
+var _pending := {}
+var _last_persist_ms := 0
+var _exiting := false
+var _debounce: Timer
 ## Provenance of the last scan — {notes, cached, read, tokenized,
 ## reused_positions} — published under the same mutex as the results; tests
 ## and the bench read it. Empty until the first scan completes.
 var last_scan := {}
 
+func _ready() -> void:
+	_debounce = Timer.new()
+	_debounce.name = "EmbedDebounce"
+	_debounce.one_shot = true
+	_debounce.timeout.connect(_on_embed_debounce)
+	add_child(_debounce)
+
 func _exit_tree() -> void:
-	# `rescan()` joins any in-flight scan before starting a new one, and the
-	# embed worker is joined the same way, so these waits are bounded to a
-	# single pass, never the whole vault.
+	# Teardown joins like every store here (GraphDigestStore does the same);
+	# outside teardown the save path never joins (see invalidate). Both joins
+	# are bounded to a single pass each: the debounce + busy-queue design
+	# keeps at most one scan and one embed in flight, and neither starts
+	# while `_exiting` is set.
+	_exiting = true
+	if _debounce != null:
+		_debounce.stop()
 	if _embed_thread != null and _embed_thread.is_started():
 		_embed_thread.wait_to_finish()
 	if _thread != null and _thread.is_started():
@@ -60,7 +107,8 @@ func _exit_tree() -> void:
 ## final (after metadata_ready); a repeat call replaces any in-flight scan.
 ## The worker backfills from the sidecar cache, embeds (warm-started when the
 ## corpus changed, reused verbatim when it did not), delivers both, then
-## re-persists the cache — nothing touches the main thread.
+## re-persists the cache — nothing touches the main thread. Joins whatever is
+## in flight first: this is the boot / vault-switch path, not the typing path.
 func rescan() -> void:
 	_generation += 1
 	_vault = GameManager.vault_abs()
@@ -69,9 +117,18 @@ func rescan() -> void:
 	var names: Array[String] = GameManager.notes.duplicate()
 	var k := embed_k
 	var cache_path := _cache_path_for(vault)
+	# The scan re-reads every note from disk, so queued edits ride along in
+	# the files; nothing else may schedule an embed against the old state.
+	_pending.clear()
+	if _debounce != null:
+		_debounce.stop()
 	_join_embed()
 	if _thread != null and _thread.is_started():
 		_thread.wait_to_finish()
+	# The joined scan's deferred completion is stale now (the generation moved)
+	# and skips itself, so the busy flag simply transfers to the new scan.
+	_last_persist_ms = Time.get_ticks_msec()   # the boot scan always persists
+	_scan_busy = true
 	_thread = Thread.new()
 	_thread.start(_scan_worker.bind(gen, vault, names, k, cache_path))
 
@@ -81,20 +138,41 @@ func cache_path() -> String:
 
 ## The whole-vault Area View embedding ({note: Vector2} in map space, from
 ## `AreaEmbedding`); empty until the scan has delivered. The view falls back
-## to the island-grid layout while it is empty (ADR-0016).
+## to the island-grid layout while it is empty (ADR-0016). The reference is
+## taken under the mutex because a worker swaps it; the object itself is
+## never mutated after publish, so the caller may read it without the lock.
 func area_positions() -> Dictionary:
-	return _positions
+	_mutex.lock()
+	var pos := _positions
+	_mutex.unlock()
+	return pos
 
 ## Top-k TF-IDF neighbours for a note; empty until the scan has indexed it.
 func top_neighbors(rel: String, k: int) -> Array:
-	return _index.top_neighbors(rel, k)
+	_mutex.lock()
+	var idx = _index
+	_mutex.unlock()
+	return idx.top_neighbors(rel, k)
 
-## Re-index one note after its text changed (editor save path), then re-embed
-## on the worker — an edit changes similarity, so the Area View follows — and
-## update the sidecar cache so the next boot sees the edit. Joins any
-## in-flight embed first: the worker must never read an index being mutated.
+## Re-index one note after its text changed (editor save path). The re-index
+## itself is synchronous (~ms) so `top_neighbors` answers the new text right
+## away; the re-embed is debounced. While a worker is in flight the rel is
+## queued instead — the worker's deferred completion drains the queue and
+## reschedules — so the save path never blocks on `wait_to_finish()` and
+## never mutates state a worker still reads (INV-015).
 func invalidate(rel: String) -> void:
-	_join_embed()
+	if _exiting:
+		return
+	if _scan_busy or _embed_busy:
+		_pending[rel] = true
+		return
+	_apply_invalidate(rel)
+	_schedule_embed()
+
+## Read + re-tokenise one note into the index and the cache document.
+## Main thread only, and only when both workers are idle — the callers
+## (`invalidate`, `_drain_pending`) gate that.
+func _apply_invalidate(rel: String) -> void:
 	var abs := _vault.path_join(rel)
 	var text := TextIO.read_text(abs)
 	var bag := _bag(text)
@@ -104,16 +182,35 @@ func invalidate(rel: String) -> void:
 		_cache_doc["notes"] = {}
 	_cache_doc["notes"][key] = {"m": int(FileAccess.get_modified_time(abs)),
 		"h": bag.hash(), "tf": _index.term_counts(key)}
-	_reembed()
+
+## (Re)start the debounce; every invalidation restarts it, so a typing burst
+## coalesces into exactly one embed once the burst settles.
+func _schedule_embed() -> void:
+	if _debounce == null or _exiting:
+		return
+	_debounce.wait_time = maxf(0.05, embed_debounce_s)
+	_debounce.start()
+
+func _on_embed_debounce() -> void:
+	if _exiting or _scan_busy or _embed_busy:
+		return   # a worker is finishing; its completion drains + reschedules
+	_start_reembed()
 
 ## Drop the index, embedding and cache document on vault switch / import /
 ## restore. The sidecar file itself stays (keyed per vault) and is simply
-## reloaded by the next rescan of the same vault.
+## reloaded by the next rescan of the same vault. Joins the in-flight embed
+## (vault-switch path, bounded to one pass) and bumps the generation so the
+## stale completions of either worker cannot resurrect the cleared state.
 func clear() -> void:
+	_generation += 1
 	_join_embed()
 	_index = TfidfIndexScript.new()
 	_positions = {}
 	_cache_doc = {}
+	_pending.clear()
+	if _debounce != null:
+		_debounce.stop()   # a pending timer would embed (and persist) the
+		                   # cleared state against the next vault's cache path
 	_vault = GameManager.vault_abs()
 
 # ------------------------------------------------------------------ workers
@@ -185,27 +282,47 @@ func _scan_worker(gen: int, vault: String, names: Array[String], k: int,
 	call_deferred("_emit_ready", gen)
 
 func _emit_ready(gen: int) -> void:
-	if gen == _generation and is_inside_tree():
+	if _exiting or gen != _generation:
+		return   # a newer rescan owns the state *and* the busy flag; its own
+		        # completion clears it. Clearing here would let an invalidate
+		        # mutate the index while that newer scan still runs.
+	_scan_busy = false
+	if is_inside_tree():
 		index_ready.emit()
 		positions_ready.emit()
+	_drain_pending()
 
-## Re-embed the current index on the worker, warm-started from the current
-## positions, and re-persist the cache. Serialized like the scan: a new run
-## joins any in-flight embed first, so the main thread never mutates the
-## state a running worker still reads.
-func _reembed() -> void:
-	_join_embed()
+## Start the re-embed worker, warm-started from the current positions. Only
+## the debounce timer starts it, so at most one embed runs at a time and the
+## main thread never joins it. `persist` is pre-decided on the main thread
+## (throttled against the last persist); a skipped persist loses nothing —
+## the next boot's stat-and-hash backfill re-reads the changed notes.
+func _start_reembed() -> void:
 	var gen := _generation
 	var k := embed_k
 	var cache_path := _cache_path_for(_vault)
-	var idx = _index      # quiescent: joined above, the next mutation joins us
+	var persist := Time.get_ticks_msec() - _last_persist_ms >= persist_interval_ms
+	if persist:
+		_last_persist_ms = Time.get_ticks_msec()
+	# Realize the previous thread object: the busy gate plus the completion
+	# deferred mean its callable has already returned, so this is bookkeeping
+	# Godot requires before the object is replaced — it never waits on work.
+	if _embed_thread != null and _embed_thread.is_started():
+		_embed_thread.wait_to_finish()
+	_mutex.lock()
+	var idx = _index      # quiescent: the busy gates + drains serialize this
 	var notes = _cache_doc.get("notes", {})
 	var warm = _positions
+	_mutex.unlock()
+	_embed_busy = true
 	_embed_thread = Thread.new()
-	_embed_thread.start(_embed_worker.bind(gen, k, cache_path, idx, notes, warm))
+	_embed_thread.start(_embed_worker.bind(gen, k, cache_path, idx, notes, warm, persist))
 
+## Re-embed the captured index on the worker, warm-started from the captured
+## positions, and persist the cache when the throttle allows. Everything the
+## worker touches was captured at start; nothing is mutated mid-flight.
 func _embed_worker(gen: int, k: int, cache_path: String, idx, notes: Dictionary,
-		warm: Dictionary) -> void:
+		warm: Dictionary, persist: bool) -> void:
 	var embed := AreaEmbeddingScript.layout(idx.knn_graph(k),
 		AreaEmbeddingScript.ITERATIONS, warm)
 	var fingerprint := _fingerprint(notes)
@@ -216,16 +333,39 @@ func _embed_worker(gen: int, k: int, cache_path: String, idx, notes: Dictionary,
 		_positions = embed
 		_cache_doc = doc
 	_mutex.unlock()
-	_save_cache(cache_path, doc)
+	if persist:
+		_save_cache(cache_path, doc)
 	call_deferred("_emit_positions_ready", gen)
 
 func _emit_positions_ready(gen: int) -> void:
-	if gen == _generation and is_inside_tree():
+	if _exiting or gen != _generation:
+		return   # a newer rescan owns the state *and* the busy flag; its own
+		        # completion clears it (see _emit_ready).
+	_embed_busy = false
+	if is_inside_tree():
 		positions_ready.emit()
+	_drain_pending()
 
+## Apply queued invalidations now that every worker is idle, then reschedule
+## the debounced embed. Called only from the workers' deferred completions
+## (main thread), so the queue drains exactly once per completion.
+func _drain_pending() -> void:
+	if _pending.is_empty():
+		return
+	var rels := _pending.keys()
+	_pending.clear()
+	for rel in rels:
+		_apply_invalidate(String(rel))
+	_schedule_embed()
+
+## Join the embed worker. Vault-switch/boot/teardown paths only — the typing
+## path queues instead (see invalidate). The join clears the busy flag
+## because the joined worker's deferred is stale by then (the caller has
+## bumped the generation) and skips itself.
 func _join_embed() -> void:
 	if _embed_thread != null and _embed_thread.is_started():
 		_embed_thread.wait_to_finish()
+	_embed_busy = false
 
 # ---------------------------------------------------------------- cache file
 

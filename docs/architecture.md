@@ -59,7 +59,7 @@ settings live in `user://settings.cfg`; exports and embedded media live under
 | `scripts/common/vault_tree_rows.gd` | Shared tree rows: folders, folder-as-note merges, note leaves, browse/results shapes |
 | `scripts/common/list_continuation.gd` | Smart Enter for Markdown lists: marker/next-prefix analysis + fence guard (pure) |
 | `scripts/common/graph_digest.gd`, `graph_digest_store.gd` | Graph preview view-models + worker-thread cache |
-| `scripts/common/tfidf_index.gd`, `tfidf_body_store.gd` | Area View similarity: note-word TF-IDF — title + boosted tags + body (memoised idf/vectors, common-term filter), worker-threaded scan + embedding with a persisted sidecar cache (warm boots, backfill, position reuse) |
+| `scripts/common/tfidf_index.gd`, `tfidf_body_store.gd` | Area View similarity: note-word TF-IDF — title + boosted tags + body (memoised idf/vectors, common-term filter), worker-threaded scan + embedding with a persisted sidecar cache (warm boots, backfill, position reuse); saves re-index synchronously, re-embed debounced + queued behind busy workers, persist throttled (INV-015) |
 | `scripts/common/area_layout.gd`, `area_embedding.gd` | Area View positions: the island grid (pre-scan fallback) and the deterministic force-directed embedding (ADR-0016, warm-startable) |
 | `scripts/common/dev_session.gd` | Opt-in dev/MCP isolation policy |
 | `scripts/common/backup_service.gd` | Vault zip backup/restore, manifest, zip-slip, SAF URI copy |
@@ -206,6 +206,13 @@ notes are read and tokenised, an unchanged corpus reuses its cached embedding
 verbatim and a changed one warm-starts from it. The signal bag folds a note's
 title, its tags (`TAG_WEIGHT`×, boosted — user-curated subject markers, and
 the one signal that bridges languages in a multilingual vault) and its body.
+The save path never joins a worker (INV-015, GOT-027): `invalidate()`
+re-indexes the saved note synchronously (~ms) and restarts a one-shot debounce
+timer, so a typing burst coalesces into one embed; while a worker is busy the
+rel queues and the worker's deferred completion drains the queue and
+reschedules. Sidecar persists from re-embeds are throttled
+(`PERSIST_INTERVAL_MS`) — the boot scan always persists, and a skipped
+persist costs only a re-read of changed notes on the next boot's backfill.
 `GraphView.open()` rebuilds keys, then `_layout_points()` / `_assign_sectors()`
 lay out radial sectors with an adaptive child-ring radius (`_child_edge()`);
 `label_layout()` resolves outline-style labels with priority, outward anchors,
@@ -261,7 +268,7 @@ common wrapper stripped, bare note gets `title`/`created`); sync pauses/resumes.
 | `tests/ReproTreeTap.tscn` | Mobile tree tap/long-press + drawer/card dismissal |
 | `tests/TestSelectionOverlay.tscn` | Android selection bar, loupe, edge auto-scroll |
 | `tests/TestGraphCard.tscn` | Graph digest/card, form factors, nav, view restore |
-| `tests/TestTfidfStore.tscn` | Worker scan + embedding delivery, invalidate re-embed, sidecar cache (warm boot, backfill, position reuse, corruption self-heal) |
+| `tests/TestTfidfStore.tscn` | Worker scan + embedding delivery, invalidate re-embed, sidecar cache (warm boot, backfill, position reuse, corruption self-heal); save-path regression: burst coalescing, busy-worker queueing, persist throttle |
 | `tests/TestGraphDock.tscn` | Graph dock/full view, follow-note, swipes |
 | `tests/TestGraphTreeSync.tscn` | Tree click follows into another scope/page |
 | `scripts/dev/GraphProbe.tscn` | Graph canvas internals: menus, link/unlink modes, labels, camera, area projection (link-only routes, embedding positions + island fallback, view switching) |

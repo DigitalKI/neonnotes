@@ -83,8 +83,12 @@ story. If a rule changes, change the code/test and this line together.
   `vault_move.gd`, `vault_search.gd`, `vault_tree_rows.gd`, `tests/unit_tests.gd`.
 - **INV-015 — Use `Thread` for heavy work.** Encoding, large buffers, sync
   collection, and preview digests run on workers; the main thread yields frames
-  and never blocks on `wait_to_finish()` synchronously.
-  Guard: `scripts/sync/sync_service.gd`, `scripts/export/gif_writer.gd`, `graph_digest_store.gd`.
+  and never blocks on `wait_to_finish()` synchronously — a hot path that must
+  hand a busy worker fresh state queues for the worker's own deferred
+  completion to drain (`tfidf_body_store.gd`); joins are boot/switch/teardown
+  only.
+  Guard: `scripts/sync/sync_service.gd`, `scripts/export/gif_writer.gd`,
+  `graph_digest_store.gd`, `tfidf_body_store.gd`.
 - **INV-016 — Tabs everywhere; every GDScript file ends with a newline.** New
   `class_name` scripts need one `godot --headless --editor --quit` before smoke
   tests. Guard: `tests/run_tests.sh`.

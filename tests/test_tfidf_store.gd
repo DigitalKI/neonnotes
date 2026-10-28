@@ -26,6 +26,12 @@ func _ready() -> void:
 
 	var store = TfidfBodyStoreScript.new()
 	store.name = "TfidfBodyStore"
+	# The store debounces re-embeds and throttles sidecar persists (INV-015:
+	# the save path never joins a worker). Shrink both knobs so the awaited
+	# transitions stay fast and deterministic here; store2 below keeps the
+	# shipping throttle to check it.
+	store.embed_debounce_s = 0.05
+	store.persist_interval_ms = 0
 	add_child(store)
 	var ready := [false]
 	store.index_ready.connect(func(): ready[0] = true)
@@ -79,6 +85,9 @@ func _ready() -> void:
 	var first_pos: Dictionary = store.area_positions().duplicate(true)
 	var store2 = TfidfBodyStoreScript.new()
 	store2.name = "TfidfBodyStore2"
+	# Fast debounce for the awaited transitions; the persist throttle keeps its
+	# shipping default here so the burst checks below observe it.
+	store2.embed_debounce_s = 0.05
 	add_child(store2)
 	var ready2 := [false]
 	store2.index_ready.connect(func(): ready2[0] = true)
@@ -161,6 +170,60 @@ func _ready() -> void:
 	check.call("empty tags fold in nothing",
 		TfidfBodyStoreScript._tag_terms("   ") == [])
 
+	# --- the save-path regression (INV-015): debounced, coalesced, never joined
+	# A typing burst is three saves in one frame (the autosave debounce fires
+	# per save). They must coalesce into ONE re-embed — the pre-fix code joined
+	# a whole-vault embed per save, which froze typing on phones (GOT-027).
+	# The counter is an array because lambdas capture locals by value.
+	var embeds := [0]
+	store2.positions_ready.connect(func(): embeds[0] += 1)
+	var cache_before := _read_text(cp)
+	store2.invalidate("bake.md")
+	store2.invalidate("song.md")
+	store2.invalidate("bake.md")
+	# Headless frames pump far faster than real time, so wait on the clock,
+	# not on a frame count — the debounce timer needs real engine time to fire.
+	var deadline := Time.get_ticks_msec() + 3000
+	while embeds[0] < 1 and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+	check.call("a typing burst coalesces into one re-embed", embeds[0] == 1)
+	# The burst embed ran within the persist throttle window of the last scan
+	# write, so the multi-megabyte sidecar dump must have been skipped.
+	check.call("a throttled re-embed skips the sidecar persist",
+		_read_text(cp) == cache_before)
+
+	# Past the interval the embed persists again. Even a note whose content
+	# did not change re-indexes (invalidate never stat-compares), so the doc
+	# moves — and the throttle no longer suppresses it.
+	store2.persist_interval_ms = 0
+	store2.invalidate("song.md")
+	deadline = Time.get_ticks_msec() + 3000
+	while embeds[0] < 2 and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+	check.call("a re-embed past the interval persists the cache",
+		_read_text(cp) != cache_before)
+
+	# While a worker is in flight, invalidate queues instead of mutating or
+	# joining, and the worker's deferred completion drains the queue. Real
+	# worker timing is not deterministic in a headless run, so the busy flag
+	# and the completion entry point are driven directly — the same paths the
+	# workers take.
+	_write(PROBE_VAULT.path_join("song.md"), "Melody and harmony without tags")
+	store2._scan_busy = true
+	store2.invalidate("song.md")
+	check.call("a busy worker queues the invalidation",
+		store2._pending.has("song.md"))
+	var stale_top := store2.top_neighbors("song.md", 1)
+	check.call("the queued rel is not indexed yet",
+		stale_top.size() == 1 and String(stale_top[0]["note"]) == "bake.md")
+	store2._scan_busy = false
+	store2._emit_ready(store2._generation)
+	check.call("the worker's completion drains the queue",
+		not store2._pending.has("song.md"))
+	var top_dropped := store2.top_neighbors("song.md", 1)
+	check.call("the drained re-index takes effect",
+		top_dropped.size() == 0 or String(top_dropped[0]["note"]) != "bake.md")
+
 	store.queue_free()
 	store2.queue_free()
 	await get_tree().process_frame
@@ -175,3 +238,12 @@ func _write(path: String, text: String) -> void:
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	f.store_string(text)
 	f.close()
+
+
+func _read_text(path: String) -> String:
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return ""
+	var t := f.get_as_text()
+	f.close()
+	return t
