@@ -130,6 +130,10 @@ var _map_offset := Vector2.ZERO
 # only to a sane maximum so the view cannot be lost in empty space.
 var _min_zoom := 0.05
 var _max_zoom := 4.0
+## Panning is bounded too: the viewport centre may never drift further than
+## this many pixels past the node bounds, so the graph can be dragged to the
+## edge of the screen but never wholly out of sight. See `_clamp_camera()`.
+const PAN_MARGIN_PX := 64.0
 var _touches := {}          # touch index -> position, for pinch
 var _pinch_last := 0.0
 var _dragging := false
@@ -554,7 +558,8 @@ func _restore_state(state: Dictionary) -> void:
 		_layout_points()
 		_build_routes()
 	_map_scale = float(state.get("scale", _map_scale))
-	_map_offset = state.get("offset", _map_offset)
+	_map_offset = _clamped_offset(state.get("offset", _map_offset) as Vector2,
+		_map_scale)
 	_restore_selection(state, true)
 
 ## Restore a persisted view exactly: the saved zoom/offset are re-applied
@@ -565,7 +570,9 @@ func _restore_view_state(state: Dictionary) -> void:
 	var saved_offset: Vector2 = state.get("offset", _map_offset)
 	_fit_to_view()
 	_map_scale = clampf(saved_scale, _min_zoom, _max_zoom)
-	_map_offset = saved_offset
+	# A state saved before the clamp (or after notes were deleted) may point
+	# away from the remaining nodes; bring it back onto the map.
+	_map_offset = _clamped_offset(saved_offset, _map_scale)
 	_restore_selection(state, false)
 
 ## Reapply a saved selection. `fly` glides the camera to the node (session
@@ -661,7 +668,7 @@ func refresh_graph() -> void:
 	# Keep the camera exactly where it was — no fit — so the update is invisible
 	# apart from the removed node.
 	_map_scale = clampf(keep_scale, _min_zoom, _max_zoom)
-	_map_offset = keep_offset
+	_map_offset = _clamped_offset(keep_offset, _map_scale)  # clamp guards a map that shrank
 	if had_selection and (keep_selected == "" or _keys.has(keep_selected)):
 		_reselect(keep_selected, false)
 	else:
@@ -1395,6 +1402,37 @@ func _fit_to_view() -> void:
 	# starts closer.
 	_min_zoom = fit_scale
 	_max_zoom = maxf(_map_scale * 8.0, 3.0)
+
+## Node bounds in map space — the frame the camera may never wander away
+## from. Both layouts feed `_pos` (radial skeleton, area embedding), so one
+## rect bounds whichever graph is active. Empty map → a (-1, -1) sentinel size.
+func _map_bounds() -> Rect2:
+	var lo := Vector2(INF, INF)
+	var hi := Vector2(-INF, -INF)
+	for k in _pos:
+		lo = lo.min(_pos[k])
+		hi = hi.max(_pos[k])
+	if hi.x < lo.x:
+		return Rect2(Vector2.ZERO, Vector2(-1, -1))
+	return Rect2(lo, hi - lo)
+
+## Nearest camera offset to `off` (at zoom `scale`) that keeps the viewport
+## centre within the node bounds plus PAN_MARGIN_PX: a pan can drag the map's
+## edge to about mid-screen, but content always stays reachable. Clamping the
+## centre works at every zoom — when the whole map fits the view, the slack
+## merely limits travel to roughly half a view; zoom-out is bounded separately
+## by `_min_zoom` (fit-all). Empty maps are not clamped.
+func _clamped_offset(off: Vector2, zoom: float) -> Vector2:
+	var b := _map_bounds()
+	if b.size.x < 0.0:
+		return off
+	var m := Vector2(PAN_MARGIN_PX, PAN_MARGIN_PX)
+	var centre := view_rect().get_center()
+	return off.clamp(centre - m - b.end * zoom, centre + m - b.position * zoom)
+
+## Re-clamp the live camera after an input-driven move (pan, zoom, restore).
+func _clamp_camera() -> void:
+	_map_offset = _clamped_offset(_map_offset, _map_scale)
 
 # ---------------------------------------------------------------- frame
 
@@ -2189,6 +2227,7 @@ func _gui_input(event: InputEvent) -> void:
 	elif event is InputEventPanGesture:
 		# Trackpad two-finger pan.
 		_map_offset -= event.delta * 12.0
+		_clamp_camera()
 		queue_redraw()
 		state_changed.emit()
 	elif event is InputEventScreenTouch:
@@ -2248,6 +2287,7 @@ func _gui_input(event: InputEvent) -> void:
 			# One finger drags the map. Use the tracked position rather than
 			# event.relative, which is not reliably populated on every platform.
 			_map_offset += event.position - prev
+			_clamp_camera()
 			if event.position.distance_to(_touch_press) > TAP_SLOP:
 				_press_moved = true
 			queue_redraw()
@@ -2259,6 +2299,7 @@ func _gui_input(event: InputEvent) -> void:
 				_press_moved = true
 			_map_offset += event.position - _drag_last
 			_drag_last = event.position
+			_clamp_camera()
 			queue_redraw()
 			state_changed.emit()
 		else:
@@ -2283,6 +2324,9 @@ func _zoom_at(anchor: Vector2, factor: float) -> void:
 	var before := _to_map(anchor)
 	_map_scale = clampf(_map_scale * factor, _min_zoom, _max_zoom)
 	_map_offset = anchor - before * _map_scale
+	# Anchoring keeps the point under the pointer; the clamp additionally keeps
+	# the map reachable when zooming in empty space or around at the fringe.
+	_clamp_camera()
 	queue_redraw()
 	state_changed.emit()
 
@@ -2676,12 +2720,16 @@ func _tween_to(key: String) -> void:
 	else:
 		var extent := Vector2(reach, reach) * 2.0 + Vector2(pad, pad) * 2.0
 		target = clampf(minf(avail.x / extent.x, avail.y / extent.y), _min_zoom, _max_zoom)
-	var end_off := view.get_center() - key_pos * target
+	# The glide's endpoints are clamped like any other camera move — a tween can
+	# only land where a drag could, and a lerp between two in-bounds offsets
+	# stays in bounds.
+	var end_off := _clamped_offset(view.get_center() - key_pos * target, target)
 	# Stage 1 glides the picked node to the centre at the incoming zoom;
 	# stage 2 zooms so the immediate neighbourhood fits. Feels like pointing
 	# at the node first, then opening up the space around it.
 	var start_off := _map_offset
-	var center_off: Vector2 = view.get_center() - key_pos * start_scale
+	var center_off: Vector2 = _clamped_offset(
+		view.get_center() - key_pos * start_scale, start_scale)
 	if _cam_tween and _cam_tween.is_valid():
 		_cam_tween.kill()
 	_cam_tween = create_tween()

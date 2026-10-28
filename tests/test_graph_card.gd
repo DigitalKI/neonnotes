@@ -551,8 +551,12 @@ func _run_graph_state_checks(check: Callable) -> void:
 	check.call("refresh keeps the subview scope", gv._scope == "sec")
 	check.call("refresh drops the removed node",
 		not gv._keys.has("sec/two.md") and not gv._page_children.has("sec/two.md"))
+	# Camera contract: refresh/restore never *move* the camera on their own —
+	# the only permitted adjustment is the pan clamp pulling a state that
+	# points away from the (possibly shrunken) node bounds back onto the map.
 	check.call("refresh keeps the camera position",
-		absf(gv._map_scale - 1.7) < 0.0001 and gv._map_offset == Vector2(123.0, -45.0))
+		absf(gv._map_scale - 1.7) < 0.0001
+		and gv._map_offset == gv._clamped_offset(Vector2(123.0, -45.0), 1.7))
 
 	# Remove the whole entered folder: fall back to the overview, not a reset.
 	GameManager.notes = ["_homepage.md", "other.md"]
@@ -560,7 +564,8 @@ func _run_graph_state_checks(check: Callable) -> void:
 	check.call("a deleted subview falls back to the overview",
 		gv._scope == "" and not gv._scope_active)
 	check.call("fallback keeps the camera position",
-		absf(gv._map_scale - 1.7) < 0.0001 and gv._map_offset == Vector2(123.0, -45.0))
+		absf(gv._map_scale - 1.7) < 0.0001
+		and gv._map_offset == gv._clamped_offset(Vector2(123.0, -45.0), 1.7))
 	gv.queue_free()
 
 	# Persisted state round-trip: capture, then reopen on it.
@@ -590,7 +595,8 @@ func _run_graph_state_checks(check: Callable) -> void:
 	await get_tree().process_frame
 	check.call("restore reopens inside the subview", dst._scope == "sec")
 	check.call("restore keeps the zoom", absf(dst._map_scale - 2.25) < 0.0001)
-	check.call("restore keeps the position", dst._map_offset == Vector2(-80.0, 33.0))
+	check.call("restore keeps the position",
+		dst._map_offset == dst._clamped_offset(Vector2(-80.0, 33.0), 2.25))
 	check.call("restore reapplies the selection",
 		dst._selected == "sec/one.md" and dst._menu.open)
 	src.queue_free()

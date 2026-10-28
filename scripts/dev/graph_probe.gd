@@ -13,6 +13,56 @@ func _focus_scale(gv: GraphView, key: String) -> void:
 	gv._tween_to(key)
 	await get_tree().create_timer(0.9).timeout
 
+## Pan-clamp probe, shared by both layouts: drives the real drag path far past
+## the node bounds toward each screen edge and asserts the camera stops at the
+## bounds (+ PAN_MARGIN_PX) — further identical drags move `_map_offset` no
+## more. Kills a camera tween first so it cannot fight the synthetic input.
+func _pan_clamp_checks(tag: String, gv: GraphView, check: Callable) -> void:
+	if gv._cam_tween and gv._cam_tween.is_valid():
+		gv._cam_tween.kill()
+	gv._close_menu()
+	var press := InputEventScreenTouch.new()
+	press.index = 0
+	press.pressed = true
+	var drag := InputEventScreenDrag.new()
+	drag.index = 0
+	var release := InputEventScreenTouch.new()
+	release.index = 0
+	release.pressed = false
+	for dirn: Vector2 in [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]:
+		gv._fit_to_view()
+		gv._zoom_at(gv.size / 2.0, 2.0)   # zoomed in, so there is map to pan across
+		var at: Vector2 = gv.size * 0.5
+		press.position = at
+		gv._gui_input(press)
+		for i in 160:                     # 3200 px of travel — past any bound
+			at += dirn * 20.0
+			drag.position = at
+			gv._gui_input(drag)
+		release.position = at
+		gv._gui_input(release)
+		var b: Rect2 = gv._map_bounds()
+		var m := Vector2(GraphView.PAN_MARGIN_PX, GraphView.PAN_MARGIN_PX)
+		var c: Vector2 = gv.view_rect().get_center()
+		var off: Vector2 = gv._map_offset
+		var tol := 0.01
+		var inside := off.x >= c.x - m.x - b.end.x * gv._map_scale - tol \
+			and off.x <= c.x + m.x - b.position.x * gv._map_scale + tol \
+			and off.y >= c.y - m.y - b.end.y * gv._map_scale - tol \
+			and off.y <= c.y + m.y - b.position.y * gv._map_scale + tol
+		check.call(tag + " pan " + str(dirn) + " keeps the nodes on screen", inside)
+		var settled: Vector2 = gv._map_offset
+		press.position = at
+		gv._gui_input(press)
+		for i in 20:
+			at += dirn * 20.0
+			drag.position = at
+			gv._gui_input(drag)
+		release.position = at
+		gv._gui_input(release)
+		check.call(tag + " pan " + str(dirn) + " stops at the bound",
+			gv._map_offset == settled)
+
 func _ready() -> void:
 	var notes: Array[String] = [
 		"a.md", "b.md", "a/a1.md", "a/a2.md", "a/sub.md", "a/sub/s1.md",
@@ -70,6 +120,11 @@ func _ready() -> void:
 	var center: Vector2 = gv._to_screen(gv._pos[key])
 	var off: float = (center - gv.size / 2.0).length()
 	check.call("focus camera moved to include neighborhood", off < gv.size.length() * 0.5)
+
+	# 4b. Pan clamp (radial): a hard drag toward each edge stops at the node
+	#     bounds + PAN_MARGIN_PX — the map can reach the screen edge but the
+	#     nodes can never be scrolled wholly out of sight.
+	_pan_clamp_checks("radial", gv, check)
 
 	# 5. collapsed folder gets an Expand action (synthesise a big folder; do NOT
 	# call _build_hierarchy here — it would rebuild from GameManager and wipe it).
@@ -757,6 +812,10 @@ func _ready() -> void:
 	gv.set_area_layout(true)
 	check.call("switching again maps the note to its area node",
 		gv._selected == "physics/quantum.md")
+	# Same clamp on the area layout: one canvas, one camera, one bound. (Run
+	# after the switch-back checks — the helper closes the menu, which those
+	# rely on to carry the focused note across the layout switch.)
+	_pan_clamp_checks("area", gv, check)
 	# 20b. The dock flow — the shell opens the map on the current note
 	# (`open(GameManager.current_rel)`), which sets `_center_note`. Radial
 	# spotlights the focused neighbourhood and dims the rest; the area

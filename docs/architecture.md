@@ -70,7 +70,7 @@ settings live in `user://settings.cfg`; exports and embedded media live under
 | `scripts/markdown/wiki_links.gd` | Link extraction, resolution, backlinks, graph |
 | `scripts/render/preview_builder.gd` | Markdown → RichTextLabel blocks, charts, FX |
 | `scripts/render/graph_model.gd` | Renderer-agnostic graph levels/edges |
-| `scripts/render/graph_view.gd` | Vault-map canvas: camera/labels/markers/menu shared by both layouts — radial (folder spine) and area (embedding positions via `area_positions_cb`, link-only direct light) |
+| `scripts/render/graph_view.gd` | Vault-map canvas: camera/labels/markers/menu shared by both layouts — radial (folder spine) and area (embedding positions via `area_positions_cb`, link-only direct light; pan is clamped to the node bounds (`PAN_MARGIN_PX`, `_clamp_camera()`)) |
 | `scripts/sync/sync_service.gd` | UDP discovery, pairing proof, manifest/stream transfer, LWW state |
 | `scripts/sync/sync_page.gd` | Sync settings/status page |
 | `scripts/export/*.gd` | PNG/GIF/HTML exporters and outbound share |
