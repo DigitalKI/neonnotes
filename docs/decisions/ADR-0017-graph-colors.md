@@ -76,3 +76,7 @@ Root notes (no top-level folder) keep the theme's `accent2` fallback.
 - `scripts/dev/graph_probe.gd` §11 (radial folder vs root fallback) and §20
   (a note keeps its exact colour across the radial ⇄ area switch) — the
   user-visible contract, asserted headless on desktop.
+- `scripts/dev/graph_probe.gd` §20b (the dock flow): radial focus keeps the
+  linked neighbourhood lit and dims the rest, but the area projection keeps
+  the map lit under the same focus (no level dimming — `_node_color`), and an
+  unfocused overview shows section colours, not all-accent.

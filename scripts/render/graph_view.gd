@@ -1666,12 +1666,20 @@ func _section_color(k: String) -> Color:
 	return GraphColors.section_color(String(_open_target.get(k, k)), _folder_colors, _accent2)
 
 func _node_color(k: String) -> Color:
-	var hot := k == _center_note or String(_companion.get(k, "")) == _center_note \
-		or k == _selected \
-		or k == _link_source \
-		or (_center_note != "" and String(_open_target.get(k, "")) == _center_note)
+	# Hot: the focused note's own node (or its folder companion), plus the
+	# selection and the link-mode source. The companion/open-target checks are
+	# guarded by a non-empty centre: against "" they matched every plain note
+	# and drowned an unfocused overview in accent.
+	var hot := k == _center_note or k == _selected or k == _link_source \
+		or (_center_note != "" and (String(_companion.get(k, "")) == _center_note \
+			or String(_open_target.get(k, "")) == _center_note))
 	var col := _accent if hot else _section_color(k)
-	var in_focus := _center_note == "" or _levels.has(String(_open_target.get(k, "")))
+	# Radial focus dims the nodes outside the focused neighbourhood. The area
+	# projection has no levels and its contract is "every node is equally in
+	# focus" (see `_layout_area_points`): dimming there washed the colours out
+	# of the whole map whenever the dock opened it on the current note.
+	var in_focus := _center_note == "" or _area_active \
+		or _levels.has(String(_open_target.get(k, "")))
 	if not hot and not in_focus:
 		col = Color(col.r, col.g, col.b, 0.35)
 	return col
@@ -1909,9 +1917,14 @@ func _label_modes_for(want: Vector2) -> Array:
 func _label_is_hot(k: String) -> bool:
 	if k == _center_note:
 		return true
+	# Guarded like `_node_color`'s hot check: against an empty centre the
+	# companion lookup matched every plain note and made the whole unfocused
+	# overview label set "hot" priority.
+	if _center_note == "":
+		return false
 	if String(_companion.get(k, "")) == _center_note:
 		return true
-	return _center_note != "" and String(_open_target.get(k, "")) == _center_note
+	return String(_open_target.get(k, "")) == _center_note
 
 ## Marker radius used as a label obstacle (collapsed rings are the widest).
 func _node_label_radius(k: String) -> float:

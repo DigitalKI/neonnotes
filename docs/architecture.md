@@ -195,7 +195,10 @@ fallback.
 Node colours are shared the same way: both key builders fold the vault's note
 list through `GraphColors.build_palette()` (each top-level folder hashes to
 its own generated OKHSL hue; root notes fall back to the theme's `accent2`),
-so a note keeps its colour across the radial ⇄ area switch (ADR-0017).
+so a note keeps its colour across the radial ⇄ area switch (ADR-0017). Focus
+dimming is radial-only — the area projection keeps every node lit (its
+contract: every node is equally in focus), so a map opened on the current
+note (the dock flow) never washes the colours out.
 Its edges are wiki-links only: `_build_area_routes()` feeds the shared
 `_build_link_routes()` a straight-line sampler (`_direct_samples`), so the
 travelling light crosses directly between the two notes — no folder spine,

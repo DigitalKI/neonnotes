@@ -757,6 +757,35 @@ func _ready() -> void:
 	gv.set_area_layout(true)
 	check.call("switching again maps the note to its area node",
 		gv._selected == "physics/quantum.md")
+	# 20b. The dock flow — the shell opens the map on the current note
+	# (`open(GameManager.current_rel)`), which sets `_center_note`. Radial
+	# spotlights the focused neighbourhood and dims the rest; the area
+	# projection must NOT dim (its contract: every node is equally in focus)
+	# or the colours wash out of the whole map. An unfocused overview shows
+	# section colours, not all-accent. State is set directly (probe style):
+	# `open()` would defer `_finish_open_layout` and stall the flow below.
+	gv.set_area_layout(false)
+	gv._center_note = "physics.md"
+	gv._build_levels()
+	check.call("radial focus keeps its note hot",
+		gv._node_color("physics") == gv._accent)
+	check.call("radial keeps the linked neighbour lit",
+		gv._node_color("hubnote.md") == gv._accent2)
+	check.call("radial dims the unrelated note",
+		gv._node_color("cooking.md")
+		== Color(gv._accent2.r, gv._accent2.g, gv._accent2.b, 0.35))
+	gv.set_area_layout(true)
+	gv._selected = ""  # the switch re-selects the kept note; sample pure focus
+	check.call("area keeps the focused note hot",
+		gv._node_color("physics.md") == gv._accent)
+	check.call("area keeps the map lit (no level dimming)",
+		gv._node_color("cooking.md") == gv._accent2)
+	check.call("area folder notes stay palette-coloured under focus",
+		gv._node_color("physics/quantum.md") == radial_folder_col)
+	gv._center_note = ""
+	check.call("an unfocused overview shows section colours, not all-accent",
+		gv._node_color("cooking.md") == gv._accent2
+		and gv._node_color("physics/quantum.md") == radial_folder_col)
 	# ADR-0016: embedding positions from the worker take precedence; the
 	# neighbour-callback islands are the pre-scan fallback.
 	gv.area_positions_cb = func() -> Dictionary:
