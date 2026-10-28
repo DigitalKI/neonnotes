@@ -94,6 +94,10 @@ run_godot_test "GRAPH TREE DRAG RESULT: OK" --headless --path . tests/TestGraphT
 # Graph probe: tap/focus/menu, root hub, routes, adaptive layout spacing and the
 # collision-aware label pass (no overlapping boxes, hovered drawn last).
 run_godot_test "PROBE RESULT: OK" --headless --path . scripts/dev/GraphProbe.tscn
+# Graph visual search: the map's search bar (same keywords + #tags grammar as
+# the sidebar) dims and de-clicks unmatched nodes, gates the travelling light
+# to matched origins, and survives tree/graph refreshes until cleared.
+run_godot_test "GRAPH SEARCH RESULT: OK" --headless --path . tests/TestGraphSearch.tscn
 # Sync delete/move propagation over loopback (real frame protocol + tombstones).
 run_godot_test "SYNC DELETE/MOVE RESULT: OK" --headless --path . tests/TestSyncDeleteMove.tscn
 # Sync identity is per vault (in-folder id + device-local phrase); switching

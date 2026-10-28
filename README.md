@@ -56,7 +56,10 @@ itself still propagates to paired devices as a tombstone.
 ### 🔗 Wiki-links, backlinks, and the graph
 Write `[[Some Note]]` or `[[Some Note|a label]]` to link notes together.
 **🔗 Links** shows backlinks, and **⊛ Graph** renders a radial vault map with
-folder-spine hierarchy and animated, directional link light. Link resolution on
+folder-spine hierarchy and animated, directional link light. The map carries a
+visual search bar (the sidebar's keywords + `#tags` grammar): matching notes
+stay lit and keep their light, everything else dims, goes quiet and stops
+accepting taps. Link resolution on
 the big generated test vault was optimized ~1,400× so the graph opens promptly
 even past a thousand notes.
 

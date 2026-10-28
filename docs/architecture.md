@@ -83,7 +83,7 @@ settings live in `user://settings.cfg`; exports and embedded media live under
 | `scripts/components/edge_swipe_component.gd` | Mobile edge-drag claims (drawer/map), tap/scroll preservation |
 | `scripts/components/backup_page.gd` | Backup page: worker zip, in-app desktop save, Android SAF save |
 | `scripts/components/import_page.gd` | Import/Restore page: auto-detect, replace vs new vault |
-| `scripts/components/graph_*.gd` | Graph nav bar, focus card, radial menu, links page |
+| `scripts/components/graph_*.gd` | Graph nav bar, focus card, radial menu, search bar, links page |
 | `scripts/components/graph_shell_component.gd` | Graph dock/full-view state, map slide + edge swipe, focus-card/digest/links routing, nav mirror |
 | `scripts/components/page_router.gd` | Full-screen page routing: `page_mode`, open/close, note-column/graph hide-restore |
 | `scripts/components/link_resolve_controller.gd` | Wiki-link resolve flow: preview/wiki-link clicks, the resolve page (suggest + create) |
@@ -192,6 +192,26 @@ through `area_positions_cb` as whole-vault `{note: Vector2}` map-space
 positions (the view computes nothing about similarity itself — ADR-0016),
 with `AreaLayout`'s island grid over `area_neighbours_cb` as the pre-scan
 fallback.
+
+The *visual search* rides this canvas in both layouts: the bar
+(`GraphSearchBar`, wired by `GraphShellComponent.setup()`) publishes to
+`GraphView.set_search_query()`, which parses with `VaultSearch` (the sidebar's
+query model, INV-066) and reads bodies on `VaultSearchRunner`'s worker
+(INV-015). Results live as note rels (`_search_notes`) and are re-derived into
+node keys (`_search_keys` — a folder matches through its companion or any
+descendant, so a result set stays drillable over the folder spine) after every
+key pass and when the worker publishes. The set then drives node dimming
+(alpha 0.22), label dimming, pointer gating (`_key_at`/`_hub_at` skip
+unmatched), per-direction route gating (`_route_emits`: pass 0 needs a matched
+source, pass 1 a matched target) and dormant-rail recolour
+(`_rail_alpha`/`_refresh_rail_cols`). Guard: `tests/TestGraphSearch.tscn`.
+
+Typing `#` summons the sidebar's own `TagSuggest` overlay (INLINE mode,
+INV-059): the bar defers the `add_child` (it readies while Main is still
+wiring children) and parents the overlay to the scene root because the map
+control clips contents; `tag_chosen` re-publishes the query since the
+programmatic rewrite fires no `text_changed`, and hiding the bar closes the
+overlay.
 Node colours are shared the same way: both key builders fold the vault's note
 list through `GraphColors.build_palette()` (each top-level folder hashes to
 its own generated OKHSL hue; root notes fall back to the theme's `accent2`),
@@ -280,6 +300,7 @@ common wrapper stripped, bare note gets `title`/`created`); sync pauses/resumes.
 | `tests/TestGraphDock.tscn` | Graph dock/full view, follow-note, swipes |
 | `tests/TestGraphTreeSync.tscn` | Tree click follows into another scope/page |
 | `scripts/dev/GraphProbe.tscn` | Graph canvas internals: menus, link/unlink modes, labels, camera, area projection (link-only routes, embedding positions + island fallback, view switching) |
+| `tests/TestGraphSearch.tscn` | Graph visual search: tags/keywords highlight, inert dimming, per-direction light gating, refresh + layout-switch persistence |
 | `tests/TestGraphTreeDrag.tscn` | Tree drop rebuilds the graph and follows the moved note |
 | `tests/TestSyncDeleteMove.tscn` | Loopback sync protocol, tombstones, moves |
 | `tests/TestPerVaultSync.tscn` | Per-vault identity, unpair/reset |
@@ -299,6 +320,10 @@ common wrapper stripped, bare note gets `title`/`created`); sync pauses/resumes.
   build shapes, `node_rel`/`destination`) and `VaultSearch` +
   `VaultSearchRunner` (query model, tag filter, worker). The sidebar and the
   Move page share them; never re-implement rows or matching in a component.
+- **Change graph visual search:** `GraphSearchBar` (the map's bar, wired in
+  `GraphShellComponent.setup()`) + GraphView's visual-search section
+  (`set_search_query`, `_derive_search_keys`, `set_query`/dimming/gating).
+  It reuses `VaultSearch` + `VaultSearchRunner` — never re-match in the view.
 - **Add a note operation:** go through `GameManager.write_note()` (link index,
   metadata, save) and fire `SyncService.note_saved/note_deleted/note_restored`;
   refresh via `Main._refresh_list()`.

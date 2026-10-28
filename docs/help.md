@@ -234,6 +234,18 @@ collapsed folder or turns the page that was hiding it. **⚙ Settings → Graph
 neighbor levels** (1–10) controls how many hops out from the current note the
 map expands.
 
+**🔍 Visual search** — the map's search bar (top-right, in the dock and in the
+full view alike) runs the sidebar's query grammar: keywords and `#tags`, with
+`#tags` AND-ing the keyword results. Matching notes stay bright and keep
+flowing their link light — toward their destination even when that destination
+is not a match — while every other node fades to a faint tint, stops emitting
+and refuses taps and hover. Folders light up when the match is inside them, so
+a result set can be drilled into folder by folder; the small counter beside the
+field shows how many notes matched, and clearing the field returns the map to
+its normal behaviour. Typing `#` opens the same tag autocomplete as the sidebar
+search, ranked prefix → substring → near-match, and picking a tag applies it
+immediately.
+
 ## 10. Callouts
 
 Callouts use Obsidian-compatible syntax. Start a blockquote with `[!type]` and

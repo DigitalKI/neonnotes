@@ -37,6 +37,9 @@ signal nav_changed
 ## pan, zoom). Main debounces this into a settings write so a graph-default
 ## app reopens where it was left.
 signal state_changed
+## Visual search state for the map's search bar ({"state": ..., "count": ...}),
+## mirrored by scenes/components/graph_search_bar.tscn through the shell.
+signal search_reported
 ## Screen space the focus card covers (mobile only — the desktop card floats in
 ## the corner and there is room enough to ignore it). Focus framing centres the
 ## neighbourhood in the free area instead of behind the card.
@@ -246,6 +249,23 @@ var _root_home := ""            # homepage note path when it exists (root hub)
 ## check, so headless probes can exercise both behaviours.
 var mobile_fit := GameManager.is_phone_screen()
 
+## Visual search — the same query model as the sidebar's search field
+## (INV-066): `#tags` AND keywords >= MIN_KEYWORD chars, case-insensitive;
+## body reads ride the sidebar's runner class on its worker (INV-015).
+## GraphView only stores the result and applies it to nodes, flows, rails,
+## labels and pointers (handlers in the visual search section below).
+var _search_filter := VaultSearch.new()
+var _search_query_txt := ""   ## last applied query; guards re-scheduling
+## rel -> true for every map-representable note matched by the query.
+var _search_notes := {}
+## Node keys treated as matched: a node's own note (leaf or folder companion)
+## plus every folder whose subtree contains a match, so results stay drillable
+## over the folder spine. Derived over the whole hierarchy.
+var _search_keys := {}
+var _search_active := false    ## the result set is on screen
+var _search_pending := false   ## a worker is scheduled or running
+var _search_runner: VaultSearchRunner
+
 func _ready() -> void:
 	# Pan/zoom is a draw transform: clip so the map never spills past the
 	# graph view's bounding box into the toolbar / status bar / sidebar.
@@ -260,6 +280,13 @@ func _ready() -> void:
 	GameManager.palette_changed.connect(_on_palette_changed)
 	resized.connect(_mark_map_dirty)
 	mouse_exited.connect(_clear_hover)
+	# Visual search: the sidebar's debounced runner (a Node; it joins its own
+	# worker on exit) publishes matched note rels, then the view derives keys,
+	# recolours and re-gates. As a child it dies with the view.
+	_search_runner = VaultSearchRunner.new()
+	_search_runner.name = "GraphSearchRunner"
+	add_child(_search_runner)
+	_search_runner.finished.connect(_on_search_results)
 
 ## The graph label face is a code-level choice (see LABEL_FONT); "body" follows
 ## the app's body font setting, "orbitron" keeps the display face.
@@ -413,6 +440,12 @@ func _mark_camera_dirty() -> void:
 ## all — the links then "appeared" only after navigating somewhere and back,
 ## which rebuilt them. Refresh both passes once the index is complete.
 func _on_metadata_ready() -> void:
+	# A rescan replaced the note set under an active visual search: re-run the
+	# query on the worker so matches, dimming and gating track the new vault
+	# (the derivation itself prunes stale rels on every key pass).
+	if _search_active or _search_pending or _search_filter.is_active():
+		_search_query_txt = ""
+		set_search_query(_search_filter.query)
 	if not visible or not _map_ready:
 		return
 	# Titles can arrive with the metadata pass (the root hub label reads one).
@@ -790,6 +823,10 @@ func _build_hierarchy() -> void:
 		_open_target[n] = n
 	_detect_collapsed()
 	_rebuild_keys()
+	# Visual search re-derives over the fresh hierarchy, so matches, dimming
+	# and pointer gating survive refreshes (edits, moves, sync) while the
+	# query stands; stale rels prune themselves (they find no node any more).
+	_derive_search_keys()
 
 ## Mark parents with more than MAX_SEPARATE_NODES direct children as grouped.
 func _detect_collapsed() -> void:
@@ -1099,11 +1136,12 @@ func _make_route(a: String, b: String, samples: PackedVector2Array,
 ## Flatten every route's guide rail into one coloured segment list: the whole
 ## set of rails then renders as a single `draw_multiline_colors` call. The rail
 ## is static in map space (only the travelling light animates), so it is built
-## here, once, rather than re-emitted every frame.
+## here, once, rather than re-emitted every frame. In visual search a route
+## with no emitting origin dims (see `_rail_alpha`).
 func _build_rail_geometry() -> void:
 	for route in _routes:
 		var samples: PackedVector2Array = route["samples"]
-		var col := Color(_route_guide_color(route), 0.09)
+		var col := Color(_route_guide_color(route), 0.09 * _rail_alpha(route))
 		# `draw_multiline_colors` wants one colour per *segment*, not per vertex.
 		for i in samples.size() - 1:
 			_rail_pts.append(samples[i])
@@ -1320,6 +1358,8 @@ func _build_area_keys() -> void:
 	for rel in notes:
 		_keys.append(rel)
 		_open_target[rel] = rel
+	# Same derivation rule as the radial hierarchy (kept live across switches).
+	_derive_search_keys()
 	_mark_map_dirty()
 
 ## Layout pass: positions from the shell's embedding worker when it has
@@ -1580,10 +1620,19 @@ func _append_flow(route: Dictionary, halo_pts: PackedVector2Array,
 	var cycle := 1.0 + span_frac
 	var s := fmod(_time * float(route["speed"]), cycle)
 	var passes := 2 if route["bidir"] else 1
+	# Visual search gates each direction by its ORIGIN: pass 0 emits only while
+	# the source node matched, pass 1 while the target did — a matching origin
+	# keeps its light flowing even toward a destination outside the result set.
+	var emits_fwd := _route_emits(String(route.get("src", "")))
+	var emits_back := _route_emits(String(route.get("dst", "")))
+	if not emits_fwd and not emits_back:
+		return
 	for pass_i in passes:
 		# pass 0 runs source -> target, pass 1 runs target -> source. Both derive
 		# from the same s, so a mutual pair stays mirrored (two-way traffic).
 		var fwd := pass_i == 0
+		if not (emits_fwd if fwd else emits_back):
+			continue  # this direction's origin is dormant in visual search
 		# Each direction carries the colour of the node it leaves: pass 0 leaves
 		# the source, pass 1 (reverse) leaves the target.
 		var col := _link_color(String(route.get("src", ""))) if fwd \
@@ -1700,6 +1749,143 @@ func pulse_link(source: String, target: String) -> void:
 	}
 	queue_redraw()
 
+## ----------------------------------------------------------- visual search
+## The map's search bar (scenes/components/graph_search_bar.tscn, wired by the
+## shell) shares the sidebar's query model and its worker: parsing via
+## VaultSearch (keywords + #tags, INV-066), tag candidates from the in-memory
+## index, keyword hits on VaultSearchRunner's debounced worker (INV-015). The
+## result never opens or filters anything — it *highlights the map*: matched
+## notes stay bright and keep emitting link light (toward whatever node they
+## point at), everything else fades, goes inert to the pointer and dims its
+## guide rails. Clearing the field returns the map to normal.
+
+## Apply a typed query. Empty text and fragments shorter than MIN_KEYWORD are
+## "not searching yet": they clear the mode instead of scheduling a read —
+## the same rule the sidebar applies.
+func set_search_query(text: String) -> void:
+	var q := text.strip_edges()
+	if q == _search_query_txt:
+		return
+	_search_query_txt = q
+	_search_filter.set_query(q)
+	if not _search_filter.is_active():
+		_search_runner.invalidate()
+		_clear_search_mode()
+		return
+	# Tags filter the in-memory index; keywords rank that narrowed candidate
+	# list on the worker (title first, bodies second) — the sidebar's two
+	# halves, in the same order.
+	var candidates := VaultSearch.tag_candidates(GameManager.notes,
+		_search_filter.tags, GameManager.tags)
+	_search_pending = true
+	_emit_report("pending", 0)
+	_search_runner.schedule(candidates, GameManager.titles, GameManager.vault_abs(),
+		_search_filter.text)
+
+## The runner published for the newest generation. Keep only rels the map can
+## represent — an Inbox match lights nothing, because the Inbox is not on the
+## knowledge map.
+func _on_search_results(_generation: int, results: Array) -> void:
+	if not _search_filter.is_active():
+		_clear_search_mode()
+		return
+	_search_pending = false
+	_search_notes.clear()
+	for raw in results:
+		var rel := str(raw)
+		if GameManager.notes.has(rel) and not GameManager.is_inbox_path(rel):
+			_search_notes[rel] = true
+	_search_active = true
+	_derive_search_keys()
+	_refresh_rail_cols()
+	_mark_map_dirty()
+	queue_redraw()
+	_emit_report("done", _search_notes.size())
+
+## Back to the normal map: focus dimming, flowing light, live pointers.
+func _clear_search_mode() -> void:
+	_search_pending = false
+	_search_active = false
+	_search_notes.clear()
+	_derive_search_keys()
+	_refresh_rail_cols()
+	_mark_map_dirty()
+	queue_redraw()
+	_emit_report("idle", 0)
+
+## Derive the matched node set from the current hierarchy. Runs when results
+## arrive and after both layouts' key passes; a stale rel (a vault switch)
+## simply finds no node, so the derivation prunes itself.
+func _derive_search_keys() -> void:
+	_search_keys.clear()
+	if not _search_active:
+		return
+	if _area_active:
+		# Flat projection: every key is a note, so a key matches directly.
+		for k in _keys:
+			if _search_notes.has(String(k)):
+				_search_keys[String(k)] = true
+		return
+	if _root_home != "" and _search_notes.has(_root_home):
+		_search_keys[""] = true  # the hub stands for the homepage note alone
+	for child in _children.get("", []):
+		_search_walk(String(child))
+	# Virtual group markers fold onto their parent's subtree result.
+	for cluster in _cluster_nodes.keys():
+		if _search_keys.has(String(_cluster_nodes[cluster])):
+			_search_keys[String(cluster)] = true
+
+## Post-order walk: `key` matches when its own note (a leaf, or a folder's
+## companion) matched, or any descendant note did — folders stay drillable
+## toward matches, which is what keeps them meaningful highlight targets.
+func _search_walk(key: String) -> bool:
+	var note := String(_open_target.get(key, ""))
+	var hit := note != "" and _search_notes.has(note)
+	for child in _children.get(key, []):
+		if _search_walk(String(child)):
+			hit = true
+	if hit:
+		_search_keys[key] = true
+	return hit
+
+## True while the route direction leaving `key` may draw light: in search mode
+## only a matched origin emits, and it emits toward its destination even when
+## that destination is not part of the result set.
+func _route_emits(key: String) -> bool:
+	return not _search_active or _search_keys.has(key)
+
+## Alpha for a route's static guide rail. Without a visual search every rail
+## rides at full strength; in search mode a rail is alive only when one of the
+## passes that actually exist still emits — the forward pass needs a matched
+## source, the reverse pass (two-way pairs only) a matched target.
+func _rail_alpha(route: Dictionary) -> float:
+	if not _search_active:
+		return 1.0
+	if _route_emits(String(route.get("src", ""))):
+		return 1.0
+	if bool(route.get("bidir", false)) and _route_emits(String(route.get("dst", ""))):
+		return 1.0
+	return 0.25
+
+## Recolour the guide rails in place (routes and segment counts unchanged) for
+## a search-state change without a graph rebuild; `_build_rail_geometry` runs
+## the same rule whenever the routes themselves are rebuilt.
+func _refresh_rail_cols() -> void:
+	if _bg == null:
+		return
+	_rail_cols.clear()
+	for route in _routes:
+		var samples: PackedVector2Array = route["samples"]
+		var col := Color(_route_guide_color(route), 0.09 * _rail_alpha(route))
+		for i in samples.size() - 1:
+			_rail_cols.append(col)
+	_bg.queue_redraw()
+
+## Publish the search state to the bar: {"state": "idle"|"pending"|"done",
+## "count": matched map notes}.
+func _emit_report(state: String, count: int) -> void:
+	search_reported.emit({"state": state, "count": count})
+
 func _section_color(k: String) -> Color:
 	return GraphColors.section_color(String(_open_target.get(k, k)), _folder_colors, _accent2)
 
@@ -1712,6 +1898,13 @@ func _node_color(k: String) -> Color:
 		or (_center_note != "" and (String(_companion.get(k, "")) == _center_note \
 			or String(_open_target.get(k, "")) == _center_note))
 	var col := _accent if hot else _section_color(k)
+	# Visual search replaces the focus dimming: matched nodes stay bright (and
+	# gain a slight lift so the result set reads as "energised") even outside
+	# the radial focus levels; everything else fades to a faint context tint.
+	if _search_active:
+		if not _search_keys.has(k):
+			return Color(col.r, col.g, col.b, 0.22)
+		return col if hot else col.lightened(0.12)
 	# Radial focus dims the nodes outside the focused neighbourhood. The area
 	# projection has no levels and its contract is "every node is equally in
 	# focus" (see `_layout_area_points`): dimming there washed the colours out
@@ -1734,6 +1927,11 @@ func _draw_labels(ci: CanvasItem) -> void:
 		var fill := LABEL_HOVER_COLOR if hovered else LABEL_COLOR
 		var outline_col := LABEL_HOVER_OUTLINE_COLOR if hovered else LABEL_OUTLINE_COLOR
 		var outline_w := LABEL_OUTLINE_WIDTH + (1 if hovered else 0)
+		# Visual search: an unmatched label fades with its marker (the hovered
+		# label is always matched — hover is gated — so it never fades).
+		if _search_active and not _search_keys.has(String(item["key"])) and not hovered:
+			fill = Color(fill.r, fill.g, fill.b, 0.35)
+			outline_col = Color(outline_col.r, outline_col.g, outline_col.b, 0.35)
 		if LABEL_STYLE == "background":
 			ci.draw_rect(rect, Color(GameManager.color("bg"), LABEL_BG_ALPHA))
 		if LABEL_STYLE != "none" and outline_w > 0:
@@ -2311,8 +2509,12 @@ func _gui_input(event: InputEvent) -> void:
 			if not hover_active:
 				var label_hit := _label_key_at(event.position)
 				if bool(label_hit.get("hit", false)):
-					hover_active = true
-					hover_key = String(label_hit.get("key", ""))
+					var hit_key := String(label_hit.get("key", ""))
+					# Unmatched labels are as inert as their markers in search
+					# mode: hovering them must not fake a live pointer target.
+					if not _search_active or _search_keys.has(hit_key):
+						hover_active = true
+						hover_key = hit_key
 			if hover_active != _hover_active or hover_key != _hover:
 				_hover_active = hover_active
 				_hover = hover_key
@@ -2337,6 +2539,9 @@ func _zoom_at(anchor: Vector2, factor: float) -> void:
 func _hub_at(at: Vector2) -> bool:
 	if _scope != "" or _root_home == "" or not _pos.has(""):
 		return false
+	# Visual search: the hub is a pointer target only while it matches.
+	if _search_active and not _search_keys.has(""):
+		return false
 	return at.distance_to(_to_screen(_pos[""])) <= 26.0
 
 ## Nearest node to a point — the tree key (folders + companion stems), which is
@@ -2347,6 +2552,11 @@ func _key_at(at: Vector2) -> String:
 	var best_d := 26.0 / maxf(_map_scale, 0.001)
 	for k in _keys:
 		if not _pos.has(k):
+			continue
+		# Visual search: unmatched nodes are not pointer targets — no tap,
+		# no selection, no hover; they recede to context exactly as their
+		# dimming suggests.
+		if _search_active and not _search_keys.has(k):
 			continue
 		var d: float = m.distance_to(_pos[k])
 		if d < best_d:

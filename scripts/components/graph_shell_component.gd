@@ -19,6 +19,7 @@ var toolbar: ToolbarComponent
 var graph_nav: GraphNavBar
 var focus_card: GraphFocusCard
 var view_toolbar: GraphViewToolbar
+var graph_search_bar: GraphSearchBar
 var links_page: GraphLinksPage
 var layout: LayoutComponent
 var vault_tree: VaultTreeComponent
@@ -103,6 +104,11 @@ func setup() -> void:
 	# back into the map: pressing a button re-runs the shell's layout switch.
 	view_toolbar.view_selected.connect(_set_view_type)
 	_apply_view_type()
+	# The map's visual-search bar (authored in graph_search_bar.tscn): the bar
+	# publishes the typed query, the view matches on its runner and mirrors the
+	# state back into the counter — the tree's VaultSearch grammar on the map.
+	graph_view.search_reported.connect(graph_search_bar.set_report)
+	graph_search_bar.query_changed.connect(graph_view.set_search_query)
 	# Card rows navigate: a child or backlink press focuses that node on the map
 	# (revealing the scope/page hiding it); a tag chip filters the vault exactly
 	# like typing "#tag" into the tree search.

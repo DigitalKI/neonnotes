@@ -31,6 +31,7 @@ extends Control
 @onready var backlinks_card: BacklinksCard = %BacklinksCard
 @onready var graph_nav: GraphNavBar = %GraphNavBar
 @onready var graph_view_toolbar: GraphViewToolbar = %GraphViewToolbar
+@onready var graph_search_bar: GraphSearchBar = %GraphSearchBar
 @onready var links_page: GraphLinksPage = %GraphLinksPage
 @onready var sync_page: SyncPage = %SyncPage
 @onready var backup_page: BackupPage = %BackupPage
@@ -218,6 +219,7 @@ func _phase_theme_layout() -> void:
 	graph_shell.graph_nav = graph_nav
 	graph_shell.view_toolbar = graph_view_toolbar
 	graph_shell.focus_card = focus_card
+	graph_shell.graph_search_bar = graph_search_bar
 	graph_shell.links_page = links_page
 	graph_shell.layout = layout_component
 	graph_shell.vault_tree = vault_tree

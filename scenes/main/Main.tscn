@@ -24,6 +24,7 @@
 [ext_resource type="PackedScene" path="res://scenes/components/backup_page.tscn" id="24_backup"]
 [ext_resource type="PackedScene" path="res://scenes/components/import_page.tscn" id="25_import"]
 [ext_resource type="PackedScene" path="res://scenes/components/graph_view_toolbar.tscn" id="26_vt"]
+[ext_resource type="PackedScene" path="res://scenes/components/graph_search_bar.tscn" id="27_gsb"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMat_crt"]
 shader = ExtResource("3_crt")
@@ -253,6 +254,10 @@ unique_name_in_owner = true
 layout_mode = 1
 
 [node name="GraphViewToolbar" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/GraphDock/GraphView" unique_id=2163850971 instance=ExtResource("26_vt")]
+unique_name_in_owner = true
+layout_mode = 1
+
+[node name="GraphSearchBar" parent="Root/WorkspaceMargin/Workspace/Content/ContentSplit/GraphDock/GraphView" unique_id=2716049382 instance=ExtResource("27_gsb")]
 unique_name_in_owner = true
 layout_mode = 1
 

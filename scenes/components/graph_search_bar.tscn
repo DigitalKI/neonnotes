@@ -1,0 +1,31 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/components/graph_search_bar.gd" id="1_gsb"]
+
+[node name="GraphSearchBar" type="PanelContainer"]
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -216.0
+offset_top = 86.0
+offset_right = -8.0
+offset_bottom = 124.0
+grow_horizontal = 0
+script = ExtResource("1_gsb")
+
+[node name="Row" type="HBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Matches" type="Label" parent="Row"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+tooltip_text = "Notes matching the visual search"
+
+[node name="Query" type="LineEdit" parent="Row"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Search notes or #tags…"
+clear_button_enabled = true
