@@ -108,6 +108,11 @@ revisited.
 - **Area View draws only wiki-link edges** — straight direct routes with the
   radial view's travelling light; semantic similarity shows as proximity,
   never as lines.
+- **Visual search highlights, never filters** — the map's search bar shares the
+  sidebar's VaultSearch query (same grammar, same worker); matched nodes stay
+  lit and keep emitting their light, non-matches dim and refuse taps, folders
+  match through their subtree for drill-down — the map never hides or
+  re-lays-out nodes.
 - **Area View semantic cache is a user:// sidecar** — token counts + positions
   keyed per vault (its id file, else the hashed path), mtime + content-hash
   invalidation, fingerprint-gated position reuse; never inside the vault,

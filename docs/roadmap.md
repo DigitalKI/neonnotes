@@ -116,7 +116,10 @@ drawn as chords). Facet grouping is single- or multi-valued by parameter: tag is
 multi-valued (one primary node plus dimmed ghost replicas in its other tag
 columns); date/size are single-valued. Live filtering is a `note → keep(bool)`
 predicate fed by the tag index + search worker, with two modes: dim non-matches
-(render-only) or hide + re-layout the subset. Editing (bulk move, link
+(render-only) or hide + re-layout the subset. The dim mode already exists on the
+radial and area views as the map's visual search (`GraphView.set_search_query`,
+fed by the tag index + VaultSearch's worker); the future layouts reuse that
+same predicate when they land. Editing (bulk move, link
 create/remove) works in every layout through the same commands; mobile uses
 long-press + action-sheet triggers instead of desktop drag.
 

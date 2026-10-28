@@ -285,7 +285,8 @@ story. If a rule changes, change the code/test and this line together.
 - **INV-059 — TagSuggest is added deferred** when created during
   `NoteEditor._ready()` (parent is busy setting up children). It is an in-scene
   `top_level` panel with `FOCUS_NONE` rows, closes on Esc/accept/blur/outside
-  tap, and shares `TagMatch` with link resolution. Guard: `unit_tests.gd`.
+  tap, and shares `TagMatch` with link resolution. Guard: `unit_tests.gd`,
+  `tests/TestGraphSearch.tscn` (map bar: deferred add, tag_chosen re-publish).
 - **INV-060 — Find-in-editor highlights are colour-only.** This CodeEdit honours
   only a syntax range's `color`; `background_color`/bold/italic are ignored.
   `clear_highlighting_cache()`/`update_cache()` do not re-run highlighting:
