@@ -30,6 +30,7 @@ extends Control
 ## Floating backlinks card over the note column (not the old tree footer panel).
 @onready var backlinks_card: BacklinksCard = %BacklinksCard
 @onready var graph_nav: GraphNavBar = %GraphNavBar
+@onready var graph_view_toolbar: GraphViewToolbar = %GraphViewToolbar
 @onready var links_page: GraphLinksPage = %GraphLinksPage
 @onready var sync_page: SyncPage = %SyncPage
 @onready var backup_page: BackupPage = %BackupPage
@@ -215,6 +216,7 @@ func _phase_theme_layout() -> void:
 	graph_shell.content_split = content_split
 	graph_shell.toolbar = toolbar
 	graph_shell.graph_nav = graph_nav
+	graph_shell.view_toolbar = graph_view_toolbar
 	graph_shell.focus_card = focus_card
 	graph_shell.links_page = links_page
 	graph_shell.layout = layout_component

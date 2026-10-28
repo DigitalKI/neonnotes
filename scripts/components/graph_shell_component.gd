@@ -18,6 +18,7 @@ var content_split: HSplitContainer
 var toolbar: ToolbarComponent
 var graph_nav: GraphNavBar
 var focus_card: GraphFocusCard
+var view_toolbar: GraphViewToolbar
 var links_page: GraphLinksPage
 var layout: LayoutComponent
 var vault_tree: VaultTreeComponent
@@ -55,8 +56,6 @@ var _swipe_kind := ""
 ## Digest worker + cache behind the graph focus card (off-thread summaries).
 var _digest_store: GraphDigestStore
 var _tfidf_store: TfidfBodyStore
-## The view-type toolbar (Radial / Area), a child of the graph canvas.
-var view_toolbar: GraphViewToolbar
 ## Top-k semantic neighbours per note for the Area layout's islands.
 const AREA_NEIGHBOUR_K := 3
 ## The note the card currently describes (digest results arrive by rel).
@@ -100,10 +99,8 @@ func setup() -> void:
 	# when it owns the canvas, so the map reflects the fresh positions without
 	# another view toggle.
 	_tfidf_store.positions_ready.connect(_on_tfidf_ready)
-	view_toolbar = GraphViewToolbar.new()
-	view_toolbar.name = "GraphViewToolbar"
-	view_toolbar.position = Vector2(8, 8)
-	graph_view.add_child(view_toolbar)
+	# The scene-authored selector (Radial / Area) mirrors the persisted type
+	# back into the map: pressing a button re-runs the shell's layout switch.
 	view_toolbar.view_selected.connect(_set_view_type)
 	_apply_view_type()
 	# Card rows navigate: a child or backlink press focuses that node on the map
