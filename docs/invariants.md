@@ -434,6 +434,17 @@ story. If a rule changes, change the code/test and this line together.
   `GraphView._node_quad`. A missing class is a GDScript parse error at boot, not
   an editor error, and the exported app then crashes on the GL thread
   (GOT-021). Guard: `scripts/render/graph_view.gd`, `2D-V2`, device boot.
+- **INV-109 — A share cold start never boots into a blank shell, and never
+  builds a start page just to discard it.** While a cold-start payload is
+  pending (`ShareIntake.has_pending_payload()`, backed by `Share._cold_pending`
+  — `get_received_data()` *consumes* the singleton's copy, so the pending state
+  must live on the node), `Main._open_start_page` holds the start page and the
+  capture becomes the landing. The hold always resolves — the payload's
+  `_on_share_received`, or the two-frame `_share_hold_settle()` fallback when
+  it produced nothing. The landing's `scan_paths()` bumps the scan generation
+  (aborting the boot's metadata drip), so `_restart_metadata_pass` must run a
+  frame later, or `links_ready`/`metadata_ready` never arrive. Guard:
+  `tests/TestShareBoot.tscn`.
 - **INV-108 — The Android template is GL-only and keeps the runtime feature
   modules.** `2D-V2` builds with `vulkan=no` and disables unused modules. Keep
   `renderer/rendering_method` and its `.mobile` override on `gl_compatibility`;

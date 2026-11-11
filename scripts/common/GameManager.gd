@@ -669,6 +669,18 @@ func _index_note_metadata() -> void:
 	refresh_index()
 
 
+## Index just these notes (read + cache entry + link-index refresh) without
+## rescanning the vault — the targeted share-rescan path. `write_note()` already
+## indexed the new captures (Capture writes through it), so this only re-applies
+## their entries after a `scan_paths()` cleared the maps; every other note keeps
+## the boot scan's metadata and is filled by `load_metadata_async()`.
+func index_note_metas(rels: Array[String]) -> void:
+	for rel in rels:
+		if notes.has(rel):
+			_apply_note_meta(rel, _meta_for(rel))
+	refresh_index()
+
+
 ## Batched, frame-yielding metadata pass used after the shell and tree are up.
 ## Aborts if the vault is rescanned meanwhile (generation bump).
 const METADATA_BATCH := 12

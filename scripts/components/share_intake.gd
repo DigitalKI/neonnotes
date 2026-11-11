@@ -50,6 +50,16 @@ func start(enabled: bool) -> void:
 	print("[share] target active=%s (requested %s)" % [share_node.is_share_target(), enabled])
 
 
+## True while a cold-start payload is queued on the plugin node: Share._ready()
+## consumed it from the pending share intent and re-emits it one frame later.
+## Main asks this while deferring the boot's start page — with "open to graph"
+## the whole map would otherwise be built only to be torn down when the payload
+## lands (the capture becomes the landing instead). No plugin (desktop, tests)
+## or no payload → harmless false.
+func has_pending_payload() -> bool:
+	return share_node != null and share_node.has_pending_data()
+
+
 func set_enabled(enabled: bool) -> void:
 	if share_node != null:
 		share_node.set_share_target(enabled)

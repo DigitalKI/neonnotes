@@ -90,6 +90,11 @@ var slash_menu: SlashMenuComponent = preload("res://scenes/components/slash_menu
 var _boot_t0 := 0
 var _boot_last := 0
 
+## Set while a cold-start share payload is pending: the start page is held
+## (`_open_start_page`) and the capture becomes the landing instead. See
+## `_share_hold_settle` for how the hold can never strand the shell empty.
+var _share_boot_hold := false
+
 
 
 func _ready() -> void:
@@ -316,13 +321,33 @@ func _phase_share() -> void:
 ## page): close whatever page is open, rescan once for the whole payload, and
 ## show the newest capture so the user sees it arrived.
 func _on_share_received(rels: Array[String]) -> void:
+	_share_boot_hold = false  # a payload resolved: the capture (or refusal) is the landing
 	if rels.is_empty():
 		return
 	if page_mode != "":
 		_close_page()
-	GameManager.scan_notes()
+	# Targeted rescan: write_note() already indexed the captured notes (Capture
+	# writes through it), so only paths are re-enumerated here and the payload's
+	# entries re-applied — not a whole-vault metadata read on the share hot path.
+	# scan_paths() also aborts the boot's metadata drip (generation bump), so
+	# the pass restarts a frame later: a warm cache applies everything
+	# synchronously, a cold drip completes it like any boot, and metadata_ready
+	# fires either way to re-row the tree and boot the derived caches.
+	GameManager.scan_paths()
+	GameManager.index_note_metas(rels)
+	_restart_metadata_pass()
 	_refresh_list()
 	vault_tree.select_note(rels[rels.size() - 1])
+
+## Restart the metadata pass after the share rescan bumped the scan generation:
+## the interrupted boot drip aborts at its next frame boundary, and until then
+## a fresh load_metadata_async() would no-op — so wait one frame and start the
+## replacement pass.
+func _restart_metadata_pass() -> void:
+	if not is_inside_tree():
+		return
+	await get_tree().process_frame
+	GameManager.load_metadata_async()
 
 
 func _phase_sync() -> void:
@@ -388,6 +413,19 @@ func _start_background_sync() -> void:
 
 
 func _open_start_page() -> void:
+	# A cold-start share payload is consumed by the plugin node while booting and
+	# re-emitted one frame later — in the same flush as this deferred call, but
+	# just after it, so the start page would be built (with "open to graph": the
+	# whole map) only to be torn down when the payload lands. Hold it instead:
+	# the capture is the landing, and a payload that produces nothing settles
+	# into a normal start page via _share_hold_settle().
+	if _share_boot_hold:
+		return
+	if share_intake != null and share_intake.has_pending_payload():
+		_share_boot_hold = true
+		_share_hold_settle()
+		_boot_mark("share-hold")
+		return
 	if GameManager.open_start_mode == "graph":
 		# Graph map as the startup "homepage": same presentation as toggling the
 		# graph from the toolbar (the note column hidden, the map filling the
@@ -406,6 +444,22 @@ func _open_start_page() -> void:
 	else:
 		_on_note_selected("_homepage.md")
 	_boot_mark("first-note")
+
+## Resolve the cold-start-share hold. Anything that handled the payload — the
+## Inbox note opening, or even a refusal message — has cleared the hold by
+## then; if two idle frames pass with neither, the payload was dropped or
+## failed silently and the shell must not sit empty.
+func _share_hold_settle() -> void:
+	if not is_inside_tree():
+		return
+	await get_tree().process_frame
+	await get_tree().process_frame
+	if not _share_boot_hold or not is_inside_tree():
+		return
+	_share_boot_hold = false
+	_boot_mark("share-settle")
+	_open_start_page()
+
 
 func _on_metadata_ready() -> void:
 	# Titles/tags/links are now complete: refresh the tree text (filenames were

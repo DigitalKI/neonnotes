@@ -63,6 +63,12 @@ const SIGNAL_NAME_SHARE_RECEIVED: String = "share_received"
 
 var _plugin_singleton: Object
 
+## Cold-start share payloads: [method _ready] consumed the pending intent
+## before any GDScript ran, and the singleton's copy is consumed-with-read, so
+## this field is what answers [method has_pending_data] while the
+## one-frame-deferred re-emission waits.
+var _cold_pending: ReceivedSharedData
+
 # ==============================================================================
 # Lifecycle
 # ==============================================================================
@@ -80,6 +86,7 @@ func _ready() -> void:
 	# share_received handler tries to access scene nodes.
 	var __pending: ReceivedSharedData = get_received_data()
 	if __pending != null:
+		_cold_pending = __pending
 		call_deferred(&"_emit_share_received_deferred", __pending)
 
 
@@ -231,6 +238,13 @@ func get_received_data() -> ReceivedSharedData:
 	return null
 
 
+## [code]true[/code] while a cold-start payload has been consumed by [method _ready]
+## but its deferred re-emission has not fired yet (one frame). ShareIntake reads
+## this during boot so the shell can hold the start page until the payload lands.
+func has_pending_data() -> bool:
+	return _cold_pending != null
+
+
 # ==============================================================================
 # Private helpers
 # ==============================================================================
@@ -241,6 +255,7 @@ func get_received_data() -> ReceivedSharedData:
 ## and all [code]@onready[/code] variables are initialised before any handler fires.
 func _emit_share_received_deferred(a_data: ReceivedSharedData) -> void:
 	emit_signal(SIGNAL_NAME_SHARE_RECEIVED, a_data)
+	_cold_pending = null
 
 
 # Private signal handlers

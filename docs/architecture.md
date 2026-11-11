@@ -27,7 +27,8 @@ settings live in `user://settings.cfg`; exports and embedded media live under
   `_phase_build_ui` → `_phase_theme_layout` → `_phase_vault` → `_phase_share`
   → `_phase_sync` → `_phase_smoke`.
 - The vault phase calls `GameManager.scan_paths()`, renders the tree from
-  filenames, applies layout, opens the start page deferred, and starts
+  filenames, applies layout, opens the start page deferred (held while a
+  cold-start share payload is pending — see *Capture and share*), and starts
   `GameManager.load_metadata_async()`.
 - Page routing lives in `PageRouter` (which owns `page_mode`, exposed to the
   shell as `Main.page_mode`). Every in-app page is a scene inside `%Content`

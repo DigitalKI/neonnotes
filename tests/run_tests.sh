@@ -44,7 +44,10 @@ run_godot_test "CAPTURE RESULT: OK" --headless --path . tests/TestCapture.tscn
 # Share-sheet intake: a received link/image/file/text payload lands in Inbox
 # through Capture (plugin-free routing, so it runs off-platform).
 run_godot_test "SHARE INTAKE RESULT: OK" --headless --path . tests/TestShareIntake.tscn
-
+# Share cold start: a pending payload holds the start page (never built just to
+# be discarded), the capture lands as the start page, and a no-produce payload
+# still settles into a normal start page.
+run_godot_test "SHARE BOOT RESULT: OK" --headless --path . tests/TestShareBoot.tscn
 # Trash: recoverable deletes, dot-hidden, sync-excluded, collision restore, purge.
 run_godot_test "TRASH RESULT: OK" --headless --path . tests/TestTrash.tscn
 # Delete → shell sync: every delete affordance (right-click, ⋮ menu, graph
