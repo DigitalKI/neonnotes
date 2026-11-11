@@ -115,7 +115,10 @@ planned for easy vault switching); see
 `Main._ready()` → phases (above). `GameManager.scan_paths()` enumerates paths;
 the tree renders from filenames; `load_metadata_async()` fills titles/tags/links,
 applying `user://metadata_index.json` cache hits synchronously and dripping
-uncached notes 12/frame. `metadata_ready` refreshes the tree/backlinks/graph.
+uncached notes 48/frame (a cold 1,000-note drip ≈0.35 s). `metadata_ready`
+refreshes the tree/backlinks/graph — the graph rebuilds routes only when its
+keys were keyed against the same `scan_paths()` generation (the boot case: no
+relayout), fully otherwise.
 
 ### Open and save
 Tree row → `VaultTreeComponent.note_requested` → `Main._on_note_selected` →

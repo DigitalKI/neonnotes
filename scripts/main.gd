@@ -413,15 +413,24 @@ func _on_metadata_ready() -> void:
 	_boot_mark("metadata")
 	graph_shell.clear_card_maps()
 	graph_shell.tfidf_rescan()
-	_refresh_list()
+	# Links just completed (INV-052). The map was keyed while the note set was
+	# already final (scan_paths ran before the metadata pass) — when the keys
+	# still match that scan generation only the routes rebuild, and nothing
+	# visibly relayouts; a vault that changed since (share landing on a hidden
+	# map, vault switch) takes the full rebuild. Either way the tree re-rows.
+	graph_view.refresh_after_metadata()
+	_refresh_list(true)
 	if backlinks_card.visible:
 		_refresh_backlinks()
 
 
-func _refresh_list() -> void:
+func _refresh_list(keep_graph := false) -> void:
 	# Any rescan (delete / move / sync / vault switch) also invalidates the
-	# graph's node set: rebuild it in place, keeping scope/page/camera.
-	graph_view.refresh_graph()
+	# graph's node set: rebuild it in place, keeping scope/page/camera. A caller
+	# that already refreshed the graph on the same pass (links-only after
+	# metadata_ready) passes keep_graph so nothing rebuilds twice.
+	if not keep_graph:
+		graph_view.refresh_graph()
 	var selected := GameManager.current_rel
 	var mobile_drawer_was_open := layout_component.is_mobile_layout and layout_component.drawer_open
 	vault_tree.refresh()

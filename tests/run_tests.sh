@@ -44,12 +44,14 @@ run_godot_test "CAPTURE RESULT: OK" --headless --path . tests/TestCapture.tscn
 # Share-sheet intake: a received link/image/file/text payload lands in Inbox
 # through Capture (plugin-free routing, so it runs off-platform).
 run_godot_test "SHARE INTAKE RESULT: OK" --headless --path . tests/TestShareIntake.tscn
+
 # Trash: recoverable deletes, dot-hidden, sync-excluded, collision restore, purge.
 run_godot_test "TRASH RESULT: OK" --headless --path . tests/TestTrash.tscn
 # Delete → shell sync: every delete affordance (right-click, ⋮ menu, graph
 # circle menu) rebuilds tree AND graph and opens the nearest note;
 # the deleted row never lingers under an active search/tag filter.
 run_godot_test "DELETE NOTE RESULT: OK" --headless --path . tests/TestDeleteNote.tscn
+
 # Move page: relocate a note from the ⋮ menu (stays open) and the graph circle
 # menu (returns + re-focuses), rewriting wiki-links and guarding self-nesting.
 run_godot_test "MOVE RESULT: OK" --headless --path . tests/TestMoveDialog.tscn
@@ -98,6 +100,10 @@ run_godot_test "PROBE RESULT: OK" --headless --path . scripts/dev/GraphProbe.tsc
 # the sidebar) dims and de-clicks unmatched nodes, gates the travelling light
 # to matched origins, and survives tree/graph refreshes until cleared.
 run_godot_test "GRAPH SEARCH RESULT: OK" --headless --path . tests/TestGraphSearch.tscn
+# Links-only map refresh: links landing for an unchanged note set (metadata_ready
+# at the same scan generation) rebuild routes without re-keying/relayouting
+# the map; a changed vault or a hidden map takes the full/no rebuild.
+run_godot_test "GRAPH LINKS REFRESH RESULT: OK" --headless --path . tests/TestGraphLinksRefresh.tscn
 # Sync delete/move propagation over loopback (real frame protocol + tombstones).
 run_godot_test "SYNC DELETE/MOVE RESULT: OK" --headless --path . tests/TestSyncDeleteMove.tscn
 # Sync identity is per vault (in-folder id + device-local phrase); switching

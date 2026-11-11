@@ -162,6 +162,11 @@ var _scope_history: Array[Dictionary] = []
 var _suspended_state := {}
 ## A persisted view state to apply on the next `open()` (graph as start page).
 var _pending_restore := {}
+
+## The `scan_paths()` generation the current keys were keyed against. Set on
+## every key build (`_rebuild_keys` / `_build_area_keys`); `refresh_after_metadata()`
+## compares it so links completing for an unchanged note set rebuild routes only.
+var _keyed_scan_gen := -1
 ## Radial action menu widget (state, geometry, hit-test, drawing). GraphView
 ## only decides *which* actions a node offers and what each one does.
 var _menu := GraphRadialMenu.new()
@@ -711,6 +716,24 @@ func refresh_graph() -> void:
 	nav_changed.emit()
 	state_changed.emit()
 
+## Links just completed (`metadata_ready`): when the map was keyed against the
+## same `scan_paths()` generation the note set is unchanged — rebuild routes
+## only (keys, labels, layout and camera all stand, so nothing visibly
+## relayouts; this is the boot map's cheap link attach, INV-052). A rescan
+## that changed the vault since the keys were built takes the full rebuild.
+func refresh_after_metadata() -> void:
+	if not _map_ready or not visible:
+		return
+	if _keyed_scan_gen == GameManager._scan_generation:
+		_rebuild_resolve_maps()
+		if _area_active:
+			_build_area_routes()
+		else:
+			_build_routes()
+		queue_redraw()
+		return
+	refresh_graph()
+
 ## Fold a remembered scope onto the freshly built hierarchy: a folder that no
 ## longer exists climbs to its nearest surviving ancestor, and the saved page is
 ## kept (clamped later by `_rebuild_keys`). Requires `_children` to be current.
@@ -857,6 +880,7 @@ func _rebuild_keys() -> void:
 			if _keys.size() >= 2000:
 				break
 			_keys.append(node)
+		_keyed_scan_gen = GameManager._scan_generation
 		nav_changed.emit()
 		return
 	for child in _children.get(_scope, []):
@@ -885,6 +909,7 @@ func _rebuild_keys() -> void:
 	# Emit only once the page math above is final: the nav bar mirrors this
 	# snapshot, so emitting early left it stuck on the previous (often 1/1)
 	# values while the pager actually had pages to flip through.
+	_keyed_scan_gen = GameManager._scan_generation
 	nav_changed.emit()
 
 func _collect_overview_nodes(parent: String, out: Array[String]) -> void:
@@ -1360,6 +1385,7 @@ func _build_area_keys() -> void:
 		_open_target[rel] = rel
 	# Same derivation rule as the radial hierarchy (kept live across switches).
 	_derive_search_keys()
+	_keyed_scan_gen = GameManager._scan_generation
 	_mark_map_dirty()
 
 ## Layout pass: positions from the shell's embedding worker when it has

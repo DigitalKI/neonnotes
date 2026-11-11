@@ -239,10 +239,13 @@ story. If a rule changes, change the code/test and this line together.
   spatial-only, so the node shader uses material uniforms and three marker
   meshes. Guard: `scripts/dev/bench_graph.gd`.
 - **INV-052 — Link routes lag boot by design.** `scan_paths()` clears `links`;
-  `load_metadata_async()` fills them 12 notes/frame. Anything deriving
+  `load_metadata_async()` fills them (cache hits synchronously, uncached notes
+  48/frame on the cold drip ≈0.35 s @1k notes). Anything deriving
   routes/levels/labels from `GameManager.links`/`titles` must refresh on
-  `metadata_ready` (GraphView does; `Main._on_metadata_ready` covers tree +
-  backlinks). Guard: `tests/TestGraphCard.tscn`.
+  `metadata_ready` (GraphView does — routes-only when the keys were keyed
+  against the same `scan_paths()` generation, a full rebuild otherwise;
+  `Main._on_metadata_ready` covers tree + backlinks). Guard:
+  `tests/TestGraphCard.tscn`, `tests/TestGraphLinksRefresh.tscn`.
 - **INV-053 — Graph pager emits after page math is final.** Emit `nav_changed`
   only after `_page_count` is recomputed; hide `%Pager` when `page_count <= 1`.
   Guard: `scripts/components/graph_nav_bar.gd`, `GraphProbe.tscn`.
