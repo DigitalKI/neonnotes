@@ -626,6 +626,9 @@ func _build_dynamic_ui() -> void:
 	vault_picker.folder_chosen.connect(_on_vault_selected)
 	media_dialog.bind(editor, func(rel: String): sync_service.note_saved(rel), _flash)
 	media_dialog.close_requested.connect(_close_page)
+	# A "used in" row in the media library navigates like a backlink: close the
+	# page, then open the note through the tree (reveal + select).
+	media_dialog.note_requested.connect(_on_media_note_requested)
 	sync_page.close_requested.connect(_close_sync)
 	sync_page.bind_service(sync_service)
 	new_dialog.close_requested.connect(_close_page)
@@ -851,6 +854,19 @@ func _on_image_click(src: String) -> void:
 	_open_page(PAGE_MEDIA, media_dialog)
 	media_dialog.open_for(src)
 
+
+## ⋮ → Media Library: the media page in its management mode — every file with
+## its usage (expandable to note rows that open the note) and deletion. No
+## embed is targeted, so imports here never rewrite markdown.
+func _open_media_library() -> void:
+	_open_page(PAGE_MEDIA, media_dialog)
+	media_dialog.open_library()
+
+
+func _on_media_note_requested(rel: String) -> void:
+	_close_page()
+	vault_tree.select_note(rel)
+
 ## The image FileDialog is the only real Window left (it must browse files);
 ## every other surface is a page that inherits the shell styling directly.
 func _theme_dialogs() -> void:
@@ -1055,6 +1071,8 @@ func _on_more_action(id: int) -> void:
 			_move_selected()
 		MoreMenuComponent.ID_BACKLINKS:
 			_toggle_backlinks()
+		MoreMenuComponent.ID_MEDIA_LIBRARY:
+			_open_media_library()
 		MoreMenuComponent.ID_UNDO:
 			editor.undo()
 		MoreMenuComponent.ID_REDO:

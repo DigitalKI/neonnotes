@@ -39,6 +39,7 @@ func _init() -> void:
 	_check_list_continuation()
 	_check_inbox_path()
 	_check_media_import()
+	_check_media_usage_map()
 	_check_dev_session_detection()
 	_check_font_settings()
 	_check_icon_font_fallback()
@@ -113,6 +114,41 @@ func _check_media_import() -> void:
 	_check(d3 == tmp.path_join("photo.png"), "content URI forces png")
 	DirAccess.remove_absolute(tmp.path_join("image-2117.png"))
 	DirAccess.remove_absolute(tmp.path_join("image-2117-2.png"))
+	# build_usage_map: one pass mapping each media file to the notes that
+	# reference `media/<name>`; non-vault paths (URLs, folder-prefixed) and
+	# prefix neighbours (`alpha.png-2`) must never count as references.
+	_check_media_usage_map()
+
+
+func _check_media_usage_map() -> void:
+	var tmp := "/tmp/nn-media-usage-unit"
+	var media_dir := tmp.path_join("media")
+	DirAccess.make_dir_recursive_absolute(media_dir)
+	var img := Image.create(2, 2, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0, 1, 0, 1))
+	var alpha := media_dir.path_join("alpha.png")
+	var beta := media_dir.path_join("alpha.png-2.png")
+	var gamma := media_dir.path_join("gamma.png")
+	img.save_png(alpha)
+	img.save_png(beta)
+	img.save_png(gamma)
+	var write := func(rel: String, text: String) -> void:
+		var f := FileAccess.open(tmp.path_join(rel), FileAccess.WRITE)
+		f.store_string(text)
+		f.close()
+	write.call("n1.md", "![](media/alpha.png)\n")
+	write.call("n2.md", "see ![x](media/alpha.png) twice, plus (media/alpha.png-2.png)\n")
+	write.call("n3.md", "https://elsewhere.org/media/alpha.png and xmedia/alpha.png and _media/alpha.png\n")
+	write.call("n4.md", "![](files/alpha.png)\n")
+	var files := MediaImport.collect_media_images(media_dir)
+	var usage := MediaImport.build_usage_map(tmp, ["n1.md", "n2.md", "n3.md", "n4.md"], files)
+	_check(usage.has("alpha.png") and usage["alpha.png"] == ["n1.md", "n2.md"], "usage map lists direct references")
+	_check(usage["alpha.png-2.png"] == ["n2.md"], "longest-name-first stops prefix collisions")
+	_check(usage["gamma.png"].is_empty(), "unreferenced media maps to an empty list")
+	_check(usage["alpha.png"].size() == 2, "external URLs and path-like prefixes are not references")
+	for f in ["n1.md", "n2.md", "n3.md", "n4.md", "media/alpha.png", "media/alpha.png-2.png", "media/gamma.png"]:
+		DirAccess.remove_absolute(tmp.path_join(f))
+
 
 ## The dev-session gate that keeps MCP/editor UI testing out of the real vault.
 ## Env-driven here because this headless --script run is itself "real use".

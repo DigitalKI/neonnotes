@@ -54,7 +54,9 @@ run_godot_test "TRASH RESULT: OK" --headless --path . tests/TestTrash.tscn
 # circle menu) rebuilds tree AND graph and opens the nearest note;
 # the deleted row never lingers under an active search/tag filter.
 run_godot_test "DELETE NOTE RESULT: OK" --headless --path . tests/TestDeleteNote.tscn
-
+# Media library: the ⋮ item opens the media page in management mode — per-file
+# usage rows that open notes, confirmed permanent delete, picker mode intact.
+run_godot_test "MEDIA LIBRARY RESULT: OK" --headless --path . tests/TestMediaLibrary.tscn
 # Move page: relocate a note from the ⋮ menu (stays open) and the graph circle
 # menu (returns + re-focuses), rewriting wiki-links and guarding self-nesting.
 run_godot_test "MOVE RESULT: OK" --headless --path . tests/TestMoveDialog.tscn

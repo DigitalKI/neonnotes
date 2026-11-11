@@ -15,6 +15,7 @@ extends PopupMenu
 const ID_MOVE := 34
 const ID_DELETE_NOTE := 31
 const ID_BACKLINKS := 11
+const ID_MEDIA_LIBRARY := 38
 const ID_UNDO := 35
 const ID_REDO := 36
 const ID_EDIT_SEPARATOR := 37

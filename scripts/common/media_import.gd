@@ -45,6 +45,62 @@ static func collect_media_images(dir_path: String) -> Array[String]:
 	return out
 
 
+## Characters that may end a `media/<name>` reference inside note text: the
+## markdown link's closing paren, whitespace, HTML attribute quotes/angle,
+## and URL query/fragment starts.
+const REF_STOP_CHARS := ") \n\t\"'<>&?"
+
+## One serial pass over the vault mapping every media file name to the notes
+## that reference it (the boot scan makes the same serial-read trade-off). A
+## reference is any `media/<name>` occurrence directly preceded by something
+## that is not a path/word character (so `.../media/x` and `externalmedia/x`
+## never count) and directly followed by a stop character (so `photo.png`
+## never matches inside `photo.png-2`; longest names are tested first).
+## Keys are media file names, values are sorted vault-relative note paths.
+static func build_usage_map(vault_abs: String, note_rels: Array[String], media_files: Array[String]) -> Dictionary:
+	var names: Array[String] = []
+	for f in media_files:
+		names.append(f.get_file())
+	names.sort_custom(func(a: String, b: String) -> bool: return a.length() > b.length())
+	var usage := {}
+	for name in names:
+		usage[name] = [] as Array
+	for rel in note_rels:
+		var text := TextIO.read_text(vault_abs.path_join(rel))
+		if text.is_empty():
+			continue
+		var at := text.find("media/")
+		while at >= 0:
+			if at == 0 or _ref_start_ok(text[at - 1]):
+				var seg := text.substr(at + 6)  # len("media/") == 6
+				for name in names:
+					if seg.begins_with(name):
+						if seg.length() == name.length() or REF_STOP_CHARS.contains(seg[name.length()]):
+							var arr: Array = usage[name]
+							if not arr.has(rel):
+								arr.append(rel)
+							break
+			at = text.find("media/", at + 1)
+	for name in names:
+		(usage[name] as Array).sort()
+	return usage
+
+
+## `media/…` counts as a media reference only when the character before it
+## cannot continue a longer path or word: another slash (absolute/URL paths),
+## a letter/digit, or `_`, `-`, `.`.
+static func _ref_start_ok(prev: String) -> bool:
+	if prev == "/" or prev == "_" or prev == "-" or prev == ".":
+		return false
+	if prev >= "a" and prev <= "z":
+		return false
+	if prev >= "A" and prev <= "Z":
+		return false
+	if prev >= "0" and prev <= "9":
+		return false
+	return true
+
+
 ## Copy an Android content:// URI (SAF provider stream) to the vault, always
 ## re-encoding as PNG. flash_cb is called with a user-facing message when the
 ## payload cannot be decoded.

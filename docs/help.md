@@ -281,6 +281,16 @@ its note.
 ## 12. Note metadata and themes
 
 Each note's metadata is edited through the header panels, not by hand:
+### The media library
+
+Open **⋮ → 🖼 Media Library** to manage every imported image in `vault/media/`.
+Each row shows the image and a note count for where it is used: expand a row to
+see exactly which notes reference it and jump straight to one, or read the
+hover tooltip. **＋** imports a new image into the library without embedding it
+anywhere, and **🗑** deletes an image permanently after a confirmation — when
+notes still embed the file, the dialog says so, and those embeds fall back to
+the "click to choose image" placeholder afterwards.
+
 
 - **Title** — displayed name, set in the **◈ NOTE TITLE** panel.
 - **Tags** — set in the **◈ NOTE TAGS** panel; they feed search and autocomplete

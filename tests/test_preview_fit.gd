@@ -111,11 +111,17 @@ https://example.com/very/long/path/that/keeps/going/without/any/spaces/at/all
 	# ------------------------------------------- the picker's own file list
 	main.media_dialog.begin(["/tmp/" + LONG_NAME + "_20240105.jpg"])
 	await get_tree().process_frame
+	# Rows are [name button][usage label][🗑] inside a per-file VBox; the long
+	# name must ellipsize on the button instead of widening the row page.
 	var row: Node = main.media_dialog.media_list.get_child(0) if main.media_dialog.media_list.get_child_count() > 0 else null
-	_check("the media picker lists the file", row is Button)
-	if row is Button:
-		_check("a long file name ellipsizes in the picker (%s)" % row.get_combined_minimum_size().x,
-			row.get_combined_minimum_size().x < 24.0)
+	var file_btn: Button = null
+	if row is VBoxContainer and row.get_child_count() > 0 and row.get_child(0).get_child_count() > 0:
+		file_btn = row.get_child(0).get_child(0) as Button
+	_check("the media picker lists the file",
+		file_btn != null and file_btn.text == LONG_NAME + "_20240105.jpg")
+	if file_btn != null:
+		_check("a long file name ellipsizes in the picker (%s)" % file_btn.get_combined_minimum_size().x,
+			file_btn.get_combined_minimum_size().x < 24.0)
 	main.media_dialog.begin([])
 
 	print("PREVIEW FIT RESULT: %s (%d failures)" % ["FAIL" if _fails > 0 else "OK", _fails])

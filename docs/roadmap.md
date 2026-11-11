@@ -64,7 +64,10 @@ phone ↔ PC over the local network.
   segfaults headless. Needs bundled FFmpeg or a GDExtension.
 - **Sync hardening** — content hashes, conflict detection, cryptographic
   pairing, encrypted transport.
-
+- **Media deletion × sync** — deleting from the Media Library (⋮) removes the
+  file locally; peers that still have it re-deliver it on the next manifest
+  (media has no tombstone). Decide between media tombstones or documented
+  resurrection; until then treat media deletion as device-local cleanup.
 - **Easy vault switching** — a device-local known-vaults registry (path → vault
   id + pairing/peer state) with a picker that switches vaults while preserving
   per-vault pairing. `INV-021`/`INV-028` already key identity by vault id, so

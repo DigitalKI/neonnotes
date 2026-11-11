@@ -180,6 +180,32 @@ unchanged. `ShareIntake` routes text/link/image and Markdown (shared or opened
 via Android's **Open with** picker) through `Capture`; other files are refused.
 The Inbox is a plain vault folder; only presentation is special (pinned row, not
 a move destination, not a graph node).
+**Cold-start share** (`tests/TestShareBoot.tscn`): `Share` consumed the
+pending intent in `_ready()` before any GDScript ran — `get_received_data()`
+*consumes* the singleton's payload, so the pending state lives on the node
+(`Share.has_pending_data()` → `ShareIntake.has_pending_payload()`). While it
+is true, `Main` holds the start page (`_share_boot_hold`) and the capture
+becomes the landing; a payload that produces nothing settles into the normal
+start page (`_share_hold_settle()` after two idle frames — a refusal message
+or a silent failure both resolve it, so the shell can never sit empty). The
+landing rescan is targeted: `scan_paths()` + `GameManager.index_note_metas(rels)`
+(`write_note()` already indexed the payload's notes) + a one-frame-deferred
+`load_metadata_async()` restart — not a whole-vault metadata read. The
+`scan_paths()` generation bump aborts the boot's metadata drip, so the restart
+is what re-fires `metadata_ready`/`links_ready` afterwards.
+
+### Media page
+One scene (`media_dialog.tscn`), two modes. **Picker** — a clicked image embed
+(`_on_image_click` → `MediaDialog.open_for`) targets that embed; picking a row
+rewrites it and saves. **Library** — ⋮ → **🖼 Media Library**
+(`Main._open_media_library()` → `open_library`) lists every `vault/media` image
+with its usage: `MediaImport.build_usage_map()` (one serial vault pass; a
+reference is a `media/<name>` occurrence bounded by stop chars, so URLs and
+`photo`-vs-`photo-2` neighbours never count) drives a per-row count, an
+expandable "used in" list (rows emit `note_requested`; Main closes the page and
+opens the note through the tree), and a 🗑 delete (confirmed, permanent,
+warns when still referenced). Import from the library mode never rewrites
+markdown; both modes refresh the listing on delete/import.
 
 ### Graph
 `GraphModel` builds levels/edges from `GameManager.notes` + `links`.
@@ -359,7 +385,9 @@ common wrapper stripped, bare note gets `title`/`created`); sync pauses/resumes.
   hicolor icons, `install.sh`) into versioned archives. The Windows preset's
   platform id is `Windows Desktop`.
 - **Add media/export:** import through `MediaImport` into `vault/media/`; render
-  through `Exporter`/`GifWriter`/`HtmlExporter` into `vault/exports/`.
+  through `Exporter`/`GifWriter`/`HtmlExporter` into `vault/exports/`. The media
+  page (embed picker + ⋮ Media Library) builds its rows from
+  `MediaImport.collect_media_images()` + `build_usage_map()`.
 - **Regenerate marketing assets:** `tools/social/CaptureStage.tscn` (11 stills)
   and `tools/social/CaptureMovie.tscn` (PNG frame sequence, 16:9 or 9:16) drive
   the real `Main.tscn` inside a `SubViewport` against `user://neonnotes-capture`;
