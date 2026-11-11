@@ -683,7 +683,13 @@ func index_note_metas(rels: Array[String]) -> void:
 
 ## Batched, frame-yielding metadata pass used after the shell and tree are up.
 ## Aborts if the vault is rescanned meanwhile (generation bump).
-const METADATA_BATCH := 12
+##
+## The batch size paces a COLD pass (metadata cache empty or behind): 48 reads
+## is ≈5 ms of frame work on a mid-range phone, so a 1,000-note first boot
+## finishes its drip in ≈21 frames (≈0.35 s) instead of ≈84 frames (≈1.4 s)
+## at 12/frame, without crossing the frame budget. Warm boots never hit this
+## loop — the cache-hit pass above applies everything synchronously.
+const METADATA_BATCH := 48
 var _scan_generation := 0
 var _meta_scanning := false
 

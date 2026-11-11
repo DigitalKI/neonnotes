@@ -145,6 +145,17 @@ source and native library must come from the same Godot version.
   already dead-stripped with `vulkan=no`; Graphite/Brotli are under 0.5 MB
   static. `lto=thin` is the remaining non-feature lever, at link time and
   memory cost.
+- **Engine size buys download size, not launch speed.** The `.so` is mmap'd,
+  so a cold launch page-faults only what init touches (dlopen relocations,
+  class/interface registrations, the GL driver, text-server data); code that
+  never runs at boot costs no pages, and relocation work scales with exported
+  symbols, not file size. Cutting the 41.4 MB library further (e.g. `lto=thin`)
+  is therefore a download/install win with tens of ms of cold-start effect at
+  best and ~nothing warm. Measure launches, not APK bytes:
+  `adb shell am start -W -S com.neonnotes.app/.GodotApp` (TotalTime; run 3× and
+  discard the first — dexopt/first-touch warm-up) plus the `boot_debug` marks;
+  the gap before `[boot] ui-build` is the engine+script floor, which no build
+  profile removes.
 - The APKs are signed with the dev keystore. After an engine/profile change,
   install one and watch `adb logcat | grep 'godot   :'` for
   `OnGodotMainLoopStarted` before shipping.

@@ -64,6 +64,7 @@ phone ↔ PC over the local network.
   segfaults headless. Needs bundled FFmpeg or a GDExtension.
 - **Sync hardening** — content hashes, conflict detection, cryptographic
   pairing, encrypted transport.
+
 - **Easy vault switching** — a device-local known-vaults registry (path → vault
   id + pairing/peer state) with a picker that switches vaults while preserving
   per-vault pairing. `INV-021`/`INV-028` already key identity by vault id, so
@@ -155,6 +156,35 @@ encoding, edge selection, cluster boundaries, minimap, focus mode) come first.
 Baselines are device/version dependent; re-measure with the benches.
 
 - Boot (SM-A165M, 2026-09): ≈2.9 s release / ≈4.7 s debug to first note.
+- Boot anatomy (desktop, headless, 1,090-note docs vault,
+  `scenes/dev/BootBench.tscn`, 2026-11): engine + autoload ≈0.26 s; instantiating
+  `Main.tscn` (every page/component script compiles; release exports tokenize)
+  ≈0.4–0.6 s — neither block is counted by the `[boot]` marks; `_ready` phases
+  ≈50–80 ms. Start-mode extras before the first frame: note-start parses +
+  highlights the loaded note (≈165 ms for a large note); graph-start defers
+  layout+labels into the first frames (≈65–170 ms). Cold metadata drip is
+  frame-paced (48/read-frame; a 1,000-note cold pass completes ≈0.4 s at
+  60 fps instead of ≈1.5 s at the old 12/frame); the `metadata_ready` spike is
+  ≈100 ms on note-start (tree rebuild; the hidden graph skips it) and was
+  ≈220 ms on graph-start — now ≈130 ms: keys/labels/layout stand and only
+  routes rebuild when the map was keyed against the same scan generation, so
+  the map is no longer fully rebuilt on every cold boot.
+  Share cold start pays ≈136–194 ms after frame 3: capture + full
+  `scan_notes()` rescan (≈60 ms alone, grows with vault size) + tree rebuild +
+  note open — and with "open to graph" configured, the homepage map is built
+  (and torn down) before the payload lands. Both share levers are implemented:
+  the start page is held while a cold-start payload is pending
+  (`_share_boot_hold`; `_share_hold_settle` boots normally when it produces
+  nothing) and the rescan is targeted (paths + payload notes via
+  `index_note_metas()` + metadata-pass restart) — share window 28–35 ms on the
+  same bench, identical for both start modes, and the graph homepage is never
+  built (graph-start frame 1: 843 → 669 ms). Also implemented: links-only map
+  refresh at `metadata_ready` (same scan generation → routes only) and the
+  cold drip at 48 notes/frame. Remaining candidates: lazy page instantiation
+  (the biggest uncounted block — `Main.tscn` compiles ~every component/page
+  script); a sequential reader thread for the metadata drip only if vaults
+  beyond ~5k notes ever need it (48 reads ≈5 ms of frame work per batch on a
+  phone).
 - Metadata cache (1,089 notes, warm): `[boot] metadata` ≈18 ms; shell ready
   ≈108 ms. Cold run unchanged.
 - Graph: ≈6–7 ms/frame at 1,000–4,000 nodes; ≈220–275 draw calls.
@@ -178,4 +208,6 @@ Baselines are device/version dependent; re-measure with the benches.
 Commands: `NEONNOTES_BOOT_DEBUG=1 godot --path .`,
 `godot --headless --path . --script scripts/dev/bench_scan.gd`,
 `godot --headless --path . --script scripts/dev/tfidf_bench.gd`,
-`NEONNOTES_DEV=1 godot --path . scenes/dev/GraphBench.tscn`.
+`NEONNOTES_DEV=1 godot --path . scenes/dev/GraphBench.tscn`,
+`NEONNOTES_VAULT=<scratch-vault> NEONNOTES_BOOT_DEBUG=1 NN_START=last|graph NN_SHARE=0|1 \
+  godot --headless --path . scenes/dev/BootBench.tscn`.
