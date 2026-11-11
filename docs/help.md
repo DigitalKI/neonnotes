@@ -113,8 +113,11 @@ Bullet lists:
 - One or more times
 
 Task lists put a checkbox after the bullet. Checkboxes in the preview are
-clickable: toggling one rewrites the `[ ]` or `[x]` marker in the Markdown file
-and saves immediately.
+clickable and touch-friendly: tapping (even a slightly drifting finger tap)
+rewrites the `[ ]` or `[x]` marker in the Markdown file, saves immediately, and
+restyles the row (strike-through for done items) without a full re-render. Each
+checkbox wears a light ring so it stays visible on every theme, and the check
+mark keeps the theme's light text colour.
 
 - [ ] Open task
 - [x] Finished task
@@ -278,9 +281,6 @@ image from the preview placeholder. NeonNotes copies it into `vault/media/` and
 updates the note. Embedded media is stored under `vault/media/` and syncs with
 its note.
 
-## 12. Note metadata and themes
-
-Each note's metadata is edited through the header panels, not by hand:
 ### The media library
 
 Open **⋮ → 🖼 Media Library** to manage every imported image in `vault/media/`.
@@ -291,6 +291,9 @@ anywhere, and **🗑** deletes an image permanently after a confirmation — whe
 notes still embed the file, the dialog says so, and those embeds fall back to
 the "click to choose image" placeholder afterwards.
 
+## 12. Note metadata and themes
+
+Each note's metadata is edited through the header panels, not by hand:
 
 - **Title** — displayed name, set in the **◈ NOTE TITLE** panel.
 - **Tags** — set in the **◈ NOTE TAGS** panel; they feed search and autocomplete

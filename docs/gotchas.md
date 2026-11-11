@@ -172,3 +172,16 @@ change must respect live in [`invariants.md`](invariants.md).
   (`tests/Test*.tscn`), where the project autoloads are live. Guard:
   `tests/unit_tests.gd` (store-dependent checks live in
   `tests/test_tfidf_store.gd`).
+- **GOT-030 — a BaseButton toggle commits only if the *last* pointer position
+  tracked during the press is inside the control rect.** Both input paths
+  (released mouse button and raw `ScreenTouch`/`ScreenDrag`) gate the release
+  on that bookkeeping (`pressing_inside`), not on whether the press landed
+  there. Real fingers drift 10–20 px past a small control, wander out and back
+  in, and the toggle silently never fires — which is how preview checkboxes
+  were dead on phones while working under a mouse. Godot exposes no
+  `pressing_inside`; the fix pattern is a `gui_input` handler that mirrors the
+  same position tracking (it runs before the native virtual) and toggles only
+  the releases the native path will skip, using the same slop the vault tree
+  uses (`TREE_TAP_MAX_DISTANCE` ≈ `PreviewBuilder.TAP_SLOP`). Clean taps must
+  stay on the native path so exactly one toggle fires. Guard:
+  `tests/TestPreviewTasks.tscn` (drifted-tap commits, 30 px drag does not).

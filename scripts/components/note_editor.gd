@@ -763,21 +763,23 @@ func _preview_text_offset(preview_text: String, body_text: String) -> int:
 ## NoteMetadata.preview(), which may prepend the title H1, so map its line back
 ## to the body and rewrite only that marker. Preview hides the editor, where
 ## flush() early-returns, so the change is written immediately instead.
-func _on_preview_task(preview_line: int, marker_col: int, checked: bool) -> void:
+## Returns true when the written state matches the checkbox: false lets the
+## PreviewBuilder roll its in-place visuals back after a stale preview.
+func _on_preview_task(preview_line: int, marker_col: int, checked: bool) -> bool:
 	if help_mode or source_mode or GameManager.current_rel == "":
-		return
+		return false
 	var line := preview_line - _preview_line_offset
 	if line < 0 or line >= code_edit.get_line_count():
-		return
+		return false
 	var raw := code_edit.get_line(line)
 	var col := marker_col
 	if col < 0 or col + 3 > raw.length() or not _is_task_marker(raw.substr(col, 3)):
 		col = _find_task_marker(raw)
 	if col < 0:
-		return
+		return false
 	var replacement := "[x]" if checked else "[ ]"
 	if raw.substr(col, 3) == replacement:
-		return
+		return true  # already the target state (stale preview) — nothing to write
 	autosave_timer.stop()
 	code_edit.set_line(line, raw.substr(0, col) + replacement + raw.substr(col + 3))
 	save_source(GameManager.current_rel, compose_note_source())
@@ -785,6 +787,7 @@ func _on_preview_task(preview_line: int, marker_col: int, checked: bool) -> void
 	if svc != null:
 		svc.note_saved(GameManager.current_rel)
 	flash_cb.call("✓ Saved " + GameManager.current_rel)
+	return true
 
 
 func _is_task_marker(marker: String) -> bool:

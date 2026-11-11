@@ -82,12 +82,94 @@ func _ready() -> void:
 		_check("clicking writes [x] to the note immediately", saved.contains("- [x] first task"))
 		_check("the click does not disturb the other task", saved.contains("- [x] second task"))
 		_check("the clicked checkbox shows its new state", (checks[0] as CheckBox).button_pressed)
+		_check("the row text restyles in place (strike)", _row_text(checks[0] as CheckBox).contains("[s]"))
 
 		# And clicking a checked box writes an empty box back.
 		(checks[1] as CheckBox).button_pressed = false
 		await get_tree().process_frame
 		saved = GameManager.read_note("tasks.md")
 		_check("unchecking writes [ ] to the note immediately", saved.contains("- [ ] second task"))
+		_check("the row loses its strike in place", not _row_text(checks[1] as CheckBox).contains("[s]"))
+
+		# Mobile taps drift: the release must not have to land inside the tiny
+		# checkbox rect for the toggle to commit (finger wobble + content scale).
+		(checks[0] as CheckBox).button_pressed = false
+		await get_tree().process_frame
+		await _tap_drifted(checks[0] as CheckBox, 15.0)
+		await get_tree().process_frame
+		saved = GameManager.read_note("tasks.md")
+		_check("a drifted tap commits the tick like a real finger tap", saved.contains("- [x] first task"))
+		_check("the drifted tap leaves the checkbox state visible", (checks[0] as CheckBox).button_pressed)
+
+		# A true drag (release far beyond the tap slop) must stay a non-event.
+		(checks[0] as CheckBox).button_pressed = false
+		await get_tree().process_frame
+		await _tap_drifted(checks[0] as CheckBox, 30.0)
+		await get_tree().process_frame
+		saved = GameManager.read_note("tasks.md")
+		_check("a 30 px drag does not toggle", saved.contains("- [ ] first task"))
+
+	# Park the pointer away from the checkboxes so the stylistic assertions
+	# below observe the idle ring, never hover residue.
+	var park := InputEventMouseMotion.new()
+	park.position = Vector2(1, 1)
+	park.global_position = park.position
+	get_viewport().push_input(park)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	# Each checkbox carries its own hairline ring (not a border around the whole
+	# list) and a light check mark: the theme text colour at full alpha, so a
+	# completed item never reads as a dark blob. The ring doubles as the
+	# hover / touch affordance.
+	for c in checks:
+		var box := c as CheckBox
+		var ring: StyleBoxFlat = box.get_meta("ring_style") as StyleBoxFlat if box.has_meta("ring_style") else null
+		_check("each checkbox keeps a ring style around its box", ring != null and ring.border_width_left == 1)
+		if ring != null:
+			_check("the ring background stays transparent", ring.bg_color.a == 0.0)
+			_check("the ring idles at a faint text hairline", ring.border_color.a > 0.0 and ring.border_color.a < 0.5)
+		var tick: Color = box.get_theme_color("checkbox_checked_color")
+		_check("the check mark wears the light theme text", tick == GameManager.color("text") and tick.a == 1.0)
+		_check("the empty box wears the accent", box.get_theme_color("checkbox_unchecked_color") == GameManager.color("accent"))
+
+	# Nothing wraps the whole list: there is no TaskList panel anywhere.
+	var panels: Array = []
+	_find_named(main.content_body, "TaskList", panels)
+	_check("no border panel wraps the whole list", panels.size() == 0)
 
 	print("PREVIEW TASKS RESULT: %s (%d failures)" % ["FAIL" if _fails > 0 else "OK", _fails])
 	get_tree().quit(_fails)
+
+## The item text sits in the row's RichTextLabel (sibling of the checkbox).
+func _row_text(check: CheckBox) -> String:
+	for ch in check.get_parent().get_children():
+		if ch is RichTextLabel:
+			return (ch as RichTextLabel).text
+	return ""
+
+## Tap through the real input path with the release drifted out of the rect:
+## press the checkbox centre, drag `drift` px down, release there (mobile).
+func _tap_drifted(check: CheckBox, drift: float) -> void:
+	var pos := check.get_global_rect().get_center()
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	press.position = pos
+	press.global_position = pos
+	get_viewport().push_input(press, true)
+	await get_tree().process_frame
+	var mm := InputEventMouseMotion.new()
+	mm.button_mask = MOUSE_BUTTON_MASK_LEFT
+	mm.position = pos + Vector2(0.0, drift)
+	mm.global_position = mm.position
+	get_viewport().push_input(mm, true)
+	await get_tree().process_frame
+	var rel := InputEventMouseButton.new()
+	rel.button_index = MOUSE_BUTTON_LEFT
+	rel.pressed = false
+	rel.position = pos + Vector2(0.0, drift)
+	rel.global_position = rel.position
+	get_viewport().push_input(rel, true)
+	await get_tree().process_frame
+	await get_tree().process_frame

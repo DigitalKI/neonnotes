@@ -105,6 +105,14 @@ static func _add_block(block: Dictionary, into: VBoxContainer, task_cb := Callab
 		"image":
 			into.add_child(_image_block(block))
 
+## Checked task items render struck-through and dimmed; this is the single
+## source of that markup, shared by the build pass and the in-place toggle
+## restyle, so both always agree.
+static func _task_bb(base_bb: String, dim: Color, pressed: bool) -> String:
+	if pressed:
+		return "[color=#%s][s]%s[/s][/color]" % [_hex(dim), base_bb]
+	return base_bb
+
 ## Escape BBCode brackets in note text (single pass — sequential replace()
 ## would re-escape the tokens themselves).
 static func escape(s: String) -> String:
@@ -427,37 +435,61 @@ static func _list_block(block: Dictionary, accent: Color, text_c: Color, task_cb
 			# Task item: a real checkbox replaces the bullet. It is interactive only
 			# when the host passed a callback (the note preview); exports and graph
 			# cards get the same control with clicks ignored.
-			var marker_col := dim if state == 1 else accent
 			var check := CheckBox.new()
 			check.name = "TaskCheck"
 			check.button_pressed = state == 1
 			check.focus_mode = Control.FOCUS_NONE
-			check.custom_minimum_size = Vector2(26, 0)
+			check.custom_minimum_size = Vector2(32, 0)
 			check.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-			# CheckBox icons are white in the default theme; modulate tints the
-			# outline/check with the active palette instead of leaving it grey.
-			check.modulate = marker_col
+			# Explicit checkbox palette instead of the old whole-icon modulate: the
+			# empty box wears the accent, and the check mark stays light (theme text
+			# at FULL alpha) so a completed item never reads as a dark blob on the
+			# wall. The old dim modulate was what made the tick look dark.
+			check.add_theme_color_override("checkbox_unchecked_color", accent)
+			check.add_theme_color_override("checkbox_checked_color", text_c)
+			# A hairline ring around each checkbox (not one box around the whole
+			# list) keeps every box visible on any theme, and doubles as the hover /
+			# touch affordance by brightening to accent2.
+			var ring_idle := Color(text_c.r, text_c.g, text_c.b, 0.3)
+			var ring := StyleBoxFlat.new()
+			ring.bg_color = Color(0, 0, 0, 0)
+			ring.border_color = ring_idle
+			ring.set_border_width_all(1)
+			ring.set_corner_radius_all(5)
+			ring.set_content_margin_all(0)
+			check.set_meta("ring_style", ring)
+			check.draw.connect(func() -> void:
+				check.draw_style_box(ring, Rect2(
+					Vector2(0.0, (check.size.y - 26.0) / 2.0), Vector2(26, 26))))
+			# The checked style (strike + dim) is kept in one place so the in-place
+			# toggle restyle below matches the build-time markup exactly.
+			var base_bb := _inline(escape(item))
+			var content := _task_bb(base_bb, dim, state == 1)
+			var it := _rich(content, text_c)
+			row.add_child(check)
+			it.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			it.fit_content = true
+			row.add_child(it)
 			if task_cb.is_valid() and idx < task_lines.size() and idx < task_cols.size():
 				var line := int(task_lines[idx])
 				var col := int(task_cols[idx])
 				check.tooltip_text = "Toggle checkbox"
 				check.mouse_entered.connect(func() -> void:
-					check.modulate = accent2)
+					ring.border_color = accent2
+					check.queue_redraw())
 				check.mouse_exited.connect(func() -> void:
-					check.modulate = dim if check.button_pressed else accent)
+					ring.border_color = ring_idle
+					check.queue_redraw())
 				check.toggled.connect(func(pressed: bool) -> void:
-					check.modulate = dim if pressed else accent
-					task_cb.call(line, col, pressed))
+					it.text = _task_bb(base_bb, dim, pressed)
+					if not task_cb.call(line, col, pressed):
+						# Save did not land (stale preview): roll the visuals back
+						# so the checkbox never shows a state the file disagrees with.
+						check.set_pressed_no_signal(not pressed)
+						it.text = _task_bb(base_bb, dim, not pressed))
+				_tolerant_tap(check)
 			else:
 				check.mouse_filter = Control.MOUSE_FILTER_IGNORE
-			row.add_child(check)
-			var content := _inline(escape(item))
-			if state == 1:
-				content = "[color=#%s][s]%s[/s][/color]" % [_hex(dim), content]
-			var it := _rich(content, text_c)
-			it.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			it.fit_content = true
-			row.add_child(it)
 		else:
 			var num := int(numbers[idx]) if ordered and idx < numbers.size() else idx + 1
 			var bullet := ("%d." % num) if ordered else "▸"
@@ -472,6 +504,60 @@ static func _list_block(block: Dictionary, accent: Color, text_c: Color, task_cb
 			row.add_child(it)
 		box.add_child(row)
 	return box
+
+## Preview checkboxes commit their toggle through a two-step native path that
+## phones fail constantly: BaseButton only commits when the LAST pointer
+## position tracked during the press (motions/drag, or the press itself for a
+## zero-motion tap) sits inside the control rect — a finger that wanders past
+## the ~24 px edge, or drifts out and back in, never commits (hover and
+## pressing_inside stay false even for a release that lands back on the box).
+## This handler mirrors that bookkeeping in gui_input (delivered BEFORE the
+## virtual) and rescues exactly the releases the native path will skip: the
+## tracked pointer left the rect but the release landed back on the box, or the
+## whole gesture stayed within TAP_SLOP of the press — the same slop rule the
+## vault tree uses to keep touch taps reliable (TREE_TAP_MAX_DISTANCE). Clean
+## taps keep out of the way of the native path, so exactly one toggle fires.
+const TAP_SLOP := 16.0
+
+static func _tolerant_tap(check: CheckBox) -> void:
+	var tap := {"press": Vector2.INF, "touch": -1, "last_inside": true}
+	check.gui_input.connect(func(ev: InputEvent) -> void:
+		var pos: Vector2 = ev.position
+		var inside_now: bool = Rect2(Vector2.ZERO, check.size).has_point(pos)
+		if ev is InputEventMouseButton and ev.button_index == MOUSE_BUTTON_LEFT:
+			if ev.pressed:
+				tap["press"] = pos
+				tap["touch"] = -1
+				tap["last_inside"] = inside_now
+			elif tap["press"] != Vector2.INF:
+				_tap_release(tap, check, pos, inside_now)
+		elif ev is InputEventScreenTouch:
+			if ev.pressed:
+				tap["press"] = pos
+				tap["touch"] = ev.index
+				tap["last_inside"] = inside_now
+			elif ev.index == tap["touch"]:
+				_tap_release(tap, check, pos, inside_now)
+		elif ev is InputEventScreenDrag:
+			# Raw-touch devices: BaseButton tracks pressing_inside per drag too.
+			if tap["press"] != Vector2.INF and (tap["touch"] == -1 or ev.index == tap["touch"]):
+				tap["last_inside"] = inside_now
+		elif ev is InputEventMouseMotion and tap["press"] != Vector2.INF:
+			tap["last_inside"] = inside_now
+	)
+
+## Release half of the tolerant tap (see _tolerant_tap).
+static func _tap_release(tap: Dictionary, check: CheckBox, pos: Vector2, inside_now: bool) -> void:
+	var press: Vector2 = tap["press"]
+	tap["press"] = Vector2.INF
+	# Mirror of BaseButton's release predicate: it commits when the last tracked
+	# pointer position stayed inside the rect. Leave those to the native path.
+	if tap["last_inside"]:
+		return
+	# Near miss: the release landed back on the box, or the whole gesture
+	# (press → release) stayed within the tap slop instead of becoming a drag.
+	if inside_now or press.distance_to(pos) <= TAP_SLOP:
+		check.button_pressed = not check.button_pressed
 
 static func _chart(block: Dictionary) -> Control:
 	var cv := ChartView.new()

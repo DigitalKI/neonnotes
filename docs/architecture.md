@@ -52,7 +52,7 @@ settings live in `user://settings.cfg`; exports and embedded media live under
 | `scripts/common/vault_move.gd` | Pure move/rename + wiki-link rewrite; empty-folder prune helper |
 | `scripts/common/path_remap.gd` | Static path remap helpers |
 | `scripts/common/relationship_engine.gd` | Pure read-side queries: resolve, backlinks, tags, inbox, titles |
-| `scripts/common/media_import.gd` | Image import, SAF/content URIs, destination naming |
+| `scripts/common/media_import.gd` | Image import, SAF/content URIs, destination naming, media ↔ notes usage map |
 | `scripts/common/capture.gd` | Inbox capture/import API (`capture_text/link/image`, `import_markdown`) |
 | `scripts/common/tag_match.gd`, `text_match.gd`, `text_search.gd` | Tag ranking, edit distance, find-in-document |
 | `scripts/common/vault_search.gd` | One query model (`#tags` + keywords) and its matching: tag filter + title-first keyword hits |
@@ -69,7 +69,7 @@ settings live in `user://settings.cfg`; exports and embedded media live under
 | `scripts/markdown/markdown_parser.gd` | Unified block + inline parse; per-line model |
 | `scripts/markdown/markdown_highlighter.gd` | Editor tinting from parser spans/markers |
 | `scripts/markdown/wiki_links.gd` | Link extraction, resolution, backlinks, graph |
-| `scripts/render/preview_builder.gd` | Markdown → RichTextLabel blocks, charts, FX |
+| `scripts/render/preview_builder.gd` | Markdown → RichTextLabel blocks, charts, per-checkbox rings + touch-tolerant checkbox taps, FX |
 | `scripts/render/graph_model.gd` | Renderer-agnostic graph levels/edges |
 | `scripts/render/graph_view.gd` | Vault-map canvas: camera/labels/markers/menu shared by both layouts — radial (folder spine) and area (embedding positions via `area_positions_cb`, link-only direct light; pan is clamped to the node bounds (`PAN_MARGIN_PX`, `_clamp_camera()`)) |
 | `scripts/sync/sync_service.gd` | UDP discovery, pairing proof, manifest/stream transfer, LWW state |
