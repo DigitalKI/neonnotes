@@ -23,6 +23,7 @@ config/icon="res://assets/icons/neonnotes.png"
 [autoload]
 
 GameManager="*res://scripts/common/GameManager.gd"
+McpRuntime="*res://addons/godot-mcp/mcp_runtime.gd"
 
 [display]
 
