@@ -113,6 +113,46 @@ static func _task_bb(base_bb: String, dim: Color, pressed: bool) -> String:
 		return "[color=#%s][s]%s[/s][/color]" % [_hex(dim), base_bb]
 	return base_bb
 
+## The engine's default checkbox icons bake their colours into the texture —
+## `unchecked` is a near-black square at 50% alpha, `checked` a white fill with
+## a black tick — and the CheckBox draw pass only MULTIPLIES our tint onto
+## them. Dark × light stays dark: on the neon walls the empty box was
+## practically invisible (only the ring showed) and the tick could never be
+## light. So ship our own textures: a fully empty one for `unchecked` (the
+## per-checkbox ring is the box) and a thick light tick for `checked`, drawn in
+## the theme text colour at full alpha — thick enough to survive the CRT
+## aperture grille and the phone content scale.
+static var _tick_tex: ImageTexture
+static var _tick_key := Color(-1.0, -1.0, -1.0, -1.0)
+static var _empty_tex: ImageTexture
+
+static func _task_textures(light: Color) -> void:
+	if _tick_tex != null and _tick_key == light:
+		return
+	_tick_key = light
+	# Draw the tick big and smooth, then box-filter down 64 → 16 for soft AA.
+	var big := Image.create(64, 64, false, Image.FORMAT_RGBA8)
+	var a := 6.0                                  # stroke half-width in 64-space
+	_stroke_seg(big, Vector2(14, 34), Vector2(26, 46), light, a)
+	_stroke_seg(big, Vector2(26, 46), Vector2(50, 14), light, a)
+	big.resize(16, 16, Image.INTERPOLATE_BILINEAR)
+	_tick_tex = ImageTexture.create_from_image(big)
+	if _empty_tex == null:
+		_empty_tex = ImageTexture.create_from_image(Image.create(16, 16, false, Image.FORMAT_RGBA8))
+
+## Rasterise one thick stroked segment into an RGBA image.
+static func _stroke_seg(img: Image, from: Vector2, to: Vector2, col: Color, half: float) -> void:
+	var lo := Vector2(minf(from.x, to.x), minf(from.y, to.y)) - Vector2.ONE * (half + 1.0)
+	var hi := Vector2(maxf(from.x, to.x), maxf(from.y, to.y)) + Vector2.ONE * (half + 1.0)
+	var seg := to - from
+	var len2 := seg.length_squared()
+	for y in range(maxi(0, int(lo.y)), mini(img.get_height(), int(ceilf(hi.y)))):
+		for x in range(maxi(0, int(lo.x)), mini(img.get_width(), int(ceilf(hi.x)))):
+			var p := Vector2(x + 0.5, y + 0.5)
+			var t := clampf(seg.dot(p - from) / len2, 0.0, 1.0) if len2 > 0.0 else 0.0
+			if p.distance_to(from + seg * t) <= half:
+				img.set_pixel(x, y, col)
+
 ## Escape BBCode brackets in note text (single pass — sequential replace()
 ## would re-escape the tokens themselves).
 static func escape(s: String) -> String:
@@ -441,12 +481,12 @@ static func _list_block(block: Dictionary, accent: Color, text_c: Color, task_cb
 			check.focus_mode = Control.FOCUS_NONE
 			check.custom_minimum_size = Vector2(32, 0)
 			check.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-			# Explicit checkbox palette instead of the old whole-icon modulate: the
-			# empty box wears the accent, and the check mark stays light (theme text
-			# at FULL alpha) so a completed item never reads as a dark blob on the
-			# wall. The old dim modulate was what made the tick look dark.
-			check.add_theme_color_override("checkbox_unchecked_color", accent)
-			check.add_theme_color_override("checkbox_checked_color", text_c)
+			# Own icon textures (see _task_textures): the empty box comes from the
+			# ring alone; the tick is drawn thick and light, never multiplied out
+			# of visibility by the engine's baked-dark icon pixels.
+			_task_textures(text_c)
+			check.add_theme_icon_override("checked", _tick_tex)
+			check.add_theme_icon_override("unchecked", _empty_tex)
 			# A hairline ring around each checkbox (not one box around the whole
 			# list) keeps every box visible on any theme, and doubles as the hover /
 			# touch affordance by brightening to accent2.

@@ -119,9 +119,9 @@ func _ready() -> void:
 	await get_tree().process_frame
 
 	# Each checkbox carries its own hairline ring (not a border around the whole
-	# list) and a light check mark: the theme text colour at full alpha, so a
-	# completed item never reads as a dark blob. The ring doubles as the
-	# hover / touch affordance.
+	# list) and our own icon textures: the engine's baked icons are dark fills
+	# (see _task_textures) that a tint can never lighten, so `unchecked` ships
+	# empty (the ring is the box) and `checked` is a thick light tick.
 	for c in checks:
 		var box := c as CheckBox
 		var ring: StyleBoxFlat = box.get_meta("ring_style") as StyleBoxFlat if box.has_meta("ring_style") else null
@@ -129,9 +129,16 @@ func _ready() -> void:
 		if ring != null:
 			_check("the ring background stays transparent", ring.bg_color.a == 0.0)
 			_check("the ring idles at a faint text hairline", ring.border_color.a > 0.0 and ring.border_color.a < 0.5)
-		var tick: Color = box.get_theme_color("checkbox_checked_color")
-		_check("the check mark wears the light theme text", tick == GameManager.color("text") and tick.a == 1.0)
-		_check("the empty box wears the accent", box.get_theme_color("checkbox_unchecked_color") == GameManager.color("accent"))
+		_check("the empty box ships our empty icon (no baked dark fill)",
+			box.has_theme_icon_override("unchecked") \
+			and (box.get_theme_icon("unchecked") as ImageTexture).get_image().get_pixel(8, 8).a == 0.0)
+		var tick_img := (box.get_theme_icon("checked") as ImageTexture).get_image()
+		var light_px := false
+		for yy in 16:
+			for xx in 16:
+				if tick_img.get_pixel(xx, yy) == GameManager.color("text"):
+					light_px = true
+		_check("the tick is drawn thick in the light text colour", light_px)
 
 	# Nothing wraps the whole list: there is no TaskList panel anywhere.
 	var panels: Array = []
